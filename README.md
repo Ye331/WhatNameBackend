@@ -44,6 +44,7 @@ IDEA 的 **Database → ＋ → MySQL**：地址 `127.0.0.1`，端口 `3307`，�
 - `controller` 接收请求；`service` 处理业务与事务；`mapper` 执行SQL，XML在 `resources/mapper`。
 - `entity` 为数据库实体，`dto` 为请求响应对象，`common` 为公共配置和处理。
 - 响应使用 `ApiResponse`，跨模块通过 Service 协作。
+- 两阶段开发：第一阶段独立实现基础功能，第二阶段补齐公共校验和联调；A/C稍多，B/D稍少。见 [分工与开发计划](DEVELOPMENT_PLAN.md)。
 - `main` 受保护，成员从最新 `main` 拉任务分支，提交PR/MR审查，由组织者合并。见 [Git开发规范](GIT_WORKFLOW.md)。
 - 本地配置、密码文件不提交；已有数据库改表使用迁移，不重复执行建表脚本。
 
