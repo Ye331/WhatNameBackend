@@ -1,0 +1,11 @@
+@baseUrl = http://localhost:8080
+
+### 服务是否启动；不代表数据库已经可用
+GET {{baseUrl}}/api/v1/system/ping
+X-Request-Id: local-ping-001
+
+### 数据库连通性：成功200，连接失败503
+GET {{baseUrl}}/api/v1/system/database
+
+### 未实现路由应返回统一404
+GET {{baseUrl}}/api/v1/not-implemented

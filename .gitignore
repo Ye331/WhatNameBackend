@@ -1,0 +1,49 @@
+# Maven构建产物与IDE编译目录
+target/
+out/
+*.class
+
+# 个人IDE配置
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# 本地配置与密码；公共配置和示例文件仍需提交
+/config/application-local.yml
+/config/application-local.yaml
+/config/local-secrets/
+.env
+.env.*
+!.env.example
+!.env.*.example
+http-client.private.env.json
+.http-client/
+
+# 私钥及本地密钥库
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# 日志、堆转储和临时文件
+logs/
+*.log
+*.hprof
+hs_err_pid*
+replay_pid*
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 必须保留：.mvn/、mvnw、mvnw.cmd、pom.xml、compose.yaml、SQL及配置模板

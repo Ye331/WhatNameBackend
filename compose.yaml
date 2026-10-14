@@ -1,0 +1,42 @@
+name: whatname-iam
+
+services:
+  mysql:
+    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+    environment:
+      MYSQL_DATABASE: unified_permission
+      MYSQL_USER: iam_dev
+      MYSQL_ROOT_HOST: localhost
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      TZ: Asia/Taipei
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+    secrets:
+      - mysql_root_password
+      - mysql_app_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'MYSQL_PWD="$$(cat /run/secrets/mysql_app_password)" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''unified_permission'' AND table_type=''BASE TABLE''" | grep -qx 23'
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  mysql_data:
+
+secrets:
+  mysql_root_password:
+    file: ./config/local-secrets/mysql_root_password.txt
+  mysql_app_password:
+    file: ./config/local-secrets/mysql_app_password.txt

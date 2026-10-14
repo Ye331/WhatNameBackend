@@ -1,0 +1,8 @@
+# Docker方式运行scripts/setup-local.ps1自动生成配置；手动配置可复制此文件。
+# 从backend目录启动；本地文件不会提交，禁止填入正式环境凭据。
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3307/unified_permission?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
+    username: iam_dev
+    password: "填写个人本地数据库密码"
+# 不使用Docker时，按实际地址修改url。
