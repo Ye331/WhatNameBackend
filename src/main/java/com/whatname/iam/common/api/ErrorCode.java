@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
     INVALID_ARGUMENT(HttpStatus.BAD_REQUEST, "请求参数不正确"),
     INVALID_ROUTE_TEMPLATE(HttpStatus.BAD_REQUEST, "API路由模板不正确"),
+    MENU_TREE_CYCLE(HttpStatus.BAD_REQUEST, "菜单层级形成循环"),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "身份凭据不正确"),
     INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "身份验证失败"),
     INVALID_SERVICE(HttpStatus.UNAUTHORIZED, "服务身份验证失败"),

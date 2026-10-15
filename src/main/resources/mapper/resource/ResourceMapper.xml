@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.whatname.iam.mapper.resource.ResourceMapper">
+    <select id="countApplications" resultType="int">
+        SELECT COUNT(*) FROM sys_application
+    </select>
+
+    <select id="listApplications" resultType="com.whatname.iam.entity.resource.ApplicationEntity">
+        SELECT id, app_code, app_name, app_desc, status
+        FROM sys_application
+        ORDER BY id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countApplicationCode" resultType="int">
+        SELECT COUNT(*)
+        FROM sys_application
+        WHERE app_code = #{appCode}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <insert id="insertApplication" parameterType="com.whatname.iam.entity.resource.ApplicationEntity" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_application(app_code, app_name, app_desc, status)
+        VALUES(#{appCode}, #{appName}, #{appDesc}, #{status})
+    </insert>
+
+    <select id="findApplicationById" resultType="com.whatname.iam.entity.resource.ApplicationEntity">
+        SELECT id, app_code, app_name, app_desc, status
+        FROM sys_application
+        WHERE id = #{id}
+    </select>
+
+    <update id="updateApplication" parameterType="com.whatname.iam.entity.resource.ApplicationEntity">
+        UPDATE sys_application
+        <set>
+            <if test="appName != null">app_name = #{appName},</if>
+            <if test="status != null">status = #{status},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <select id="listMenusByAppId" resultType="com.whatname.iam.entity.resource.MenuEntity">
+        SELECT id, app_id, parent_id, menu_code, menu_name, menu_type, path, api_revision, status
+        FROM sys_menu
+        WHERE app_id = #{appId}
+        ORDER BY sort_order ASC, id ASC
+    </select>
+
+    <select id="countMenuCode" resultType="int">
+        SELECT COUNT(*)
+        FROM sys_menu
+        WHERE app_id = #{appId}
+          AND menu_code = #{menuCode}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <insert id="insertMenu" parameterType="com.whatname.iam.entity.resource.MenuEntity" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_menu(app_id, parent_id, menu_code, menu_name, menu_type, path, api_revision, status)
+        VALUES(#{appId}, #{parentId}, #{menuCode}, #{menuName}, #{menuType}, #{path}, #{apiRevision}, #{status})
+    </insert>
+
+    <select id="findMenuById" resultType="com.whatname.iam.entity.resource.MenuEntity">
+        SELECT id, app_id, parent_id, menu_code, menu_name, menu_type, path, api_revision, status
+        FROM sys_menu
+        WHERE id = #{id}
+    </select>
+
+    <update id="updateMenu" parameterType="com.whatname.iam.entity.resource.MenuEntity">
+        UPDATE sys_menu
+        <set>
+            <if test="parentId != null">parent_id = #{parentId},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="menuName != null">menu_name = #{menuName},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <select id="countApisByApp" resultType="long">
+        SELECT COUNT(*)
+        FROM sys_api
+        WHERE app_id = #{appId}
+        <if test="httpMethod != null">
+            AND http_method = #{httpMethod}
+        </if>
+    </select>
+
+    <select id="listApisByApp" resultType="com.whatname.iam.entity.resource.ApiEntity">
+        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        FROM sys_api
+        WHERE app_id = #{appId}
+        <if test="httpMethod != null">
+            AND http_method = #{httpMethod}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <insert id="insertApi" parameterType="com.whatname.iam.entity.resource.ApiEntity" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_api(app_id, api_code, api_name, api_path, http_method, status)
+        VALUES(#{appId}, #{apiCode}, #{apiName}, #{apiPath}, #{httpMethod}, #{status})
+    </insert>
+
+    <select id="findApiById" resultType="com.whatname.iam.entity.resource.ApiEntity">
+        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        FROM sys_api
+        WHERE id = #{id}
+    </select>
+
+    <update id="updateApi" parameterType="com.whatname.iam.entity.resource.ApiEntity">
+        UPDATE sys_api
+        <set>
+            <if test="apiName != null">api_name = #{apiName},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="apiPath != null">api_path = #{apiPath},</if>
+            <if test="httpMethod != null">http_method = #{httpMethod},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <select id="listApisByAppAndMethod" resultType="com.whatname.iam.entity.resource.ApiEntity">
+        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        FROM sys_api
+        WHERE app_id = #{appId}
+          AND http_method = #{httpMethod}
+    </select>
+
+    <select id="listApiIdsByMenuId" resultType="long">
+        SELECT api_id
+        FROM sys_menu_api
+        WHERE menu_id = #{menuId}
+        ORDER BY id ASC
+    </select>
+
+    <delete id="deleteMenuApis">
+        DELETE FROM sys_menu_api WHERE menu_id = #{menuId}
+    </delete>
+
+    <insert id="insertMenuApis">
+        INSERT INTO sys_menu_api(menu_id, api_id)
+        VALUES
+        <foreach collection="apiIds" item="apiId" separator=",">
+            (#{menuId}, #{apiId})
+        </foreach>
+    </insert>
+
+    <update id="bumpMenuApiRevision">
+        UPDATE sys_menu
+        SET api_revision = api_revision + 1
+        WHERE id = #{menuId}
+          AND api_revision = #{expectedRevision}
+    </update>
+
+    <select id="listMenusByIds" resultType="com.whatname.iam.entity.resource.MenuEntity">
+        SELECT id, app_id, parent_id, menu_code, menu_name, menu_type, path, api_revision, status
+        FROM sys_menu
+        WHERE id IN
+        <foreach collection="menuIds" item="menuId" open="(" separator="," close=")">
+            #{menuId}
+        </foreach>
+    </select>
+
+    <select id="listApisByIds" resultType="com.whatname.iam.entity.resource.ApiEntity">
+        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        FROM sys_api
+        WHERE id IN
+        <foreach collection="apiIds" item="apiId" open="(" separator="," close=")">
+            #{apiId}
+        </foreach>
+    </select>
+</mapper>

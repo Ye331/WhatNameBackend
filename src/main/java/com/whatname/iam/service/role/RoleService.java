@@ -1,0 +1,160 @@
+package com.whatname.iam.service.role;
+
+import com.whatname.iam.common.api.ErrorCode;
+import com.whatname.iam.common.exception.BusinessException;
+import com.whatname.iam.common.util.RevisionUtils;
+import com.whatname.iam.dto.common.PageRequest;
+import com.whatname.iam.dto.common.PageResponse;
+import com.whatname.iam.dto.role.RoleRequests.CreateRoleRequest;
+import com.whatname.iam.dto.role.RoleRequests.ReplaceRoleMenusRequest;
+import com.whatname.iam.dto.role.RoleRequests.UpdateRoleRequest;
+import com.whatname.iam.dto.role.RoleResponses.CreateRoleResult;
+import com.whatname.iam.dto.role.RoleResponses.RoleItem;
+import com.whatname.iam.dto.role.RoleResponses.RoleMenusResult;
+import com.whatname.iam.dto.role.RoleResponses.UpdateRoleResult;
+import com.whatname.iam.entity.role.RoleEntity;
+import com.whatname.iam.entity.resource.MenuEntity;
+import com.whatname.iam.mapper.role.RoleMapper;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class RoleService {
+    private final RoleMapper mapper;
+
+    public RoleService(RoleMapper mapper) {
+        this.mapper = mapper;
+    }
+
+    public PageResponse<RoleItem> listRoles(PageRequest pageRequest) {
+        int total = mapper.countRoles();
+        List<RoleItem> items = mapper.listRoles(pageRequest.offset(), pageRequest.getPageSize())
+                .stream()
+                .map(role -> new RoleItem(role.getId(), role.getRoleCode(), role.getRoleName(), role.getRoleType(), role.getStatus()))
+                .toList();
+        return new PageResponse<>(items, pageRequest.getPage(), pageRequest.getPageSize(), total);
+    }
+
+    @Transactional
+    public CreateRoleResult createRole(CreateRoleRequest request) {
+        int roleType = requireRoleType(request.getRoleType());
+        if (roleType == 3) {
+            throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+        }
+        String roleCode = request.getRoleCode().trim().toUpperCase(Locale.ROOT);
+        if (mapper.countRoleCode(roleCode, null) > 0) {
+            throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
+        }
+        RoleEntity entity = new RoleEntity();
+        entity.setRoleCode(roleCode);
+        entity.setRoleName(request.getRoleName().trim());
+        entity.setRoleDesc(request.getDescription().trim());
+        entity.setRoleType(roleType);
+        entity.setMenuRevision(1);
+        entity.setStatus(1);
+        mapper.insertRole(entity);
+        return new CreateRoleResult(entity.getId(), entity.getRoleType(), entity.getStatus());
+    }
+
+    public RoleItem getRole(long roleId) {
+        RoleEntity role = requireRole(roleId);
+        return new RoleItem(role.getId(), role.getRoleCode(), role.getRoleName(), role.getRoleType(), role.getStatus());
+    }
+
+    @Transactional
+    public UpdateRoleResult updateRole(long roleId, UpdateRoleRequest request) {
+        RoleEntity existing = requireRole(roleId);
+        if (existing.getRoleType() == 3) {
+            throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+        }
+        Integer status = request.getStatus();
+        if (status != null && status != 0 && status != 1) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        }
+
+        RoleEntity update = new RoleEntity();
+        update.setId(roleId);
+        update.setStatus(status);
+        if (request.getRoleName() != null) {
+            update.setRoleName(request.getRoleName().trim());
+        }
+        mapper.updateRole(update);
+        RoleEntity latest = requireRole(roleId);
+        return new UpdateRoleResult(latest.getId(), latest.getStatus());
+    }
+
+    public RoleMenusResult listRoleMenus(long roleId) {
+        RoleEntity role = requireRole(roleId);
+        List<Long> menuIds = mapper.listMenuIdsByRoleId(roleId);
+        return new RoleMenusResult(roleId, menuIds, RevisionUtils.toVersion(role.getMenuRevision()));
+    }
+
+    @Transactional
+    public RoleMenusResult replaceRoleMenus(long roleId, ReplaceRoleMenusRequest request) {
+        RoleEntity role = requireRole(roleId);
+        if (role.getRoleType() == 3) {
+            throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+        }
+        int expectedRevision = RevisionUtils.parseExpectedVersion(request.getExpectedVersion());
+        if (role.getMenuRevision() != expectedRevision) {
+            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+        }
+
+        List<Long> dedupMenuIds = deduplicateIds(request.getMenuIds());
+        if (!dedupMenuIds.isEmpty()) {
+            List<MenuEntity> menus = mapper.listMenusByIds(dedupMenuIds);
+            if (menus.size() != dedupMenuIds.size()) {
+                throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+            }
+            for (MenuEntity menu : menus) {
+                if (menu.getMenuType() != 2) {
+                    throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+                }
+            }
+        }
+
+        mapper.deleteRoleMenus(roleId);
+        if (!dedupMenuIds.isEmpty()) {
+            mapper.insertRoleMenus(roleId, dedupMenuIds);
+        }
+        if (mapper.bumpRoleMenuRevision(roleId, expectedRevision) != 1) {
+            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+        }
+        RoleEntity latest = requireRole(roleId);
+        return new RoleMenusResult(roleId, dedupMenuIds, RevisionUtils.toVersion(latest.getMenuRevision()));
+    }
+
+    private RoleEntity requireRole(long roleId) {
+        RoleEntity role = mapper.findRoleById(roleId);
+        if (role == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        return role;
+    }
+
+    private int requireRoleType(Integer roleType) {
+        if (roleType == null || (roleType != 1 && roleType != 2 && roleType != 3)) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        }
+        return roleType;
+    }
+
+    private List<Long> deduplicateIds(List<Long> source) {
+        if (source == null) {
+            return List.of();
+        }
+        Set<Long> set = new LinkedHashSet<>();
+        for (Long id : source) {
+            if (id == null || id <= 0) {
+                throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+            }
+            set.add(id);
+        }
+        return new ArrayList<>(set);
+    }
+}
