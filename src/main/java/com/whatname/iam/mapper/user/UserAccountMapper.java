@@ -10,6 +10,9 @@ public interface UserAccountMapper {
     UserAccount lockById(@Param("id") long id);
     UserAccount lockByUsername(@Param("username") String username);
     UserAccount lockByPhoneHash(@Param("phoneHash") String phoneHash);
+    UserAccount lockByEmployeeNo(@Param("sgNo") String sgNo);
+    int insertHr(UserAccount user);
+    int updateHr(UserAccount user);
     int insertTemporary(UserAccount user);
     int updatePassword(UserAccount user);
     int updateLoginState(UserAccount user);

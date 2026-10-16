@@ -7,6 +7,18 @@
   <select id="lockById" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE id=#{id} FOR UPDATE</select>
   <select id="lockByUsername" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE username=#{username} FOR UPDATE</select>
   <select id="lockByPhoneHash" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE phone_hash=#{phoneHash} FOR UPDATE</select>
+  <select id="lockByEmployeeNo" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE employee_no=#{sgNo} FOR UPDATE</select>
+  <insert id="insertHr" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,employee_no,dept_id,
+      source,employment_type,status,password_initialized,session_version,grant_revision,hr_version,pwd_failed_count)
+    VALUES(#{username},#{realNameCiphertext},#{phone},#{phoneHash},#{passwordHash},#{employeeNo},#{deptId},
+      1,#{employmentType},1,0,1,1,#{hrVersion},0)
+  </insert>
+  <update id="updateHr">
+    UPDATE sys_user SET real_name_ciphertext=#{realNameCiphertext},phone=#{phone},phone_hash=#{phoneHash},
+      dept_id=#{deptId},employment_type=#{employmentType},status=#{status},session_version=#{sessionVersion},
+      hr_version=#{hrVersion} WHERE id=#{id} AND source=1 AND BINARY employee_no=BINARY #{employeeNo}
+  </update>
   <select id="lockEligibleDepartment" resultType="java.lang.Long">SELECT id FROM sys_dept WHERE id=#{id} AND merged_into_dept_id IS NULL FOR UPDATE</select>
   <insert id="insertTemporary" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,

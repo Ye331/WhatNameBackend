@@ -1,0 +1,65 @@
+@baseUrl = http://localhost:8080/api/v1
+@clientId = replace-with-real-HR-client
+@timestamp = replace-with-current-time
+@nonce = replace-with-unique-nonce
+@keyId = replace-with-real-key-id
+@signature = replace-with-real-request-signature
+
+### HR02: all profile fields remain required for SUSPEND/RESUME/REHIRE as well.
+# Default production wiring rejects until genuine C/D adapters are connected.
+PUT {{baseUrl}}/integrations/hr/employees/SG000123
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-event-id",
+  "eventVersion": 25,
+  "sgNo": "SG000123",
+  "realName": "示例用户",
+  "phone": "replace-with-authorized-test-phone",
+  "deptCode": "D017",
+  "employeeAction": "UPSERT",
+  "employmentType": "FORMAL",
+  "occurredAt": "2026-10-16T13:00:00+08:00"
+}
+
+### HR03: old department must match, no automatic new role.
+POST {{baseUrl}}/integrations/hr/transfers
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-transfer-event-id",
+  "eventVersion": 26,
+  "sgNo": "SG000123",
+  "fromDeptCode": "D017",
+  "toDeptCode": "D018",
+  "occurredAt": "2026-10-16T13:00:00+08:00"
+}
+
+### HR04: no occurredAt. Future effectiveAt is rejected, not scheduled.
+POST {{baseUrl}}/integrations/hr/terminations
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-termination-event-id",
+  "eventVersion": 27,
+  "sgNo": "SG000123",
+  "effectiveAt": "2026-10-16T13:00:00+08:00"
+}
