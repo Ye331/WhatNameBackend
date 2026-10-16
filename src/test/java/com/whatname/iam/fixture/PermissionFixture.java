@@ -40,13 +40,13 @@ public final class PermissionFixture {
         ServiceIdentity serviceIdentity = new ServiceIdentity(
                 SERVICE_IDENTITY_ID, APP_ID, "inventory-backend", "test-key-1", "API_AUTH", true);
 
-        return new Scenario(application, List.of(root, product), List.of(user, admin), role,
+        return new Scenario(application, List.of(root, product), List.of(user, admin), List.of(role),
                 List.of(grantSource), List.of(directory, permissionMenu), List.of(api),
                 List.of(roleMenu), List.of(menuApi), serviceIdentity);
     }
 
     public record Scenario(Application application, List<Department> departments, List<User> users,
-                           Role role, List<GrantSource> grantSources, List<Menu> menus,
+                           List<Role> roles, List<GrantSource> grantSources, List<Menu> menus,
                            List<Api> apis, List<RoleMenu> roleMenus, List<MenuApi> menuApis,
                            ServiceIdentity serviceIdentity) {
     }
