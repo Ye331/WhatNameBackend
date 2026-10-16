@@ -14,10 +14,12 @@ $jdk = 'C:\path\to\jdk-21'
 | 套件 | 精确测试类（类名均唯一，实际 Maven 使用完整包名） | 当前用例数与证明边界 |
 |---|---|---|
 | `Unit`（默认） | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest | 50（含参数化实例）；密码/历史规则、JWT、编码和拼音，无数据库 |
-| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 30+20+18+3=71（Task15更新）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
+| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 30+20+20+3=73（Task16更新）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
 | `ACM5`（显式） | Task12M5MySqlIntegrationTest | 17；真实 A+C M5/SQL，D 是测试替身；包含生产依赖缺失时拒绝的断言 |
 
 Task15于2026-10-16北京时间19:32:43、19:33:16使用本入口分别验证当前AMySql 71项、ACM5 17项，均0失败/错误/跳过，Maven均为0；新增4项JUnit，Unit50未重跑。当前结果与限制见 [Task15修复报告](task15-account-password-fixes.md)，下文Task13原134项历史验证保持原事实。
+
+Task16新增两个事件事务交错用例，Department当前20项、AMySql catalog为73项；本任务仅精确新增两项与Department整类回归，不代表全AMySql/Unit/ACM5重跑。执行证据与边界见 [Task16事件交错报告](task16-event-interleavings.md)。
 
 ## 显式写库套件
 
@@ -56,7 +58,7 @@ try {
 
 Maven 非零、预期类/报告缺失、陈旧时间戳、零执行、计数变化、重复 testcase、失败、错误或任何 skip 均非零失败；不以 `BUILD SUCCESS` 作为唯一依据。源码新增用例后应审查并同步脚本中明确的预期计数，不能为使脚本通过而降低断言。已有输出/缺配置/锁占用等启动前失败只输出原因，不改已有证据；已启动的运行会留下失败 summary 与已取得报告。
 
-Task12 历史本机命令见 `docs/task12-c-integration.md`，同伴复现应使用本页仓库内入口。此前 C 自有 95 项不在此入口范围，不能与Task13历史134项（Unit50+A67+M5 17）重复累加为新的完整联调成绩。当前catalog共138项（Unit50+A71+M5 17）；这是可执行计数，具体新跑结果见对应任务报告。真实 D、HR 专用 C 来源回收/组织重审、姓名搜索口径、真实员工导入和性能仍未验收。
+Task12 历史本机命令见 `docs/task12-c-integration.md`，同伴复现应使用本页仓库内入口。此前 C 自有 95 项不在此入口范围，不能与Task13历史134项（Unit50+A67+M5 17）重复累加为新的完整联调成绩。当前catalog共140项（Unit50+A73+M5 17）；这是可执行计数，具体新跑结果见对应任务报告。真实 D、HR 专用 C 来源回收/组织重审、姓名搜索口径、真实员工导入和性能仍未验收。
 
 ## Task13历史实际验证（2026-10-16，北京时间，保留原134项证据）
 

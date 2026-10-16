@@ -13,6 +13,8 @@ import com.whatname.iam.dto.department.DepartmentRequests;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.service.event.*;
 import jakarta.servlet.http.HttpServletRequest;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.net.URI;
 import java.net.http.*;
 import java.time.OffsetDateTime;
@@ -22,6 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.mybatis.spring.annotation.MapperScan;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.plugin.*;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
@@ -47,6 +54,25 @@ class DepartmentBusinessIntegrationTest {
             GlobalExceptionHandler.class,SensitiveDataCodec.class})
     static class TestApplication {
         @Bean TestPort testPort(JdbcTemplate jdbc) { return new TestPort(jdbc); }
+        @Bean RecoveryLockObserver recoveryLockObserver() { return new RecoveryLockObserver(); }
+    }
+    /** Observe the actual recovery mapper connection, without replacing its SQL or transaction. */
+    @Intercepts(@Signature(type=Executor.class,method="query",
+            args={MappedStatement.class,Object.class,RowBounds.class,ResultHandler.class}))
+    static class RecoveryLockObserver implements Interceptor {
+        final ThreadLocal<CompletableFuture<Long>> nextLock=new ThreadLocal<>();
+        @Override public Object intercept(Invocation invocation) throws Throwable {
+            var signal=nextLock.get();
+            if(signal!=null && ((MappedStatement)invocation.getArgs()[0]).getId()
+                    .equals("com.whatname.iam.mapper.event.ExternalEventMapper.lock")) {
+                nextLock.remove();
+                try(var statement=((Executor)invocation.getTarget()).getTransaction().getConnection().createStatement();
+                    var result=statement.executeQuery("SELECT CONNECTION_ID()")) {
+                    assertTrue(result.next());signal.complete(result.getLong(1));
+                }
+            }
+            return invocation.proceed();
+        }
     }
     @TestConfiguration(proxyBeanMethods=false)
     @EnableAutoConfiguration
@@ -338,6 +364,142 @@ class DepartmentBusinessIntegrationTest {
         assertEquals(1,count.get());assertNotEquals(oldToken,db.queryForObject("SELECT claim_token FROM sys_external_event WHERE event_id=?",String.class,event));
         assertEquals(0,db.update("UPDATE sys_external_event SET processing_status='REJECTED' WHERE event_id=? AND claim_token=? AND processing_status='PROCESSING'",event,oldToken));
         assertEquals("APPLIED",db.queryForObject("SELECT processing_status FROM sys_external_event WHERE event_id=?",String.class,event));
+    }
+
+    @Test void activeOwnerRecoveryWaitsForCommitAndReplaysWithoutRotatingToken() throws Exception {
+        String dept=code("ACTIVE");long id=create(dept,"",10);String event=event();
+        var oa=new TrustedEventContext("OA","task06-test-oa","task16-owner");
+        var command=interleavingCommand(event,dept,"first","nonce-1");
+        var release=new CountDownLatch(1);
+        var ownerReady=new CompletableFuture<Map<String,Object>>();
+        var recoveryConnection=new CompletableFuture<Long>();
+        var observer=app.getBean(RecoveryLockObserver.class);
+        ExecutorService pool=Executors.newFixedThreadPool(2);
+        Future<Map<String,Object>> owner=null,recovery=null;
+        try {
+            owner=pool.submit(() -> events.execute(oa,command,() -> {
+                var result=applyInterleavingFact(id,event);
+                ownerReady.complete(Map.of("connection",db.queryForObject("SELECT CONNECTION_ID()",Long.class),
+                        "claim",eventState(event).get("claim_token")));
+                try { assertTrue(release.await(8,TimeUnit.SECONDS),"owner release deadline"); }
+                catch(InterruptedException interrupted) {Thread.currentThread().interrupt();throw new IllegalStateException(interrupted);}
+                return result;
+            }));
+            var owned=ownerReady.get(5,TimeUnit.SECONDS);
+            assertEquals(10L,((Number)row(id).get("hr_version")).longValue());
+            assertEquals(0,auditCount(event));assertEquals(0,signatureCount(id));
+            var processing=eventState(event);
+            assertEquals("PROCESSING",processing.get("processing_status"));assertNull(processing.get("result_data"));
+            assertEquals(owned.get("claim"),processing.get("claim_token"));
+            // A separate transaction's NOWAIT failure proves the event record is really locked.
+            try(Connection probe=Objects.requireNonNull(db.getDataSource()).getConnection()) {
+                probe.setAutoCommit(false);
+                try(var statement=probe.prepareStatement("SELECT id FROM sys_external_event WHERE source_system='OA' AND event_id=? FOR UPDATE NOWAIT")) {
+                    statement.setString(1,event);statement.setQueryTimeout(2);
+                    SQLException locked=assertThrows(SQLException.class,statement::executeQuery);
+                    assertEquals(3572,locked.getErrorCode(),"MySQL ER_LOCK_NOWAIT");
+                } finally {probe.rollback();}
+            }
+            recovery=pool.submit(() -> {
+                observer.nextLock.set(recoveryConnection);
+                try {return events.recover(oa,command,() -> {fail("active owner's recovery callback");return Map.of();});}
+                finally {observer.nextLock.remove();}
+            });
+            long recoveryId=recoveryConnection.get(2,TimeUnit.SECONDS);
+            assertNotEquals(((Number)owned.get("connection")).longValue(),recoveryId);
+            // PROCESSLIST is visible for this account's own connections; no PROCESS privilege needed.
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+            boolean executingLock=false;
+            while(System.nanoTime()<deadline) {
+                var running=db.queryForList("SELECT INFO FROM information_schema.PROCESSLIST WHERE ID=? AND COMMAND='Query'",recoveryId);
+                if(!running.isEmpty() && String.valueOf(running.getFirst().get("INFO")).contains("sys_external_event")
+                        && String.valueOf(running.getFirst().get("INFO")).contains("FOR UPDATE")) {executingLock=true;break;}
+                TimeUnit.MILLISECONDS.sleep(20);
+            }
+            assertTrue(executingLock,"recovery connection must actually execute the event locking SQL");
+            Future<Map<String,Object>> waiting=recovery;
+            assertThrows(TimeoutException.class,() -> waiting.get(150,TimeUnit.MILLISECONDS));
+            assertEquals(processing,eventState(event));
+            assertEquals(10L,((Number)row(id).get("hr_version")).longValue());assertEquals(0,auditCount(event));
+            release.countDown();
+            var first=owner.get(5,TimeUnit.SECONDS);var replay=recovery.get(5,TimeUnit.SECONDS);
+            assertEquals(semanticResult(first),semanticResult(replay));
+            assertInterleavingCommitted(id,event,first);
+            assertEquals(owned.get("claim"),eventState(event).get("claim_token"));
+            System.out.println("TASK16 active-owner: NOWAIT=3572; recovery SQL observed on distinct connection; bounded wait; APPLIED replay; version=11; audit=1; signature=1; claim unchanged");
+        } finally {
+            release.countDown();pool.shutdownNow();
+            assertTrue(pool.awaitTermination(6,TimeUnit.SECONDS),"event workers must terminate");
+        }
+    }
+
+    @Test void committedResultLostBeforeDeliveryRetriesSavedResultWithOnePersistentApplication() throws Exception {
+        String dept=code("DELIVERY");long id=create(dept,"",10);String event=event();
+        var oa=new TrustedEventContext("OA","task06-test-oa","delivery-first");
+        var command=interleavingCommand(event,dept,"request-1","nonce-1");
+        // This wrapper fails AFTER execute returns (and therefore after TransactionTemplate commits).
+        assertThrows(LostTestDelivery.class,() -> discardCommittedDelivery(() -> events.execute(oa,command,
+                () -> applyInterleavingFact(id,event))));
+        var committed=eventState(event);
+        Map<String,Object> expected=Map.of("deptId",Long.toString(id),"eventId",event,"version",11L,"processingStatus","APPLIED");
+        assertInterleavingCommitted(id,event,expected);
+        var before=row(id);
+        var retry=interleavingCommand(event,dept,"request-2","nonce-2");
+        var retried=events.execute(new TrustedEventContext("OA","task06-test-oa","delivery-retry"),retry,
+                () -> {fail("committed retry callback");return Map.of();});
+        var recovered=events.recover(oa,retry,() -> {fail("APPLIED recovery callback");return Map.of();});
+        assertEquals(semanticResult(expected),semanticResult(retried));
+        assertEquals(semanticResult(expected),semanticResult(recovered));
+        assertEquals(committed,eventState(event));assertEquals(before,row(id));
+        assertInterleavingCommitted(id,event,expected);
+        System.out.println("TASK16 lost-delivery: wrapper threw after commit; fresh transaction verified APPLIED/version=11/audit=1/signature=1; changed requestId+nonce retry and recover replay saved JSON; persistent state unchanged");
+    }
+
+    ExternalEventService.Command interleavingCommand(String event,String dept,String request,String nonce) {
+        return new ExternalEventService.Command(event,"OA_DECISION",null,"DEPT",dept,null,
+                Map.of("decision","APPROVE","version",11,"requestId",request,"nonce",nonce));
+    }
+    Map<String,Object> eventState(String event) {
+        return db.queryForMap("SELECT processing_status,processing_stage,claim_token,result_data,result_summary,payload_digest FROM sys_external_event WHERE source_system='OA' AND event_id=?",event);
+    }
+    int auditCount(String event) {
+        return db.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE source_system='OA' AND external_event_id=? AND operation_type='TASK16_EVENT_APPLY'",Integer.class,event);
+    }
+    int signatureCount(long id) {
+        return db.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK16_DEPT' AND data_id=?",Integer.class,id);
+    }
+    Map<String,Object> applyInterleavingFact(long id,String event) {
+        assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+        assertEquals(Connection.TRANSACTION_SERIALIZABLE,
+                org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+        assertEquals(1,db.update("UPDATE sys_dept SET hr_version=hr_version+1,dept_name=? WHERE id=?",event,id));
+        // Explicit test evidence only: this fixed 88-character marker is NOT a D signature.
+        assertEquals(1,db.update("INSERT INTO sys_data_signature(data_type,data_id,signature,key_id) VALUES('TASK16_DEPT',?,?,'task16-test')",id,"T".repeat(88)));
+        assertEquals(1,db.update("INSERT INTO sys_operation_log(request_id,source_system,external_event_id,operation_type,target_type,target_id,evidence,operation_desc) VALUES(?,'OA',?,'TASK16_EVENT_APPLY','DEPT',?,JSON_OBJECT('beforeVersion',10,'afterVersion',11),'task16 test evidence; not D audit')",event,event,id));
+        return Map.of("deptId",Long.toString(id),"eventId",event,"version",11L,"processingStatus","APPLIED");
+    }
+    void assertInterleavingCommitted(long id,String event,Map<String,Object> result) throws Exception {
+        var tx=new TransactionTemplate(app.getBean(PlatformTransactionManager.class));
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        // The caller has no transaction: these reads cannot see the callback's uncommitted state.
+        var state=tx.execute(status -> {
+            assertEquals(11L,((Number)row(id).get("hr_version")).longValue());assertEquals(event,row(id).get("dept_name"));
+            assertEquals(1,auditCount(event));assertEquals(1,signatureCount(id));
+            assertEquals("T".repeat(88),db.queryForObject("SELECT signature FROM sys_data_signature WHERE data_type='TASK16_DEPT' AND data_id=?",String.class,id));
+            var audit=db.queryForMap("SELECT target_id,evidence FROM sys_operation_log WHERE source_system='OA' AND external_event_id=? AND operation_type='TASK16_EVENT_APPLY'",event);
+            assertEquals(id,((Number)audit.get("target_id")).longValue());
+            assertEquals(json.valueToTree(Map.of("beforeVersion",10,"afterVersion",11)),
+                    assertDoesNotThrow(() -> json.readTree((String)audit.get("evidence"))));
+            return eventState(event);
+        });
+        assertEquals("APPLIED",state.get("processing_status"));assertEquals("COMPLETED",state.get("processing_stage"));
+        assertEquals(semanticResult(result),json.readTree((String)state.get("result_data")));
+    }
+    JsonNode semanticResult(Object value) throws Exception {return json.readTree(json.writeValueAsString(value));}
+    static class LostTestDelivery extends RuntimeException { }
+    static void discardCommittedDelivery(java.util.function.Supplier<Map<String,Object>> call) {
+        Objects.requireNonNull(call.get());throw new LostTestDelivery();
     }
 
     @Test void frozenAncestorAndHiddenMergeDestinationArePresentedWithinScope() {
