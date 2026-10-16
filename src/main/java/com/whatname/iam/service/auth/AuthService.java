@@ -150,8 +150,14 @@ public class AuthService {
                 throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
             List<String> pinyins=NamePinyin.variants(codec.decrypt(u.realNameCiphertext));
             var identity=new PasswordPolicy.IdentityContext(u.username,pinyins.getFirst(),actualPhone);
-            if(policy.validate(input.newPassword(),identity,history)!=PasswordPolicy.ValidationResult.VALID)
-                throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+            var validation=policy.validate(input.newPassword(),identity,history);
+            switch(validation) {
+                case VALID -> { }
+                case IDENTITY_CONTEXT_REQUIRED, HISTORY_REQUIRED, INVALID_HISTORY ->
+                    throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
+                case HISTORY_VERIFICATION_FAILED -> throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
+                default -> throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+            }
             String folded=input.newPassword().toLowerCase(Locale.ROOT);
             if(pinyins.stream().anyMatch(folded::contains)) throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
             u.passwordHash=hasher.hash(input.newPassword());u.passwordInitialized=1;

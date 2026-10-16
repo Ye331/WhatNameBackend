@@ -284,6 +284,55 @@ class M1MySqlIntegrationTest {
         http("POST","/users/temporary",Map.of("realName","Test Person","phone",phone,"deptId",Long.toString(allowedDept),"reason",PREFIX+"duplicate"),adminToken,409);
     }
 
+    @Test void unsupportedTemporaryNamesRejectBeforeAnyAccountOrEvidenceWriteOverHttp() throws Exception {
+        for(String name:List.of("··","𠀀","重".repeat(9))) {
+            String phone=nextPhone(),hash=codec.phoneHash(phone);fixturePhones.add(hash);
+            var audits=db.queryForList("SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST' AND user_id=? ORDER BY id",admin.id);
+            int signatures=db.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK05_USER'",Integer.class);
+            try {
+                assertEquals("BUSINESS_RULE_VIOLATION",http("POST","/users/temporary",Map.of("realName",name,"phone",phone,
+                        "deptId",Long.toString(allowedDept),"reason",PREFIX+"badname"),adminToken,422).path("code").asText());
+                assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",Integer.class,hash));
+                assertEquals(audits,db.queryForList("SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST' AND user_id=? ORDER BY id",admin.id));
+                assertEquals(signatures,db.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK05_USER'",Integer.class));
+            } finally {
+                // Register even an unexpected old-implementation success for normal fixture retirement.
+                fixtureIds.addAll(db.queryForList("SELECT id FROM sys_user WHERE phone_hash=?",Long.class,hash));
+            }
+        }
+    }
+
+    @Test void supportedTemporaryNamesCanInitializeAndResetWithDeliveredProofOverHttp() throws Exception {
+        for(String name:List.of("张三","Test Person","单明")) {
+            String phone=nextPhone();fixturePhones.add(codec.phoneHash(phone));
+            long id=http("POST","/users/temporary",Map.of("realName",name,"phone",phone,"deptId",Long.toString(allowedDept),
+                    "reason",PREFIX+"nameflow"),adminToken,200).at("/data/userId").asLong();fixtureIds.add(id);
+            http("POST","/auth/sms/send",Map.of("phone",phone,"purpose","SET_PASSWORD"),null,200);
+            http("POST","/auth/password/initialize",Map.of("phone",phone,"code",sms.code(phone,Purpose.SET_PASSWORD),"newPassword",NEXT),null,200);
+            UserAccount initialized=mapper.findById(id);assertEquals(1,initialized.passwordInitialized);assertEquals(1,initialized.sessionVersion);
+            assertNotNull(login(initialized,NEXT));
+            http("POST","/auth/sms/send",Map.of("phone",phone,"purpose","RESET_PASSWORD"),null,200);
+            http("POST","/auth/password/reset",Map.of("phone",phone,"code",sms.code(phone,Purpose.RESET_PASSWORD),"newPassword","WinterLantern84!"),null,200);
+            UserAccount reset=mapper.findById(id);assertEquals(2,reset.sessionVersion);assertEquals(1,reset.passwordInitialized);
+            assertNotNull(login(reset,"WinterLantern84!"));
+            assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?",Integer.class,id));
+            assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at IS NULL",Integer.class,reset.phoneHash));
+        }
+    }
+
+    @Test void olderCorruptHistoryReturns503AndPreservesAllPasswordFactsOverHttp() throws Exception {
+        UserAccount u=seed("corruptold",1,1,allowedDept,2);
+        // Legal nonempty ASCII fixture; current password and newest history stay valid and equal.
+        db.update("INSERT INTO sys_password_history(user_id,password_hash,created_at) VALUES(?,?,DATE_SUB(NOW(),INTERVAL 1 DAY))",u.id,"task15-invalid-encoding");
+        assertEquals(u.passwordHash,db.queryForObject("SELECT password_hash FROM sys_password_history WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 1",String.class,u.id));
+        String proof=send(u,Purpose.RESET_PASSWORD);var before=passwordFacts(u);
+        for(int attempt=0;attempt<2;attempt++) {
+            assertEquals("INTEGRITY_FAILURE",http("POST","/auth/password/reset",Map.of("phone",phone(u),"code",proof,"newPassword",NEXT),null,503).path("code").asText());
+            assertEquals(before,passwordFacts(u));
+        }
+        assertNotNull(login(u,ORIGINAL));
+    }
+
     @Test void concurrentTemporaryPhoneUniquenessHasOneWinner() throws Exception {
         String phone=nextPhone();fixturePhones.add(codec.phoneHash(phone));
         var request=new UserRequests.Temporary("Test Person",phone,Long.toString(allowedDept),PREFIX+"race");
@@ -389,11 +438,12 @@ class M1MySqlIntegrationTest {
         for(boolean initialize:List.of(true,false)) {
             UserAccount u=seed("policyhttp",initialize?0:1,1,allowedDept,2);
             String proof=send(u,initialize?Purpose.SET_PASSWORD:Purpose.RESET_PASSWORD);
-            JsonNode result=http("POST","/auth/password/"+(initialize?"initialize":"reset"),
-                    Map.of("phone",phone(u),"code",proof,"newPassword","short"),null,422);
-            assertEquals("BUSINESS_RULE_VIOLATION",result.path("code").asText());
-            assertEquals(u.passwordHash,mapper.findById(u.id).passwordHash);assertEquals(1,mapper.findById(u.id).sessionVersion);
-            assertNull(db.queryForObject("SELECT consumed_at FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC LIMIT 1",java.sql.Timestamp.class,u.phoneHash));
+            var before=passwordFacts(u);
+            for(String bad:initialize?List.of("short"):List.of("short",ORIGINAL)) {
+                JsonNode result=http("POST","/auth/password/"+(initialize?"initialize":"reset"),
+                        Map.of("phone",phone(u),"code",proof,"newPassword",bad),null,422);
+                assertEquals("BUSINESS_RULE_VIOLATION",result.path("code").asText());assertEquals(before,passwordFacts(u));
+            }
         }
     }
 
@@ -457,6 +507,14 @@ class M1MySqlIntegrationTest {
         }
     }
 
+    private List<Map<String,Object>> passwordFacts(UserAccount u) {
+        List<Map<String,Object>> facts=new ArrayList<>(db.queryForList("SELECT * FROM sys_user WHERE id=?",u.id));
+        facts.addAll(db.queryForList("SELECT * FROM sys_password_history WHERE user_id=? ORDER BY id",u.id));
+        facts.addAll(db.queryForList("SELECT * FROM sys_sms_code WHERE phone_hash=? ORDER BY id",u.phoneHash));
+        facts.addAll(db.queryForList("SELECT * FROM sys_data_signature WHERE data_type='TASK05_USER' AND data_id=?",u.id));
+        facts.addAll(db.queryForList("SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST' AND target_id=? ORDER BY id",u.id));
+        return facts;
+    }
     private AuthService.LoginResult login(UserAccount u,String password) {return auth.login(new Login(LoginType.USERNAME,u.username,password),"127.0.0.1","TASK05_TEST");}
     private String send(UserAccount u,Purpose purpose) {auth.sendSms(new SendSms(phone(u),purpose));return sms.code(phone(u),purpose);}
     private String phone(UserAccount u) {return codec.decrypt(u.phone);}

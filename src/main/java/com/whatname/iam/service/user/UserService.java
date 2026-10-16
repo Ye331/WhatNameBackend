@@ -8,6 +8,7 @@ import com.whatname.iam.dto.user.UserRequests.*;
 import com.whatname.iam.entity.user.UserAccount;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.auth.AuthService;
+import com.whatname.iam.service.auth.NamePinyin;
 import com.whatname.iam.service.auth.PasswordHasher;
 import java.util.*;
 import org.springframework.dao.DuplicateKeyException;
@@ -80,6 +81,8 @@ public class UserService {
                 UserAccount actor=auth.requireCurrentSession(principal);
                 requireScope(scope(actor,"IAM_USERS_WRITE"),deptId);
                 if(users.lockEligibleDepartment(deptId)==null) throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
+                // A persisted known name must remain usable by initialize/reset password checks.
+                NamePinyin.variants(input.realName().strip());
                 String placeholder=hasher.hash(UUID.randomUUID().toString()+UUID.randomUUID().toString().substring(0,20));
                 UserAccount u=new UserAccount();
                 u.username="temp"+new java.math.BigInteger(UUID.randomUUID().toString().replace("-",""),16).toString();

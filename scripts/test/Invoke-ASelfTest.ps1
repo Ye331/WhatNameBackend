@@ -25,8 +25,8 @@ $catalog = @{
         'com.whatname.iam.service.auth.NamePinyinTest'=2
     }
     AMySql = [ordered]@{
-        'com.whatname.iam.service.auth.M1MySqlIntegrationTest'=27
-        'com.whatname.iam.service.hr.HrBusinessIntegrationTest'=19
+        'com.whatname.iam.service.auth.M1MySqlIntegrationTest'=30
+        'com.whatname.iam.service.hr.HrBusinessIntegrationTest'=20
         'com.whatname.iam.service.department.DepartmentBusinessIntegrationTest'=18
         'com.whatname.iam.mapper.department.DepartmentMapperTest'=3
     }

@@ -10,6 +10,7 @@ import com.whatname.iam.entity.user.UserAccount;
 import com.whatname.iam.mapper.department.OrganizationWriteMapper;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.auth.PasswordHasher;
+import com.whatname.iam.service.auth.NamePinyin;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
 import java.time.Clock;
@@ -55,6 +56,8 @@ public class HrService {
         Department target=assignable(all,r.deptCode());
         UserAccount u=users.lockByEmployeeNo(r.sgNo());
         String phone=SensitiveDataCodec.normalizePhone(r.phone());
+        // Validate the whole name before lifecycle, C grants or profile writes (including updates).
+        NamePinyin.variants(r.realName().strip());
         if(u==null) {
             // REHIRE/SUSPEND/RESUME name an existing lifecycle transition, never create a person.
             if(r.employeeAction()!=Action.UPSERT) fail(ErrorCode.RESOURCE_NOT_FOUND);

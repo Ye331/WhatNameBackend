@@ -248,6 +248,26 @@ class HrBusinessIntegrationTest {
         assertEquals(u.id,after.id);assertEquals(u.username,after.username);assertEquals(stored,after.passwordHash);assertEquals(1,after.passwordInitialized);
         assertEquals(u.sessionVersion,after.sessionVersion);assertEquals(2,after.employmentType);assertEquals(20,after.hrVersion);
     }
+    @Test void unsupportedProfileNamesRejectCreationAndSuspendMoveWithoutChangingBusinessFactsOverHttp() throws Exception {
+        UserAccount u=create();sources(u);initializeFixture(u);
+        db.update("INSERT INTO sys_password_history(user_id,password_hash) VALUES(?,?)",u.id,row(u).passwordHash);
+        db.update("INSERT INTO sys_admin(user_id,admin_level,dept_id) VALUES(?,2,?)",u.id,a);
+        var before=facts(u);var history=db.queryForList("SELECT * FROM sys_password_history WHERE user_id=? ORDER BY id",u.id);
+        for(String name:List.of("··","𠀀","重".repeat(9))) {
+            String fresh=sg();
+            Employee create=new Employee("HR",event(),1L,fresh,name,phone(),deptA,Action.UPSERT,EmploymentType.FORMAL,time);
+            Employee update=new Employee("HR",event(),9L,u.employeeNo,name,phone(),deptB,Action.SUSPEND,EmploymentType.OUTSOURCED,time);
+            for(Employee bad:List.of(create,update)) {
+                assertEquals("BUSINESS_RULE_VIOLATION",http("PUT","/integrations/hr/employees/"+bad.sgNo(),bad,422).path("code").asText());
+                assertEquals("REJECTED",db.queryForObject("SELECT processing_status FROM sys_external_event WHERE event_id=?",String.class,bad.eventId()));
+                assertEquals("BUSINESS_RULE_VIOLATION",db.queryForObject("SELECT result_summary FROM sys_external_event WHERE event_id=?",String.class,bad.eventId()));
+            }
+            assertNull(users.lockByEmployeeNo(fresh));assertEquals(before,facts(u));
+            assertEquals(history,db.queryForList("SELECT * FROM sys_password_history WHERE user_id=? ORDER BY id",u.id));
+            assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE phone_hash IN (?,?)",Integer.class,codec.phoneHash(create.phone()),codec.phoneHash(update.phone())));
+            http("PUT","/integrations/hr/employees/"+u.employeeNo,update,422);assertEquals(before,facts(u));
+        }
+    }
     @Test void phoneConflictRollsBackAccountAndVersionAndNamesGetSgSuffix() throws Exception {
         UserAccount u=create();String sg=sg();Employee r=request(sg,1,deptA,Action.UPSERT);
         http("PUT","/integrations/hr/employees/"+sg,r,200);UserAccount v=users.lockByEmployeeNo(sg);
