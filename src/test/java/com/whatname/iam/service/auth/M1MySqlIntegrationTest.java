@@ -1,5 +1,7 @@
 package com.whatname.iam.service.auth;
 
+import com.whatname.iam.support.LocalTestDatabase;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
@@ -59,7 +61,7 @@ class M1MySqlIntegrationTest {
         settings.put("iam.security.jwt-public-key",Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
         settings.put("iam.security.jwt-issuer","task05-issuer");settings.put("iam.security.jwt-audience","task05-api");settings.put("iam.security.jwt-key-id","task05-random");
         context=new SpringApplicationBuilder(TestBootstrap.class,TestWiring.class).profiles("task05-test").properties(settings)
-                .run("--server.port=18085","--server.address=127.0.0.1");
+                .run(LocalTestDatabase.arguments("--server.port=18085","--server.address=127.0.0.1"));
         db=context.getBean(JdbcTemplate.class);auth=context.getBean(AuthService.class);users=context.getBean(UserService.class);
         mapper=context.getBean(UserAccountMapper.class);codec=context.getBean(SensitiveDataCodec.class);jwt=context.getBean(JwtTokenService.class);
         gateway=context.getBean(TestGateway.class);sms=context.getBean(TestSms.class);hasher=context.getBean(PasswordHasher.class);json=context.getBean(ObjectMapper.class);
@@ -447,7 +449,7 @@ class M1MySqlIntegrationTest {
     @Test void defaultEnvironmentHasNoAllowGatewayOrSmsProvider() throws Exception {
         Map<String,Object> defaults=new HashMap<>(settings);defaults.put("server.port","18086");
         try(ConfigurableApplicationContext ordinary=new SpringApplicationBuilder(TestBootstrap.class).profiles("task05-default-proof").properties(defaults)
-                .run("--server.port=18086","--server.address=127.0.0.1")) {
+                .run(LocalTestDatabase.arguments("--server.port=18086","--server.address=127.0.0.1"))) {
             assertFalse(ordinary.getBean(M1SecurityGateway.class) instanceof TestGateway);
             expect(ErrorCode.SMS_DELIVERY_UNAVAILABLE,()->ordinary.getBean(AuthService.class).sendSms(new SendSms(nextPhone(),Purpose.SET_PASSWORD)));
             UserAccount u=seed("defaultdeny",1,1,allowedDept,2);

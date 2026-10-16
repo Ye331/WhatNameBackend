@@ -1,5 +1,7 @@
 package com.whatname.iam.service.department;
 
+import com.whatname.iam.support.LocalTestDatabase;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
@@ -108,12 +110,10 @@ class DepartmentBusinessIntegrationTest {
         prefix="T06-"+Long.toString(System.currentTimeMillis(),36)+"-";
         String key=Base64.getEncoder().encodeToString(new byte[32]); // isolated test key, no production default
         byte[] hmacBytes=new byte[32]; Arrays.fill(hmacBytes,(byte)1); String hmacKey=Base64.getEncoder().encodeToString(hmacBytes);
-        app=(ServletWebServerApplicationContext)new SpringApplication(TestApplication.class).run(
-                "--server.port=18086","--spring.config.import=", "--spring.datasource.url="+System.getenv().getOrDefault("DEPARTMENT_DB_URL",
-                        "jdbc:mysql://127.0.0.1:3307/unified_permission?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei"),
-                "--spring.datasource.username=iam_dev","--spring.datasource.password="+System.getenv("DEPARTMENT_DB_PASSWORD"),
+        app=(ServletWebServerApplicationContext)new SpringApplication(TestApplication.class).run(LocalTestDatabase.arguments(
+                "--server.port=18086","--server.address=127.0.0.1",
                 "--iam.security.data-key="+key,"--iam.security.phone-hmac-key="+hmacKey,
-                "--logging.level.root=WARN","--spring.main.banner-mode=off");
+                "--logging.level.root=WARN","--spring.main.banner-mode=off"));
         db=app.getBean(JdbcTemplate.class);service=app.getBean(DepartmentService.class);events=app.getBean(ExternalEventService.class);
         port=app.getBean(TestPort.class);json=app.getBean(ObjectMapper.class);codec=app.getBean(SensitiveDataCodec.class);
         base="http://127.0.0.1:18086/api/v1";
@@ -313,8 +313,8 @@ class DepartmentBusinessIntegrationTest {
         assertEquals(0,json.readTree(http("GET","/departments/"+si+"/users?includeDescendants=true",null,"test-manager").body()).at("/data/total").asInt());
     }
     @Test void defaultProductionAssemblyRefusesAllSixHttpEntrypoints() throws Exception {
-        try(var defaultApp=new SpringApplication(DefaultApplication.class).run("--server.port=18087","--spring.config.import=",
-                "--logging.level.root=WARN","--spring.main.banner-mode=off")) {
+        try(var defaultApp=new SpringApplication(DefaultApplication.class).run(LocalTestDatabase.arguments("--server.port=18087","--server.address=127.0.0.1",
+                "--logging.level.root=WARN","--spring.main.banner-mode=off"))) {
             String previous=base;base="http://127.0.0.1:18087/api/v1";
             try {
                 String code=code("DENY");

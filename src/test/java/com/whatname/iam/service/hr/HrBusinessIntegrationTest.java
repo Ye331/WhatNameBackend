@@ -1,5 +1,7 @@
 package com.whatname.iam.service.hr;
 
+import com.whatname.iam.support.LocalTestDatabase;
+
 import com.fasterxml.jackson.databind.*;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.*;
@@ -153,14 +155,12 @@ class HrBusinessIntegrationTest {
         prefix="T07-"+Long.toString(System.currentTimeMillis(),36)+"-";
         KeyPairGenerator g=KeyPairGenerator.getInstance("RSA");g.initialize(2048);KeyPair keys=g.generateKeyPair();
         List<String> args=new ArrayList<>(List.of("--server.port=18087","--server.address=127.0.0.1",
-                "--spring.config.import=","--spring.datasource.url=jdbc:mysql://127.0.0.1:3307/unified_permission?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei",
-                "--spring.datasource.username=iam_dev","--spring.datasource.password="+System.getenv("TASK07_DB_PASSWORD"),
                 "--iam.security.data-key="+key(0),"--iam.security.phone-hmac-key="+key(1),"--iam.security.sms-hmac-key="+key(2),
                 "--iam.security.jwt-private-key="+Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()),
                 "--iam.security.jwt-public-key="+Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
                 "--iam.security.jwt-issuer=task07","--iam.security.jwt-audience=task07","--iam.security.jwt-key-id=task07",
                 "--logging.level.root=WARN","--spring.main.banner-mode=off"));
-        app=(ServletWebServerApplicationContext)new SpringApplication(TestApplication.class).run(args.toArray(String[]::new));
+        app=(ServletWebServerApplicationContext)new SpringApplication(TestApplication.class).run(LocalTestDatabase.arguments(args.toArray(String[]::new)));
         db=app.getBean(JdbcTemplate.class);hr=app.getBean(HrService.class);users=app.getBean(UserAccountMapper.class);
         port=app.getBean(TestPort.class);codec=app.getBean(SensitiveDataCodec.class);passwords=app.getBean(PasswordHasher.class);
         auth=app.getBean(AuthService.class);jwt=app.getBean(JwtTokenService.class);clock=app.getBean(MutableClock.class);json=app.getBean(ObjectMapper.class);
@@ -406,11 +406,9 @@ class HrBusinessIntegrationTest {
         http("PUT","/integrations/hr/employees/"+u.employeeNo,request(u.employeeNo,4,deptA,Action.REHIRE),503);assertEquals(before,facts(u));
     }
     @Test void productionDefaultAllThreeHttpEntrypointsFailClosed() throws Exception {
-        try(var ordinary=(ServletWebServerApplicationContext)new SpringApplication(DefaultApplication.class).run(
-                "--server.port=18088","--server.address=127.0.0.1","--spring.config.import=",
-                "--spring.datasource.url=jdbc:mysql://127.0.0.1:3307/unified_permission?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei",
-                "--spring.datasource.username=iam_dev","--spring.datasource.password="+System.getenv("TASK07_DB_PASSWORD"),
-                "--logging.level.root=WARN","--spring.main.banner-mode=off")) {
+        try(var ordinary=(ServletWebServerApplicationContext)new SpringApplication(DefaultApplication.class).run(LocalTestDatabase.arguments(
+                "--server.port=18088","--server.address=127.0.0.1",
+                "--logging.level.root=WARN","--spring.main.banner-mode=off"))) {
             String server="http://127.0.0.1:18088/api/v1";UserAccount u=create();var before=facts(u);
             httpAt(server,"PUT","/integrations/hr/employees/"+u.employeeNo,request(u.employeeNo,3,deptA,Action.UPSERT),503,"task07-hr");
             httpAt(server,"POST","/integrations/hr/transfers",transfer(u,3),503,"task07-hr");

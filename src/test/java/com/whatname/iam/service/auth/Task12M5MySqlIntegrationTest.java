@@ -1,5 +1,7 @@
 package com.whatname.iam.service.auth;
 
+import com.whatname.iam.support.LocalTestDatabase;
+
 import com.fasterxml.jackson.databind.*;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
@@ -114,7 +116,7 @@ class Task12M5MySqlIntegrationTest {
         settings.put("iam.security.jwt-public-key",Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
         settings.put("iam.security.jwt-issuer","task12");settings.put("iam.security.jwt-audience","task12");settings.put("iam.security.jwt-key-id","task12");
         settings.put("logging.level.root","WARN");settings.put("spring.main.banner-mode","off");
-        app=new SpringApplicationBuilder(M1MySqlIntegrationTest.TestBootstrap.class,Wiring.class).properties(settings).run("--server.port=18089");
+        app=new SpringApplicationBuilder(M1MySqlIntegrationTest.TestBootstrap.class,Wiring.class).properties(settings).run(LocalTestDatabase.arguments("--server.port=18089"));
         db=app.getBean(JdbcTemplate.class);users=app.getBean(UserAccountMapper.class);codec=app.getBean(SensitiveDataCodec.class);
         jwt=app.getBean(JwtTokenService.class);data=app.getBean(TestD.class);integrity=app.getBean(CIntegrity.class);
         json=app.getBean(ObjectMapper.class);manager=app.getBean(PlatformTransactionManager.class);
@@ -275,7 +277,7 @@ class Task12M5MySqlIntegrationTest {
     }
     @Test void defaultProductionDependenciesRejectAndHrRemainsUnavailable() throws Exception {
         var defaults=new HashMap<>(settings);defaults.put("server.port",18090);
-        try(var ordinary=new SpringApplicationBuilder(M1MySqlIntegrationTest.TestBootstrap.class).properties(defaults).run("--server.port=18090")) {
+        try(var ordinary=new SpringApplicationBuilder(M1MySqlIntegrationTest.TestBootstrap.class).properties(defaults).run(LocalTestDatabase.arguments("--server.port=18090"))) {
             assertFalse(ordinary.getBean(ManagementDataSecurity.class) instanceof TestD);
             assertThrows(BusinessException.class,()->new TransactionTemplate(ordinary.getBean(PlatformTransactionManager.class)).execute(tx->{ordinary.getBean(AManagementPolicy.class).prepare(actor.id);return true;}));
             assertThrows(BusinessException.class,()->ordinary.getBean(com.whatname.iam.service.department.DepartmentCollaboration.class).authenticateHr(null,"HR_MERGE"));
