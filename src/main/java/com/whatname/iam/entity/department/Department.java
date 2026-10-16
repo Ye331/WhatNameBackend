@@ -12,6 +12,7 @@ public class Department {
     private Long managerId;
     private Integer sortOrder;
     private Integer status;
+    private Long mergedIntoDeptId;
     private Long hrVersion;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -32,6 +33,8 @@ public class Department {
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
     public Integer getStatus() { return status; }
     public void setStatus(Integer status) { this.status = status; }
+    public Long getMergedIntoDeptId() { return mergedIntoDeptId; }
+    public void setMergedIntoDeptId(Long id) { this.mergedIntoDeptId = id; }
     public Long getHrVersion() { return hrVersion; }
     public void setHrVersion(Long hrVersion) { this.hrVersion = hrVersion; }
     public LocalDateTime getCreatedAt() { return createdAt; }

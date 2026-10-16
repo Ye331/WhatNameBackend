@@ -10,6 +10,7 @@
         <result column="manager_id" property="managerId"/>
         <result column="sort_order" property="sortOrder"/>
         <result column="status" property="status"/>
+        <result column="merged_into_dept_id" property="mergedIntoDeptId"/>
         <result column="hr_version" property="hrVersion"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
@@ -17,7 +18,7 @@
 
     <sql id="columns">
         d.id, d.parent_id, d.dept_code, d.dept_name, d.dept_path, d.manager_id,
-        d.sort_order, d.status, d.hr_version, d.created_at, d.updated_at
+        d.sort_order, d.status, d.merged_into_dept_id, d.hr_version, d.created_at, d.updated_at
     </sql>
 
     <select id="findById" resultMap="department">

@@ -144,6 +144,7 @@ CREATE TABLE `sys_dept` (
   `manager_id` BIGINT DEFAULT NULL COMMENT '部门经理用户ID',
   `sort_order` INT NOT NULL DEFAULT 0 COMMENT '排序',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1正常 0冻结',
+  `merged_into_dept_id` BIGINT DEFAULT NULL COMMENT '已合并去向，NULL未合并；status独立表示冻结',
   `hr_version` BIGINT NOT NULL DEFAULT 0 COMMENT '最后成功应用的HR部门事件版本',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -355,6 +356,7 @@ CREATE TABLE `sys_external_event` (
   `event_type` VARCHAR(64) NOT NULL COMMENT '事件类型：入职/资料/调岗/离职/部门/合并/OA决定',
   `event_version` BIGINT DEFAULT NULL COMMENT 'HR事件必须有正版本；OA无顺序版本时为空',
   `payload_digest` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '事件载荷SHA-256摘要，同号重发内容比对',
+  `claim_token` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL COMMENT '处理认领令牌；受控恢复换令牌隔离旧工作者',
   `target_type` VARCHAR(16) DEFAULT NULL COMMENT '目标类型：USER / DEPT',
   `target_ref` VARCHAR(64) DEFAULT NULL COMMENT '目标外部标识：SG号或部门编码',
   `processing_status` VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '处理阶段：APPLIED/PROCESSING/PENDING_RECOVERY/REJECTED',
@@ -592,5 +594,26 @@ BEGIN
   IF EXISTS (SELECT 1 FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE ma.api_id=OLD.id AND m.app_id<>NEW.app_id) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='API update would break application boundary';
   END IF;
+END$$
+DELIMITER ;
+
+ALTER TABLE sys_dept
+ ADD KEY idx_dept_merged_into (merged_into_dept_id),
+ ADD CONSTRAINT fk_dept_merged_into FOREIGN KEY (merged_into_dept_id) REFERENCES sys_dept(id);
+DELIMITER $$
+CREATE TRIGGER tr_dept_merge_self BEFORE UPDATE ON sys_dept FOR EACH ROW
+BEGIN
+ IF NEW.merged_into_dept_id = NEW.id THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Department cannot merge into itself';
+ END IF;
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER tr_dept_merge_insert BEFORE INSERT ON sys_dept FOR EACH ROW
+BEGIN
+ IF NEW.merged_into_dept_id IS NOT NULL THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='New department cannot start merged';
+ END IF;
 END$$
 DELIMITER ;
