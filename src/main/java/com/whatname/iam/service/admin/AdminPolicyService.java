@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import static com.whatname.iam.common.api.ErrorCode.*;
 
-/** M5 checks for A/B/C write services. Caller supplies a verified actor and performs M6 function checks. */
+/** 供 A/B/C 写入服务复用的 M5 校验；调用方须提供已验证的操作者，并执行 M6 功能权限检查。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class AdminPolicyService {
@@ -50,7 +50,7 @@ public class AdminPolicyService {
         rules.checkRole(state, actorId, roleId, role != null && role.roleType() == 2
                 && managementRoles.canDelegate(actorId, roleId));
     }
-    /** One snapshot and one ordered user-lock acquisition for single-user grants and queries. */
+    /** 单人授权和查询共用一次状态读取；需要加锁时，按用户 ID 顺序一次取得相关用户锁。 */
     public AdminState requireGrantContext(long actorId, long userId, Long roleId, boolean granting, boolean lock) {
         var state = loader.load(lock, actorId, userId);
         integrity.verify(state);
@@ -65,7 +65,7 @@ public class AdminPolicyService {
         }
         return state;
     }
-    /** One consistent read for scope-filtered batch results; caller owns the read transaction. */
+    /** 在调用方的读事务中一致读取批量查询所需的管理范围。 */
     public AdminState requireBatchReadContext(long actorId, List<Long> userIds) {
         var ids = LongStream.concat(LongStream.of(actorId), userIds.stream().mapToLong(Long::longValue)).distinct().toArray();
         var state = loader.load(false, ids);

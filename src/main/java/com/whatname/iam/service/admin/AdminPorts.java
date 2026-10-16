@@ -2,13 +2,13 @@ package com.whatname.iam.service.admin;
 
 import java.util.Set;
 
-/** Internal integration seams. Production implementations must join the calling transaction. */
+/** 内部协作接口；正式实现必须加入调用方事务。 */
 public final class AdminPorts {
     private AdminPorts() {}
     public interface Identity { long currentUserId(); }
     public interface Functions { void require(long actorId, String permission); }
     public interface Integrity {
-        /** Verify canonical signed records by these IDs, not the reduced projections themselves. */
+        /** 根据这些 ID 读取完整规范记录并验签，不能直接对精简字段投影验签。 */
         void verify(AdminState state);
         void sign(AdminState state, Set<Long> changedAdminIds);
     }

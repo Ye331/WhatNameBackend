@@ -174,7 +174,7 @@ class BatchGrantIT {
         var body = request(List.of(target(6, "CHECK")));
         switch (variant) {
             case "dryRun" -> body.put("dryRun", true);
-            // The application serializer intentionally emits Long as JSON strings; use Integer to send an actual JSON number.
+            // 应用序列化器会将 Long 输出为 JSON 字符串；此处用 Integer 发送真正的 JSON 数值。
             case "numericId" -> body.put("roleId", Math.toIntExact(id(100)));
             case "unknown" -> body.put("actorId", sid(1));
             case "empty" -> body.put("targets", List.of());
@@ -304,7 +304,7 @@ class BatchGrantIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
     }
 
-    // Catches caching submission-time authority or rolling back earlier committed items.
+    // 防止执行时沿用提交时的旧资格，或因后续失败回滚此前已提交的任务项。
     @ParameterizedTest @ValueSource(strings = {"REVOKE", "SHRINK"})
     void authorityChangeBetweenItemsPreservesCommittedSuccess(String change) throws Exception {
         insertUser(id(7), id(21), 1);
@@ -361,7 +361,7 @@ class BatchGrantIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_id=?", Long.class, id(7))).isZero();
     }
 
-    // Catches a global idempotency key or replay lookup that ignores the authenticated actor.
+    // 防止将幂等键错误地视为全局唯一，或在重放查询中忽略当前操作者。
     @Test void sameKeyIsIsolatedByInitiator() throws Exception {
         var body = request(List.of(target(6, "SHARED")));
         String first = accepted("shared-key", body);
@@ -380,13 +380,13 @@ class BatchGrantIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
     }
 
-    // Catches stale result scopes and counting/paginating before current scope filtering.
+    // 防止使用旧管理范围，或在按当前范围过滤之前统计数量和分页。
     @Test void queryUsesChangedScopeAndHidesBatchWhenNoTargetsRemainVisible() throws Exception {
         String batch = accepted("scope-change", request(List.of(target(3, "FIRST"), target(4, "SECOND"), target(6, "THIRD"))));
         runTasks();
         state.actor.set(id(2));
         assertThat(query(batch, 1, 1).get("total").asInt()).isEqualTo(3);
-        // Simulate trusted organization/appointment changes in this isolated fixture only.
+        // 仅在隔离测试数据中模拟可信的组织或任命变更。
         jdbc.update("UPDATE sys_admin SET dept_id=? WHERE user_id=?", id(22), id(2));
         var restricted = query(batch, 1, 1);
         assertThat(restricted.get("total").asInt()).isEqualTo(1);
@@ -402,7 +402,7 @@ class BatchGrantIT {
         assertThat(json.readTree(hidden.getResponse().getContentAsString()).get("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
     }
 
-    // Catches an early replay return that bypasses current write or view permission.
+    // 防止重放请求提前返回，绕过当前写权限或查看权限检查。
     @ParameterizedTest @ValueSource(strings = {"IAM_GRANTS_WRITE", "IAM_GRANTS_VIEW"})
     void replayRequiresCurrentFunctionPermissions(String permission) throws Exception {
         var body = request(List.of(target(6, "PERMISSIONS")));

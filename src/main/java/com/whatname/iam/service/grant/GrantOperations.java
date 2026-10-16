@@ -62,7 +62,7 @@ public class GrantOperations {
         var context = begin(actor, user, role, true, true, "IAM_GRANTS_WRITE");
         if (position && !dept.equals(context.authority().users().get(user).deptId())) fail(INVALID_ARGUMENT);
         if (expected != null) checkVersion(context.before(), expected);
-        // Use the database's unique-key collation for lookup as well as insertion.
+        // 查重与插入使用相同的数据库唯一键排序规则。
         var existing = mapper.selectSourceByKey(user, role, request.sourceType(), request.sourceRef());
         if (existing != null) {
             if (!Objects.equals(existing.sourceDeptId(), dept)) fail(IDEMPOTENCY_CONFLICT);
@@ -100,9 +100,9 @@ public class GrantOperations {
 
     private Context begin(long actor, long user, Long role, boolean granting, boolean lock, String permission) {
         if (actor <= 0) fail(INVALID_TOKEN);
-        // M5 locks admins -> departments -> roles -> delegation -> sorted actor/target users.
+        // M5 加锁顺序：管理员 → 部门 → 角色 → 委派清单 → 按 ID 排序的操作者与目标用户。
         var authority = policy.requireGrantContext(actor, user, role, granting, lock);
-        // M6 must read current facts after waiting for M5 locks, before any mutation (including self-revocation).
+        // 等待 M5 锁后，M6 必须读取当前事实；任何变更（包括自回收）都在检查通过后执行。
         functions.require(actor, permission);
         var before = load(user, lock);
         integrity.verify(before);

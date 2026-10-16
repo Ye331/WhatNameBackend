@@ -289,7 +289,7 @@ class GrantIT {
                     if ("VERIFY".equals(state.failure)) throw new BusinessException(INTEGRITY_FAILURE);
                 }
                 public void sign(GrantState facts) {
-                    // Deliberately non-cryptographic test evidence; never part of application artifacts.
+                    // 仅用于测试的非密码学签名替身，不会打入应用产物。
                     jdbc.update("INSERT INTO sys_data_signature(data_type,data_id,signature,key_id) VALUES('TEST_GRANT',?,?,?) ON DUPLICATE KEY UPDATE signature=?,key_id=?",
                             facts.userId(), "x".repeat(88), "test-v" + facts.grantRevision(), "x".repeat(88), "test-v" + facts.grantRevision());
                     if ("SIGN".equals(state.failure)) throw new BusinessException(INTEGRITY_FAILURE);

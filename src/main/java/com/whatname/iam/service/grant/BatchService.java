@@ -76,7 +76,7 @@ public class BatchService {
                 return new Submission(true, new Accepted(batch.id().toString(), "PENDING", items.size()));
             });
         } catch (DuplicateKeyException race) {
-            // A unique-key loser must read the winner in a fresh transaction, not its failed snapshot.
+            // 唯一键竞争失败后，必须开启新事务读取已成功提交的任务，不能沿用失败事务的旧快照。
             return read.execute(tx -> {
                 functions.require(actor, "IAM_GRANTS_WRITE");
                 var batch = mapper.byKey(actor, key);
@@ -117,7 +117,7 @@ public class BatchService {
             }
         }
         String status = batch.processingStatus();
-        // Completed facts remain authoritative even if the worker stopped before refreshing the header.
+        // 即使执行线程在更新汇总前停止，也以已提交的逐项结果判断完成状态。
         if (all.stream().noneMatch(i -> "PENDING".equals(i.processingStatus()))) {
             long applied = all.stream().filter(i -> "APPLIED".equals(i.processingStatus())).count();
             status = applied == all.size() ? "COMPLETED" : applied == 0 ? "FAILED" : "PARTIAL_SUCCESS";

@@ -16,7 +16,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import static com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE;
 
-/** First-stage dispatch only: no startup scan or automatic retry. */
+/** 仅实现第一阶段任务调度，不包含启动扫描或自动重试。 */
 @Service
 public class BatchWorker {
     private static final Logger log = LoggerFactory.getLogger(BatchWorker.class);
@@ -48,7 +48,7 @@ public class BatchWorker {
                 try {
                     transaction.executeWithoutResult(tx -> apply(batch, item.id()));
                 } catch (BusinessException failure) {
-                    // The failed business transaction has already rolled back, including any evidence writes.
+                    // 失败的业务事务及其中的证据写入已全部回滚，此处单独记录失败结果。
                     transaction.executeWithoutResult(tx -> {
                         var current = mapper.lockItem(item.id());
                         if (current != null && "PENDING".equals(current.processingStatus())) mapper.failed(item.id(), failure.errorCode().name());
@@ -57,7 +57,7 @@ public class BatchWorker {
             }
             transaction.executeWithoutResult(tx -> mapper.refresh(batchId));
         } catch (RuntimeException failure) {
-            // Preserve committed outcomes; uncertain/infrastructure failures remain inspectable, never retried here.
+            // 保留已提交结果；无法确认的异常或基础设施故障留下可查询的未完成项，此处不重试。
             log.warn("Batch {} stopped with unfinished work: {}", batchId, failure.getClass().getSimpleName());
         }
     }

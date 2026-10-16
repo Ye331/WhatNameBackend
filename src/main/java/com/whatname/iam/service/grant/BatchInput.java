@@ -8,7 +8,7 @@ import java.security.*;
 import java.util.*;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_ARGUMENT;
 
-/** Canonical input excludes transport ordering and identical duplicate targets. */
+/** 规范化输入，消除请求中目标排列顺序和完全重复目标的影响。 */
 record BatchInput(String operation, long roleId, List<Target> targets, String reason, String digest) {
     static BatchInput parse(String key, Request request) {
         if (key == null || !key.matches("[!-~]{1,128}") || request == null || Boolean.TRUE.equals(request.dryRun())) invalid();
