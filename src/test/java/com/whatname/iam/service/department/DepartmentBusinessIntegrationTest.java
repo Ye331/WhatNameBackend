@@ -24,6 +24,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.annotation.*;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -37,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @EnabledIfEnvironmentVariable(named="DEPARTMENT_DB_TEST",matches="true")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DepartmentBusinessIntegrationTest {
-    @Configuration(proxyBeanMethods=false)
+    @TestConfiguration(proxyBeanMethods=false)
     @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({DepartmentService.class,ExternalEventService.class,DepartmentController.class,
@@ -45,7 +46,7 @@ class DepartmentBusinessIntegrationTest {
     static class TestApplication {
         @Bean TestPort testPort(JdbcTemplate jdbc) { return new TestPort(jdbc); }
     }
-    @Configuration(proxyBeanMethods=false)
+    @TestConfiguration(proxyBeanMethods=false)
     @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({DepartmentService.class,ExternalEventService.class,DepartmentController.class,

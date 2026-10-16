@@ -46,6 +46,7 @@ public class UserService {
         final String phone=phoneHash;
         var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            security.prepareManagement(principal.userId());
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
             if(department!=null) requireScope(scope,department);
@@ -59,9 +60,10 @@ public class UserService {
     public UserView detail(String bearer,String userId) {
         long id=parseId(userId);var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            security.prepareManagement(principal.userId(),id);
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
-            UserAccount target=users.findById(id);
+            UserAccount target=users.lockById(id);
             if(target==null || !scope.contains(target.deptId)) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
             UserView view=view(target);
             security.audit("US02_DETAIL",actor.id,target.id,"SCOPED_READ");return view;
@@ -74,6 +76,7 @@ public class UserService {
         // Unrecoverable random secret is never returned and is never password history.
         try {
             return tx.execute(status->{
+                security.prepareManagement(principal.userId());
                 UserAccount actor=auth.requireCurrentSession(principal);
                 requireScope(scope(actor,"IAM_USERS_WRITE"),deptId);
                 if(users.lockEligibleDepartment(deptId)==null) throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -93,6 +96,7 @@ public class UserService {
     public StatusResult changeStatus(String bearer,String userId,Status input) {
         long id=parseId(userId);var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            security.prepareManagement(principal.userId(),id);
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_WRITE");
             UserAccount target=users.lockById(id);

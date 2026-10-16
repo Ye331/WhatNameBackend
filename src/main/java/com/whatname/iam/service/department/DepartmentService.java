@@ -22,8 +22,9 @@ public class DepartmentService {
         this.mapper=mapper; this.integration=integration; this.events=events;
     }
 
-    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    @Transactional(isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> tree(DepartmentCollaboration.Manager actor,boolean descendants) {
+        integration.prepareManagement(actor);
         List<Department> all=mapper.organization(); validateTree(all); integration.verifyOrganization(all);
         Set<Long> allowed=integration.scope(actor,"IAM_DEPTS_VIEW",all);
         List<Map<String,Object>> items=new ArrayList<>();
@@ -41,9 +42,10 @@ public class DepartmentService {
         return Map.of("items",items);
     }
 
-    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    @Transactional(isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> users(DepartmentCollaboration.Manager actor,long id,boolean descendants,int page,int size) {
         if(page<1 || page>1_000_000 || size<1 || size>500) fail(ErrorCode.INVALID_ARGUMENT);
+        integration.prepareManagement(actor);
         List<Department> all=mapper.organization(); validateTree(all); integration.verifyOrganization(all);
         Set<Long> allowed=integration.scope(actor,"IAM_USERS_VIEW",all);
         if(!allowed.contains(id)) fail(ErrorCode.OUT_OF_SCOPE);
@@ -130,6 +132,7 @@ public class DepartmentService {
     @Transactional(isolation=Isolation.SERIALIZABLE,rollbackFor=Exception.class,timeout=30)
     public Map<String,Object> freeze(DepartmentCollaboration.Manager actor,long id,boolean freeze,String reason) {
         if(reason==null || reason.isBlank() || reason.length()>512) fail(ErrorCode.INVALID_ARGUMENT);
+        integration.prepareManagement(actor);
         List<Department> all=locked();
         if(!integration.scope(actor,"IAM_DEPTS_FREEZE",all).contains(id)) fail(ErrorCode.OUT_OF_SCOPE);
         Department d=require(index(all).get(id)); active(d);

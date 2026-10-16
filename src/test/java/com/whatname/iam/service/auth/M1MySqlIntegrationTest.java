@@ -24,6 +24,7 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.*;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -497,12 +498,13 @@ class M1MySqlIntegrationTest {
         assertTrue(result.hasNonNull("requestId"));return result;
     }
 
-    @Configuration(proxyBeanMethods=false) @EnableAutoConfiguration
-    @ComponentScan(basePackages="com.whatname.iam",excludeFilters=@ComponentScan.Filter(type=FilterType.REGEX,
-            pattern={".*Test.*","com.whatname.iam.IamApplication"}))
+    @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
+    @ComponentScan(basePackages="com.whatname.iam",excludeFilters={@ComponentScan.Filter(type=FilterType.REGEX,
+            pattern={".*Test.*","com.whatname.iam.IamApplication"}),
+            @ComponentScan.Filter(type=FilterType.ANNOTATION,classes=TestConfiguration.class)})
     public static class TestBootstrap {}
 
-    @Configuration(proxyBeanMethods=false) @Profile("task05-test")
+    @TestConfiguration(proxyBeanMethods=false) @Profile("task05-test")
     public static class TestWiring {
         @Bean @Primary TestGateway task05Gateway(JdbcTemplate db){return new TestGateway(db);}
         @Bean @Primary TestSms task05Sms(){return new TestSms();}

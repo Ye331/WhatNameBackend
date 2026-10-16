@@ -12,7 +12,11 @@ import java.util.Set;
  * Management authentication includes M6 function permission and current session/frozen-actor checks.
  */
 public interface DepartmentCollaboration {
-    record Manager(String actorId) { }
+    record Manager(String actorId, com.whatname.iam.common.security.JwtTokenService.SessionPrincipal session) {
+        public Manager(String actorId) { this(actorId,null); }
+    }
+    /** Must precede organization/user reads and locks in every management transaction. */
+    default void prepareManagement(Manager actor) { }
     Manager authenticateManager(HttpServletRequest request, String permission);
     TrustedEventContext authenticateHr(HttpServletRequest request, String eventType);
     void verifyTrustedEvent(TrustedEventContext context, String eventType);

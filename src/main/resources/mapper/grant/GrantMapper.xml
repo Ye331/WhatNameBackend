@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.whatname.iam.mapper.grant.GrantMapper">
+    <select id="selectRevision" resultType="java.lang.Long">
+        SELECT grant_revision FROM sys_user WHERE id=#{userId}
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <sql id="sourceColumns">id, user_id, role_id, source_type, source_ref, source_dept_id,
+        status, granted_by, revoked_by, revoked_at, created_at</sql>
+    <select id="selectSources" resultType="com.whatname.iam.entity.grant.GrantData$Source">
+        SELECT <include refid="sourceColumns"/> FROM sys_user_role_source WHERE user_id=#{userId} ORDER BY id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectEffectiveRoles" resultType="com.whatname.iam.entity.grant.GrantData$EffectiveRole">
+        SELECT id, user_id, role_id, granted_by, granted_at FROM sys_user_role WHERE user_id=#{userId} ORDER BY role_id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectSourceByKey" resultType="com.whatname.iam.entity.grant.GrantData$Source">
+        SELECT <include refid="sourceColumns"/> FROM sys_user_role_source
+        WHERE user_id=#{userId} AND role_id=#{roleId} AND source_type=#{type} AND source_ref=#{ref} FOR UPDATE
+    </select>
+    <insert id="insertSource">
+        INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref,source_dept_id,status,granted_by)
+        VALUES(#{userId},#{roleId},#{type},#{ref},#{deptId},1,#{actorId})
+    </insert>
+    <insert id="insertEffectiveRole">
+        INSERT INTO sys_user_role(user_id,role_id,granted_by) VALUES(#{userId},#{roleId},#{actorId})
+    </insert>
+    <update id="revokeSource">
+        UPDATE sys_user_role_source SET status=0,revoked_by=#{actorId},revoked_at=CURRENT_TIMESTAMP
+        WHERE id=#{sourceId} AND user_id=#{userId} AND role_id=#{roleId} AND status=1
+    </update>
+    <delete id="deleteEffectiveRole">
+        DELETE FROM sys_user_role WHERE user_id=#{userId} AND role_id=#{roleId}
+    </delete>
+    <update id="advanceRevision">
+        UPDATE sys_user SET grant_revision=grant_revision+1
+        WHERE id=#{userId} AND grant_revision=#{expected} AND grant_revision &lt; 9223372036854775807
+    </update>
+</mapper>

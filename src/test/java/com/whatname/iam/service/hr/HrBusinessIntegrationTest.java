@@ -30,6 +30,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.annotation.*;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.*;
@@ -39,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @EnabledIfEnvironmentVariable(named="TASK07_DB_TEST",matches="true")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class HrBusinessIntegrationTest {
-    @Configuration(proxyBeanMethods=false) @EnableAutoConfiguration
+    @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.auth","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
             SensitiveDataCodec.class,PasswordHasher.class,PasswordPolicy.class,JwtTokenService.class,
@@ -49,7 +50,7 @@ class HrBusinessIntegrationTest {
         @Bean(name="hrClock") MutableClock hrClock() { return new MutableClock(); }
         @Bean SmsSender sms() { return (phone,purpose,code)->{throw new BusinessException(ErrorCode.SMS_DELIVERY_UNAVAILABLE);}; }
     }
-    @Configuration(proxyBeanMethods=false) @EnableAutoConfiguration
+    @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
             SensitiveDataCodec.class,PasswordHasher.class,GlobalExceptionHandler.class,

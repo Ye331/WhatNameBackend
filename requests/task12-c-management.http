@@ -1,0 +1,36 @@
+# Real C M5 management adapter. D dependencies must be supplied; default production rejects.
+# Fill IDs/tokens only in private local variables. No test identity headers exist in production.
+@baseUrl = http://localhost:8080/api/v1
+@accessToken = {{privateAccessToken}}
+@targetUserId = {{privateTargetUserId}}
+@targetDeptId = {{privateTargetDeptId}}
+
+### US01: items and total must both be filtered by current real C appointment scope
+GET {{baseUrl}}/users?page=1&pageSize=20&status=1&source=2
+Authorization: Bearer {{accessToken}}
+
+### US02: hidden/out-of-scope target returns 404
+GET {{baseUrl}}/users/{{targetUserId}}
+Authorization: Bearer {{accessToken}}
+
+### US04: signature/audit failure must roll back status and session version
+PATCH {{baseUrl}}/users/{{targetUserId}}/status
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"status":2,"reason":"Task12 management integration demonstration"}
+
+### DP01: session and real C scope are rechecked in the Service transaction
+GET {{baseUrl}}/departments?includeDescendants=true
+Authorization: Bearer {{accessToken}}
+
+### DP02: subtree is intersected with current scope before counting/paging
+GET {{baseUrl}}/departments/{{targetDeptId}}/users?includeDescendants=true&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### DP03: C management locks precede organization locks; requires an unfrozen eligible actor
+POST {{baseUrl}}/departments/{{targetDeptId}}/freeze
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"reason":"Task12 controlled freeze demonstration"}

@@ -16,7 +16,13 @@ import org.springframework.context.annotation.Configuration;
 public class DepartmentIntegrationConfiguration {
     @Bean
     @ConditionalOnMissingBean(DepartmentCollaboration.class)
-    DepartmentCollaboration unavailableDepartmentCollaboration() {
+    DepartmentCollaboration unavailableDepartmentCollaboration(
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.admin.AManagementPolicy> policy,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.common.security.JwtTokenService> jwt,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.auth.AuthService> auth,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.common.security.ManagementDataSecurity> data) {
+        if(policy.getIfAvailable()!=null && jwt.getIfAvailable()!=null && auth.getIfAvailable()!=null && data.getIfAvailable()!=null)
+            return new CBackedDepartmentCollaboration(policy.getObject(),jwt.getObject(),auth.getObject(),data.getObject());
         return new DepartmentCollaboration() {
             private BusinessException unavailable() { return new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE); }
             public Manager authenticateManager(HttpServletRequest r, String p) { throw unavailable(); }
