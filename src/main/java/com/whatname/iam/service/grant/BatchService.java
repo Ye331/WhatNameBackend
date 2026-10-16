@@ -32,8 +32,13 @@ public class BatchService {
     public BatchService(BatchMapper mapper, AdminPolicyService policy, AdminRules rules, AdminPorts.Identity identity,
                         AdminPorts.Functions functions, BatchWorker worker, @Qualifier("grantBatchExecutor") Executor executor,
                         PlatformTransactionManager manager) {
-        this.mapper = mapper; this.policy = policy; this.rules = rules; this.identity = identity;
-        this.functions = functions; this.worker = worker; this.executor = executor;
+        this.mapper = mapper;
+        this.policy = policy;
+        this.rules = rules;
+        this.identity = identity;
+        this.functions = functions;
+        this.worker = worker;
+        this.executor = executor;
         write = new TransactionTemplate(manager);
         write.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         read = new TransactionTemplate(manager);
@@ -81,7 +86,8 @@ public class BatchService {
         }
     }
     public Result result(String batchId, int page, int pageSize) {
-        long batch = BatchInput.id(batchId), actor = actor();
+        long batch = BatchInput.id(batchId);
+        long actor = actor();
         if (page < 1 || pageSize < 1 || pageSize > 500) throw new BusinessException(INVALID_ARGUMENT);
         return read.execute(tx -> view(actor, batch, page, pageSize));
     }

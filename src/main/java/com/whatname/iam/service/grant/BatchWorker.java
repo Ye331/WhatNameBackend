@@ -26,7 +26,10 @@ public class BatchWorker {
     private final ObjectMapper json;
     private final TransactionTemplate transaction;
     public BatchWorker(BatchMapper mapper, GrantOperations grants, GrantMapper grantMapper, ObjectMapper json, PlatformTransactionManager manager) {
-        this.mapper = mapper; this.grants = grants; this.grantMapper = grantMapper; this.json = json;
+        this.mapper = mapper;
+        this.grants = grants;
+        this.grantMapper = grantMapper;
+        this.json = json;
         this.transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -66,12 +69,15 @@ public class BatchWorker {
         if ("GRANT".equals(batch.operation())) {
             var applied = grants.grant(batch.actorUserId(), new GrantRequest(item.userId().toString(), batch.roleId().toString(),
                     item.sourceType(), item.sourceRef(), item.sourceDeptId() == null ? null : item.sourceDeptId().toString(), batch.reason(), null));
-            source = Long.parseLong(applied.grantSourceId()); result = applied;
+            source = Long.parseLong(applied.grantSourceId());
+            result = applied;
         } else if ("REVOKE".equals(batch.operation())) {
             source = item.grantSourceId();
             result = grants.revoke(batch.actorUserId(), new RevokeRequest(item.userId().toString(), batch.roleId().toString(),
                     Long.toString(source), batch.reason(), null));
-        } else throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+        } else {
+            throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+        }
         try {
             ObjectNode evidence = json.valueToTree(result);
             if (result instanceof Revoked) {
@@ -80,6 +86,8 @@ public class BatchWorker {
                 evidence.put("permissionRevision", "v" + revision);
             }
             if (mapper.applied(itemId, source, json.writeValueAsString(evidence)) != 1) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
-        } catch (JsonProcessingException e) { throw new IllegalStateException("Cannot serialize batch result", e); }
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialize batch result", e);
+        }
     }
 }

@@ -21,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -261,13 +262,18 @@ class GrantIT {
     static class TestState {
         final ThreadLocal<Long> actor = ThreadLocal.withInitial(() -> 0L);
         volatile String failure;
+        volatile String deniedPermission;
+        volatile java.util.function.LongConsumer afterGrantCommit;
     }
     @TestConfiguration(proxyBeanMethods = false)
     static class Integrations {
         @Bean TestState grantTestState() { return new TestState(); }
         @Bean @Primary AdminPorts.Identity identity(TestState state) { return state.actor::get; }
-        @Bean @Primary AdminPorts.Functions functions() {
-            return (actor, permission) -> assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+        @Bean @Primary AdminPorts.Functions functions(TestState state) {
+            return (actor, permission) -> {
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+                if (permission.equals(state.deniedPermission)) throw new BusinessException(PERMISSION_DENIED);
+            };
         }
         @Bean @Primary AdminPorts.Integrity testAdminIntegrity() {
             return new AdminPorts.Integrity() {
@@ -297,6 +303,12 @@ class GrantIT {
                         change.sourceId(), change.before().grantRevision(), change.after().grantRevision(),
                         change.after().sources().stream().filter(s -> s.status() == 1).count());
                 if ("AUDIT".equals(state.failure)) throw new BusinessException(AUDIT_UNAVAILABLE);
+                var afterCommit = state.afterGrantCommit;
+                if (afterCommit != null) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override public void afterCommit() { afterCommit.accept(change.userId()); }
+                    });
+                }
             };
         }
     }
