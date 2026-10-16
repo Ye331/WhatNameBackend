@@ -8,6 +8,7 @@ public class ApiEntity {
     private String apiPath;
     private String httpMethod;
     private Integer status;
+    private String canonicalPath;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -23,4 +24,6 @@ public class ApiEntity {
     public void setHttpMethod(String httpMethod) { this.httpMethod = httpMethod; }
     public Integer getStatus() { return status; }
     public void setStatus(Integer status) { this.status = status; }
+    public String getCanonicalPath() { return canonicalPath; }
+    public void setCanonicalPath(String canonicalPath) { this.canonicalPath = canonicalPath; }
 }

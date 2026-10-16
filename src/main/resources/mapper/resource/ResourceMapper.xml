@@ -32,6 +32,13 @@
         WHERE id = #{id}
     </select>
 
+    <select id="lockApplicationById" resultType="com.whatname.iam.entity.resource.ApplicationEntity">
+        SELECT id, app_code, app_name, app_desc, status
+        FROM sys_application
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
     <update id="updateApplication" parameterType="com.whatname.iam.entity.resource.ApplicationEntity">
         UPDATE sys_application
         <set>
@@ -100,12 +107,12 @@
     </select>
 
     <insert id="insertApi" parameterType="com.whatname.iam.entity.resource.ApiEntity" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO sys_api(app_id, api_code, api_name, api_path, http_method, status)
-        VALUES(#{appId}, #{apiCode}, #{apiName}, #{apiPath}, #{httpMethod}, #{status})
+            INSERT INTO sys_api(app_id, api_code, api_name, api_path, canonical_path, http_method, status)
+            VALUES(#{appId}, #{apiCode}, #{apiName}, #{apiPath}, #{canonicalPath}, #{httpMethod}, #{status})
     </insert>
 
     <select id="findApiById" resultType="com.whatname.iam.entity.resource.ApiEntity">
-        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        SELECT id, app_id, api_code, api_name, api_path, http_method, canonical_path, status
         FROM sys_api
         WHERE id = #{id}
     </select>
@@ -122,7 +129,7 @@
     </update>
 
     <select id="listApisByAppAndMethod" resultType="com.whatname.iam.entity.resource.ApiEntity">
-        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        SELECT id, app_id, api_code, api_name, api_path, http_method, canonical_path, status
         FROM sys_api
         WHERE app_id = #{appId}
           AND http_method = #{httpMethod}
@@ -164,7 +171,7 @@
     </select>
 
     <select id="listApisByIds" resultType="com.whatname.iam.entity.resource.ApiEntity">
-        SELECT id, app_id, api_code, api_name, api_path, http_method, status
+        SELECT id, app_id, api_code, api_name, api_path, http_method, canonical_path, status
         FROM sys_api
         WHERE id IN
         <foreach collection="apiIds" item="apiId" open="(" separator="," close=")">

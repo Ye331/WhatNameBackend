@@ -17,6 +17,8 @@ public interface ResourceMapper {
 
     ApplicationEntity findApplicationById(@Param("id") long id);
 
+    ApplicationEntity lockApplicationById(@Param("id") long id);
+
     int updateApplication(ApplicationEntity entity);
 
     List<MenuEntity> listMenusByAppId(@Param("appId") long appId);

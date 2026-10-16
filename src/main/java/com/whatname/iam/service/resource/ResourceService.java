@@ -105,7 +105,7 @@ public class ResourceService {
 
     @Transactional
     public CreateMenuResult createMenu(long appId, CreateMenuRequest request) {
-        requireApplication(appId);
+        lockApplication(appId);
         int menuType = requireMenuType(request.getMenuType());
         Long parentId = request.getParentId();
         if (parentId < 0) {
@@ -137,6 +137,8 @@ public class ResourceService {
     @Transactional
     public UpdateMenuResult updateMenu(long menuId, UpdateMenuRequest request) {
         MenuEntity existing = requireMenu(menuId);
+        lockApplication(existing.getAppId());
+        existing = requireMenu(menuId);
         if (request.getStatus() != null && request.getStatus() != 0 && request.getStatus() != 1) {
             throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         }
@@ -184,9 +186,12 @@ public class ResourceService {
 
     @Transactional
     public CreateApiResult createApi(long appId, CreateApiRequest request) {
-        requireApplication(appId);
+        // serialize API creation per-application to avoid canonicalization race
+        lockApplication(appId);
         String method = normalizeMethod(request.getHttpMethod(), false);
         String apiPath = RouteTemplateUtils.normalizeTemplate(request.getApiPath());
+        String canonical = RouteTemplateUtils.canonicalTemplate(apiPath);
+        // pre-check using canonical comparison
         validateTemplateConflict(appId, method, apiPath, null);
 
         ApiEntity entity = new ApiEntity();
@@ -194,9 +199,15 @@ public class ResourceService {
         entity.setApiCode(request.getApiCode().trim().toUpperCase(Locale.ROOT));
         entity.setApiName(request.getApiName().trim());
         entity.setApiPath(apiPath);
+        entity.setCanonicalPath(canonical);
         entity.setHttpMethod(method);
         entity.setStatus(1);
-        mapper.insertApi(entity);
+        try {
+            mapper.insertApi(entity);
+        } catch (org.springframework.dao.DuplicateKeyException ex) {
+            // another concurrent request inserted an equivalent canonical path
+            throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
+        }
         return new CreateApiResult(entity.getId(), entity.getApiPath(), entity.getHttpMethod(), entity.getStatus());
     }
 
@@ -272,6 +283,14 @@ public class ResourceService {
 
     private ApplicationEntity requireApplication(long appId) {
         ApplicationEntity entity = mapper.findApplicationById(appId);
+        if (entity == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        return entity;
+    }
+
+    private ApplicationEntity lockApplication(long appId) {
+        ApplicationEntity entity = mapper.lockApplicationById(appId);
         if (entity == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
