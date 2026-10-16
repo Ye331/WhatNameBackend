@@ -20,7 +20,9 @@ public interface UserAccountMapper {
     Long lockEligibleDepartment(@Param("id") long id);
     List<UserAccount> list(@Param("scope") Set<Long> scope,@Param("deptId") Long deptId,
                            @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,
+                           @Param("accountStatus") Integer accountStatus,@Param("source") Integer source,
                            @Param("offset") long offset,@Param("limit") int limit);
     int count(@Param("scope") Set<Long> scope,@Param("deptId") Long deptId,
-              @Param("keyword") String keyword,@Param("phoneHash") String phoneHash);
+              @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,
+              @Param("accountStatus") Integer accountStatus,@Param("source") Integer source);
 }

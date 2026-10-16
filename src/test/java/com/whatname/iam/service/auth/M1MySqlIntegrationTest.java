@@ -169,7 +169,7 @@ class M1MySqlIntegrationTest {
         String code=send(u,Purpose.RESET_PASSWORD);
         http("POST","/auth/password/reset",Map.of("phone",phone(u),"code",code,"newPassword",NEXT),null,200);
         assertEquals(2,mapper.findById(u.id).sessionVersion);expect(ErrorCode.INVALID_CREDENTIALS,()->login(u,ORIGINAL));
-        expect(ErrorCode.INVALID_TOKEN,()->users.list(old,null,null,1,20));
+        expect(ErrorCode.INVALID_TOKEN,()->users.list(old,null,null,null,null,1,20));
         assertNotNull(login(u,NEXT));
         http("POST","/auth/logout",null,old,200); // old sv may still revoke only itself
     }
@@ -315,8 +315,83 @@ class M1MySqlIntegrationTest {
         http("GET","/users/"+inside.id,null,adminToken,200);http("GET","/users/"+outside.id,null,adminToken,404);
         http("GET","/users?deptId="+outsideDept,null,adminToken,403);
         gateway.denyFunction=true;http("GET","/users?adminId="+admin.id,null,adminToken,403);gateway.denyFunction=false;
-        var exact=users.list(adminToken,phone(inside),null,1,20);assertEquals(1,exact.total());assertEquals(inside.id.toString(),exact.items().getFirst().userId());
+        var exact=users.list(adminToken,phone(inside),null,null,null,1,20);assertEquals(1,exact.total());assertEquals(inside.id.toString(),exact.items().getFirst().userId());
         http("GET","/users?pageSize=501",null,adminToken,400);
+    }
+
+    @Test void statusSourceAndDepartmentFiltersShareScopeCountAndPaginationOverHttp() throws Exception {
+        String keyword=PREFIX+"matrix";
+        List<UserAccount> matrix=new ArrayList<>();
+        for(int source=1;source<=3;source++) for(int state=1;state<=3;state++) {
+            matrix.add(seed("matrix",1,state,allowedDept,source));
+            seed("matrix",1,state,outsideDept,source);
+            seed("matrix",1,state,frozenDept,source);
+        }
+        String base="/users?keyword="+keyword;
+        JsonNode all=http("GET",base,null,adminToken,200);
+        assertEquals(18,all.at("/data/total").asInt());assertEquals(18,all.at("/data/items").size());
+        for(int source=1;source<=3;source++) for(int state=1;state<=3;state++) {
+            JsonNode byStatus=http("GET",base+"&status="+state,null,adminToken,200);
+            assertEquals(6,byStatus.at("/data/total").asInt());
+            for(JsonNode item:byStatus.at("/data/items")) assertEquals(state,item.path("status").asInt());
+            JsonNode bySource=http("GET",base+"&source="+source,null,adminToken,200);
+            assertEquals(6,bySource.at("/data/total").asInt());
+            for(JsonNode item:bySource.at("/data/items")) assertEquals(source,item.path("source").asInt());
+            String query=base+"&status="+state+"&source="+source;
+            JsonNode first=http("GET",query+"&pageSize=1",null,adminToken,200);
+            JsonNode second=http("GET",query+"&pageSize=1&page=2",null,adminToken,200);
+            assertEquals(2,first.at("/data/total").asInt());assertEquals(2,second.at("/data/total").asInt());
+            assertEquals(1,first.at("/data/items").size());assertEquals(1,second.at("/data/items").size());
+            assertNotEquals(first.at("/data/items/0/userId"),second.at("/data/items/0/userId"));
+            JsonNode exact=http("GET",query+"&deptId="+allowedDept,null,adminToken,200);
+            assertEquals(1,exact.at("/data/total").asInt());assertEquals(1,exact.at("/data/items").size());
+            final int expectedSource=source,expectedState=state;
+            UserAccount expected=matrix.stream().filter(u->u.source==expectedSource && u.status==expectedState).findFirst().orElseThrow();
+            assertEquals(expected.id.toString(),exact.at("/data/items/0/userId").asText());
+        }
+        JsonNode last=http("GET",base+"&page=1000000&pageSize=500",null,adminToken,200);
+        assertEquals(18,last.at("/data/total").asInt());assertEquals(0,last.at("/data/items").size());
+        JsonNode empty=http("GET",base+"absent&status=3&source=1&deptId="+allowedDept,null,adminToken,200);
+        assertEquals(0,empty.at("/data/total").asInt());assertEquals(0,empty.at("/data/items").size());
+    }
+
+    @Test void filteredSearchNeverBypassesFunctionScopeOrCurrentSessionOverHttp() throws Exception {
+        UserAccount inside=seed("filterguard",1,2,allowedDept,1),outside=seed("filterguard",1,2,outsideDept,1);
+        // An out-of-scope OR phone match must neither count nor decrypt this identity.
+        db.update("UPDATE sys_user SET real_name_ciphertext='unreadable-test-only' WHERE id=?",outside.id);
+        String query="/users?status=2&source=1&keyword="+phone(outside);
+        JsonNode hidden=http("GET",query,null,adminToken,200);
+        assertEquals(0,hidden.at("/data/total").asInt());assertEquals(0,hidden.at("/data/items").size());
+        http("GET",query+"&deptId="+outsideDept,null,adminToken,403);
+        JsonNode found=http("GET","/users?status=2&source=1&deptId="+allowedDept+"&keyword="+inside.employeeNo,null,adminToken,200);
+        assertEquals(1,found.at("/data/total").asInt());assertEquals(inside.id.toString(),found.at("/data/items/0/userId").asText());
+        gateway.denyFunction=true;http("GET",query,null,adminToken,403);gateway.denyFunction=false;
+        gateway.managers.put(admin.id,Set.of());http("GET",query,null,adminToken,403);
+        gateway.managers.put(admin.id,Set.of(allowedDept));
+        http("GET",query,null,null,401);
+        db.update("UPDATE sys_user SET session_version=session_version+1 WHERE id=?",admin.id);
+        http("GET",query,null,adminToken,401);
+    }
+
+    @Test void invalidFilterEnumsTypesAndPageBoundsReturnUnified400OverHttp() throws Exception {
+        for(String query:List.of("status=0","status=4","status=-1","status=ACTIVE","status=1.5","status=2147483648",
+                "source=0","source=4","source=-1","source=HR","source=1.5","source=2147483648",
+                "page=0","page=1000001","page=2147483647","page=2147483648","page=1.5","page=no",
+                "pageSize=0","pageSize=501","pageSize=no","deptId=0")) {
+            assertEquals("INVALID_ARGUMENT",http("GET","/users?"+query,null,adminToken,400).path("code").asText());
+        }
+    }
+
+    @Test void passwordPolicyFailuresExpose422AndKeepProofAndAccountUnchangedOverHttp() throws Exception {
+        for(boolean initialize:List.of(true,false)) {
+            UserAccount u=seed("policyhttp",initialize?0:1,1,allowedDept,2);
+            String proof=send(u,initialize?Purpose.SET_PASSWORD:Purpose.RESET_PASSWORD);
+            JsonNode result=http("POST","/auth/password/"+(initialize?"initialize":"reset"),
+                    Map.of("phone",phone(u),"code",proof,"newPassword","short"),null,422);
+            assertEquals("BUSINESS_RULE_VIOLATION",result.path("code").asText());
+            assertEquals(u.passwordHash,mapper.findById(u.id).passwordHash);assertEquals(1,mapper.findById(u.id).sessionVersion);
+            assertNull(db.queryForObject("SELECT consumed_at FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC LIMIT 1",java.sql.Timestamp.class,u.phoneHash));
+        }
     }
 
     @Test void temporaryPauseResumeKeepsGrantsAndNeverRevivesOldJwtOverHttp() throws Exception {

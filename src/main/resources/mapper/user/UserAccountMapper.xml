@@ -35,6 +35,8 @@
         dept_id IN <foreach collection="scope" item="dept" open="(" separator="," close=")">#{dept}</foreach>
       </when><otherwise>1=0</otherwise></choose>
       <if test="deptId != null">AND dept_id=#{deptId}</if>
+      <if test="accountStatus != null">AND status=#{accountStatus}</if>
+      <if test="source != null">AND source=#{source}</if>
       <if test="keyword != null">AND (LOCATE(#{keyword},username)&gt;0 OR LOCATE(#{keyword},employee_no)&gt;0
         <if test="phoneHash != null">OR phone_hash=#{phoneHash}</if>)</if>
     </where>

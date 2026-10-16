@@ -35,8 +35,10 @@ public class UserService {
     public record Created(String userId,String username,int source,String phoneMasked,String deptId,int status) {}
     public record StatusResult(String userId,int status) {}
 
-    public PageResponse<UserView> list(String bearer,String keyword,String deptId,int page,int pageSize) {
-        if(page<1 || pageSize<1 || pageSize>500 || (keyword!=null && keyword.length()>64)) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+    public PageResponse<UserView> list(String bearer,String keyword,String deptId,Integer accountStatus,Integer source,int page,int pageSize) {
+        if(page<1 || page>1_000_000 || pageSize<1 || pageSize>500 || (keyword!=null && keyword.length()>64)
+                || (accountStatus!=null && (accountStatus<1 || accountStatus>3))
+                || (source!=null && (source<1 || source>3))) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         Long department=deptId==null?null:parseId(deptId);
         String term=keyword==null || keyword.isBlank()?null:keyword.strip();
         String phoneHash=null;
@@ -47,8 +49,8 @@ public class UserService {
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
             if(department!=null) requireScope(scope,department);
-            int count=users.count(scope,department,term,phone);
-            List<UserView> items=users.list(scope,department,term,phone,(long)(page-1)*pageSize,pageSize).stream().map(this::view).toList();
+            int count=users.count(scope,department,term,phone,accountStatus,source);
+            List<UserView> items=users.list(scope,department,term,phone,accountStatus,source,((long)page-1)*pageSize,pageSize).stream().map(this::view).toList();
             security.audit("US01_LIST",actor.id,null,"SCOPED_READ");
             return new PageResponse<>(items,page,pageSize,count);
         });

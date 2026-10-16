@@ -14,8 +14,9 @@ public class UserController {
     @GetMapping
     public ApiResponse<PageResponse<UserService.UserView>> list(@RequestHeader(value="Authorization",required=false) String bearer,
         @RequestParam(required=false) String keyword,@RequestParam(required=false) String deptId,
+        @RequestParam(required=false) Integer status,@RequestParam(required=false) Integer source,
         @RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize) {
-        return ApiResponse.ok(users.list(bearer,keyword,deptId,page,pageSize));
+        return ApiResponse.ok(users.list(bearer,keyword,deptId,status,source,page,pageSize));
     }
     @GetMapping("/{userId}")
     public ApiResponse<UserService.UserView> detail(@RequestHeader(value="Authorization",required=false) String bearer,@PathVariable String userId) {
