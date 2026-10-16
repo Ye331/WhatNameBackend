@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.whatname.iam.mapper.admin.AdminMapper">
+    <!-- Fixed table/key order is shared by every M5 write and by AdminPolicyService. -->
+    <select id="selectAppointments" resultType="com.whatname.iam.entity.admin.AdminData$Appointment">
+        SELECT user_id, admin_level, dept_id, status, delegable_revision, appointed_by
+        FROM sys_admin ORDER BY user_id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectDepartments" resultType="com.whatname.iam.entity.admin.AdminData$Department">
+        SELECT id, parent_id, status FROM sys_dept ORDER BY id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectRoles" resultType="com.whatname.iam.entity.admin.AdminData$Role">
+        SELECT id, role_type, status FROM sys_role ORDER BY id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectDelegations" resultType="com.whatname.iam.entity.admin.AdminData$Delegation">
+        SELECT admin_user_id, role_id, configured_by FROM sys_admin_delegable_role ORDER BY admin_user_id, role_id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectUsers" resultType="com.whatname.iam.entity.admin.AdminData$User">
+        SELECT id, dept_id, status FROM sys_user
+        WHERE id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY id
+        <if test="lock">FOR UPDATE</if>
+    </select>
+    <insert id="insertAppointment">
+        INSERT INTO sys_admin(user_id, admin_level, dept_id, appointed_by, status, delegable_revision)
+        VALUES(#{userId}, #{level}, #{deptId}, #{actorId}, 1, 1)
+    </insert>
+    <update id="reactivate">
+        UPDATE sys_admin SET admin_level=#{level}, dept_id=#{deptId}, appointed_by=#{actorId},
+            appointed_at=CURRENT_TIMESTAMP, status=1
+        WHERE user_id=#{userId} AND status=0
+    </update>
+    <update id="revoke">
+        UPDATE sys_admin SET status=0 WHERE user_id=#{userId} AND status=1
+    </update>
+    <delete id="deleteDelegations">
+        DELETE FROM sys_admin_delegable_role WHERE admin_user_id=#{userId}
+    </delete>
+    <delete id="deleteDelegation">
+        DELETE FROM sys_admin_delegable_role WHERE admin_user_id=#{userId} AND role_id=#{roleId}
+    </delete>
+    <insert id="insertDelegation">
+        INSERT INTO sys_admin_delegable_role(admin_user_id, role_id, configured_by)
+        VALUES(#{userId}, #{roleId}, #{actorId})
+    </insert>
+    <update id="advanceRevision">
+        UPDATE sys_admin SET delegable_revision=delegable_revision+1
+        WHERE user_id=#{userId} AND delegable_revision=#{expected} AND delegable_revision &lt; 2147483647
+    </update>
+</mapper>
