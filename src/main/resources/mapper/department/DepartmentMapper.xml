@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.whatname.iam.mapper.department.DepartmentMapper">
+    <resultMap id="department" type="com.whatname.iam.entity.department.Department">
+        <id column="id" property="id"/>
+        <result column="parent_id" property="parentId"/>
+        <result column="dept_code" property="deptCode"/>
+        <result column="dept_name" property="deptName"/>
+        <result column="dept_path" property="deptPath"/>
+        <result column="manager_id" property="managerId"/>
+        <result column="sort_order" property="sortOrder"/>
+        <result column="status" property="status"/>
+        <result column="hr_version" property="hrVersion"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="columns">
+        d.id, d.parent_id, d.dept_code, d.dept_name, d.dept_path, d.manager_id,
+        d.sort_order, d.status, d.hr_version, d.created_at, d.updated_at
+    </sql>
+
+    <select id="findById" resultMap="department">
+        SELECT <include refid="columns"/> FROM sys_dept d WHERE d.id = #{id}
+    </select>
+
+    <select id="findByCode" resultMap="department">
+        SELECT <include refid="columns"/> FROM sys_dept d WHERE d.dept_code = #{deptCode}
+    </select>
+
+    <select id="findChildrenByParentId" resultMap="department">
+        SELECT <include refid="columns"/> FROM sys_dept d WHERE d.parent_id = #{parentId}
+        ORDER BY d.sort_order, d.id
+    </select>
+
+    <select id="findSubtreeById" resultMap="department">
+        SELECT <include refid="columns"/>
+        FROM sys_dept d
+        JOIN sys_dept root ON root.id = #{id}
+        WHERE d.dept_path LIKE CONCAT(root.dept_path, '%')
+        ORDER BY d.sort_order, d.id
+    </select>
+</mapper>
