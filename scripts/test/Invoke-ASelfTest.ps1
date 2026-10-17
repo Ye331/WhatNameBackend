@@ -22,7 +22,6 @@ $catalog = @{
         'com.whatname.iam.service.auth.PasswordPolicyTest'=20
         'com.whatname.iam.common.security.JwtTokenServiceTest'=4
         'com.whatname.iam.common.security.SensitiveDataCodecTest'=3
-        'com.whatname.iam.common.security.NameSearchTokensTest'=5
         'com.whatname.iam.service.auth.NamePinyinTest'=2
     }
     AMySql = [ordered]@{
@@ -112,6 +111,7 @@ try {
     $inputs = @(& git ls-files -- src pom.xml mvnw mvnw.cmd .mvn)
     $inputs += @(Get-ChildItem -LiteralPath $PSScriptRoot -File | ForEach-Object { 'scripts/test/' + $_.Name })
     foreach ($inputPath in @($inputs | Sort-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $repo $inputPath) -PathType Leaf)) { continue } # Explicitly removed inputs are absent from this run.
         $hash = (Get-FileHash -LiteralPath (Join-Path $repo $inputPath) -Algorithm SHA256).Hash.ToLowerInvariant()
         $result.sourceManifest += [pscustomobject]@{path=$inputPath;sha256=$hash}
     }

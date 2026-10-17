@@ -39,20 +39,17 @@
       <if test="source != null">AND source=#{source}</if>
     </where>
   </sql>
+  <sql id="identifierMatch">(LOCATE(#{keyword},username)&gt;0 OR COALESCE(LOCATE(#{keyword},employee_no),0)&gt;0
+    <if test="phoneHash != null">OR phone_hash=#{phoneHash}</if>)</sql>
   <sql id="filter">
-      <include refid="scopeFilter"/>
-      <if test="keyword != null">AND (LOCATE(#{keyword},username)&gt;0 OR LOCATE(#{keyword},employee_no)&gt;0
-        <if test="nameToken != null">OR EXISTS (SELECT 1 FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id AND nt.token=#{nameToken})</if>
-        <if test="phoneHash != null">OR phone_hash=#{phoneHash}</if>)</if>
+    <include refid="scopeFilter"/>
+    <if test="keyword != null">AND <include refid="identifierMatch"/></if>
   </sql>
-  <select id="unreadyNames" resultType="int">
-    SELECT COUNT(*) FROM sys_user <include refid="scopeFilter"/>
-    AND NOT EXISTS (SELECT 1 FROM sys_user_name_state ns WHERE ns.user_id=sys_user.id
-      AND ns.generation=#{generation} AND ns.cipher_digest=SHA2(sys_user.real_name_ciphertext,256)
-      AND ns.token_count=(SELECT COUNT(*) FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id))
-  </select>
   <select id="list" resultMap="account">SELECT <include refid="columns"/>
-    <if test="nameToken != null">,EXISTS (SELECT 1 FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id AND nt.token=#{nameToken}) AS name_search_matched</if>
     FROM sys_user <include refid="filter"/> ORDER BY id LIMIT #{limit} OFFSET #{offset}</select>
   <select id="count" resultType="int">SELECT COUNT(*) FROM sys_user <include refid="filter"/></select>
+  <select id="searchCandidates" resultMap="account">
+    SELECT <include refid="columns"/>,<include refid="identifierMatch"/> AS identifier_matched
+    FROM sys_user <include refid="scopeFilter"/> AND id&gt;#{afterId} ORDER BY id LIMIT #{limit}
+  </select>
 </mapper>

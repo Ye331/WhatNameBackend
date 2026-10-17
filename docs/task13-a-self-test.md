@@ -13,8 +13,8 @@ $jdk = 'C:\path\to\jdk-21'
 
 | 套件 | 精确测试类（类名均唯一，实际 Maven 使用完整包名） | 当前用例数与证明边界 |
 |---|---|---|
-| `Unit`（默认） | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest、NameSearchTokensTest | 55（含参数化实例）；密码/历史规则、JWT、编码和拼音，无数据库 |
-| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 37+21+20+3=81（Task17更新）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
+| `Unit`（默认） | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest | 50（含参数化实例）；密码/历史规则、JWT、编码和拼音，无数据库 |
+| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 37+21+20+3=81（Task18现行）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
 | `ACM5`（显式） | Task12M5MySqlIntegrationTest | 17；真实 A+C M5/SQL，D 是测试替身；包含生产依赖缺失时拒绝的断言 |
 
 Task15于2026-10-16北京时间19:32:43、19:33:16使用本入口分别验证当前AMySql 71项、ACM5 17项，均0失败/错误/跳过，Maven均为0；新增4项JUnit，Unit50未重跑。当前结果与限制见 [Task15修复报告](task15-account-password-fixes.md)，下文Task13原134项历史验证保持原事实。
@@ -23,7 +23,7 @@ Task16新增两个事件事务交错用例，Department当前20项、AMySql cata
 
 ## 显式写库套件
 
-仅用于自己已准备好的本地开发 MySQL：已有 25 表（原23表及两张姓名索引表）、111 条 `DEV-DEPT-R0002` 至 `DEV-DEPT-R0112` 受控基础部门，已按项目流程应用 `db/migrations/20261016_01_department_merge.sql` 、`20261016_02_external_event_owner.sql` 和 `20261017_01_user_name_search.sql`。本入口绝不执行 SQL 导入或迁移。保留 CHECK、外键、禁止物理删除与历史触发器。测试会创建随机前缀隔离部门、账号、授权/事件/审计夹具；收尾按既有机制暂停或离职账号、冻结部门、撤销夹具资格和有效关系，保留账号、来源、事件、签名和审计历史。故障/中断后应核查本次前缀，不能直接清库。
+仅用于自己已准备好的本地开发 MySQL：已有团队设计的23表、111 条 `DEV-DEPT-R0002` 至 `DEV-DEPT-R0112` 受控基础部门，已按项目流程应用 `db/migrations/20261016_01_department_merge.sql` 、`20261016_02_external_event_owner.sql`。本入口绝不执行 SQL 导入或迁移。保留 CHECK、外键、禁止物理删除与历史触发器。测试会创建随机前缀隔离部门、账号、授权/事件/审计夹具；收尾按既有机制暂停或离职账号、冻结部门、撤销夹具资格和有效关系，保留账号、来源、事件、签名和审计历史。故障/中断后应核查本次前缀，不能直接清库。
 
 启动前用私有终端环境设置三个变量；密码不要输入到带字面值的命令，也不要放入仓库模板。以下交互读取不会将密码值写到 PowerShell 命令历史：
 

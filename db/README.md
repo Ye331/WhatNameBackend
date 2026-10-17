@@ -1,6 +1,6 @@
 # 数据库脚本
 
-`01_schema.sql`是数据库设计v3.2的空库建表快照，25张表（原23表及2张姓名索引表），包含CHECK、触发器及DELIMITER。
+`01_schema.sql`是团队数据库设计v3.1及两项既有增量的空库建表快照，共23张表，包含CHECK、触发器及DELIMITER。
 
 已在Docker MySQL 8.0.46实际执行验证：23张表、16个触发器、49个CHECK；后端数据库连通接口返回200。
 Docker Compose在首次空卷启动时由MySQL初始化入口执行本脚本，支持DELIMITER，无需手动重复执行。
@@ -14,4 +14,4 @@ Docker Compose在首次空卷启动时由MySQL初始化入口执行本脚本，�
 
 随后执行 `migrations/20261016_02_external_event_owner.sql` 一次，增加 nullable `claim_token`，不改已有事件状态。两项迁移均已于2026-10-16在个人MySQL核实落地，保留23表及111条基础部门；本次未重新建表。MySQL将未指定级联动作的合并外键报告为 `NO ACTION`，在InnoDB中限制删除。当前双份空库SQL含18个触发器，原16个保留，新增2个部门合并保护；49个CHECK不变。保留账号禁止删除约束，06独立测试账号离职、部门冻结、来源回收后保留，登记见 `docs/task06-organization-integration.md` 和仓库外交接。
 
-2026-10-17：显式执行 `migrations/20261017_01_user_name_search.sql` 一次，仅新增 `sys_user_name_state`、`sys_user_name_token`。原23表及18触发器完整保留，新表增加2外键、1 CHECK。旧姓名不会在迁移或启动时解密；按 `docs/task17-name-search.md` 配置专用密钥和受控分批回填。
+2026-10-17 Task18：已撤下自行新增的姓名索引两表及其迁移。当前姓名搜索沿用现有23表，在当前可见范围内分批验签、内存解密匹配，不需要新DDL、专用密钥或旧账号回填；说明见 `docs/task18-name-search-existing-schema.md`。历史两表方案不代表团队批准，不能继续执行旧迁移。原有部门合并、事件认领迁移及约束保持。

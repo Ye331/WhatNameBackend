@@ -109,7 +109,7 @@ class Task12M5MySqlIntegrationTest {
         KeyPairGenerator generator=KeyPairGenerator.getInstance("RSA"); generator.initialize(2048); var keys=generator.generateKeyPair();
         settings=new HashMap<>();
         settings.put("server.port",18089); settings.put("server.address","127.0.0.1");
-        for(String key:List.of("data-key","phone-hmac-key","sms-hmac-key","name-search-key")) {
+        for(String key:List.of("data-key","phone-hmac-key","sms-hmac-key")) {
             byte[] value=new byte[32];new SecureRandom().nextBytes(value);settings.put("iam.security."+key,Base64.getEncoder().encodeToString(value));
         }
         settings.put("iam.security.jwt-private-key",Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()));
@@ -316,10 +316,7 @@ class Task12M5MySqlIntegrationTest {
             Object[] values={prefix+"user"+n,codec.encrypt("Task Twelve"),codec.encrypt(phone),codec.phoneHash(phone),"test-only-unusable-hash",dept,source,source==2?prefix:null,source==2?superior.id:null};
             for(int i=0;i<values.length;i++)s.setObject(i+1,values[i]);return s;},key);
         long id=key.getKey().longValue();accountIds.add(id);var user=users.findById(id);data.seed(user);
-        // Fixture initialization is not a maintenance operation and must not add business audit.
-        new TransactionTemplate(manager).executeWithoutResult(status->{
-            var current=users.lockById(id);app.getBean(com.whatname.iam.service.user.NameSearchIndex.class).replace(current,codec.decrypt(current.realNameCiphertext));
-        });return user;
+        return user;
     }
     private void appointment(long user,int level,long dept) {db.update("INSERT INTO sys_admin(user_id,admin_level,dept_id,status) VALUES(?,?,?,1)",user,level,dept);}
     private Map<String,Object> temporary(long dept) {return Map.of("deptId",Long.toString(dept),"realName","Task Twelve","phone","13912%06d".formatted(new SecureRandom().nextInt(1000000)),"reason",prefix);}

@@ -25,14 +25,11 @@ public class UserService {
     private final SensitiveDataCodec codec;
     private final M1SecurityGateway security;
     private final PasswordHasher hasher;
-    private final NameSearchIndex nameIndex;
-    private final NameSearchTokens nameTokens;
+    private static final int SEARCH_BATCH_SIZE=200;
     private final TransactionTemplate tx;
     public UserService(UserAccountMapper users,AuthService auth,JwtTokenService jwt,SensitiveDataCodec codec,
-                         M1SecurityGateway security,PasswordHasher hasher,PlatformTransactionManager manager,
-                         NameSearchIndex nameIndex,NameSearchTokens nameTokens) {
+                         M1SecurityGateway security,PasswordHasher hasher,PlatformTransactionManager manager) {
         this.users=users;this.auth=auth;this.jwt=jwt;this.codec=codec;this.security=security;this.hasher=hasher;
-        this.nameIndex=nameIndex;this.nameTokens=nameTokens;
         tx=new TransactionTemplate(manager);tx.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);tx.setTimeout(30);
     }
     public record UserView(String userId,String username,String sgNo,String realName,String phoneMasked,
@@ -55,22 +52,32 @@ public class UserService {
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
             if(department!=null) requireScope(scope,department);
-            String nameToken=null;
-            if(term!=null) {
-                String generation=nameTokens.generation();
-                if(users.unreadyNames(scope,department,accountStatus,source,generation)>0)
-                    throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-                nameToken=nameTokens.token(NameSearchTokens.normalize(term));
+            List<UserView> items;
+            int count;
+            long offset=((long)page-1)*pageSize;
+            if(term==null) {
+                count=users.count(scope,department,null,null,accountStatus,source);
+                items=users.list(scope,department,null,null,accountStatus,source,offset,pageSize).stream().map(this::view).toList();
+            } else {
+                String nameTerm=normalizeName(term,ErrorCode.INVALID_ARGUMENT);
+                items=new ArrayList<>(pageSize);count=0;
+                long afterId=0;
+                // All batches use this transaction's repeatable-read snapshot. Never prefilter
+                // on identifiers: an otherwise nonmatching row can still match its encrypted name.
+                while(true) {
+                    List<UserAccount> batch=users.searchCandidates(scope,department,term,phone,accountStatus,source,afterId,SEARCH_BATCH_SIZE);
+                    for(UserAccount u:batch) {
+                        security.verifyIdentity(u);
+                        String name=codec.decrypt(u.realNameCiphertext);
+                        if(Boolean.TRUE.equals(u.identifierMatched) || normalizeName(name,ErrorCode.INTEGRITY_FAILURE).contains(nameTerm)) {
+                            if(count>=offset && items.size()<pageSize) items.add(view(u,name));
+                            count=Math.addExact(count,1);
+                        }
+                        afterId=u.id;
+                    }
+                    if(batch.size()<SEARCH_BATCH_SIZE) break;
+                }
             }
-            int count=users.count(scope,department,term,phone,nameToken,accountStatus,source);
-            String normalizedTerm=term==null?null:NameSearchTokens.normalize(term);
-            List<UserView> items=users.list(scope,department,term,phone,nameToken,accountStatus,source,((long)page-1)*pageSize,pageSize).stream().map(u->{
-                UserView result=view(u);
-                // A collision/corrupt membership is an integrity error, never a post-page filter.
-                if(Boolean.TRUE.equals(u.nameSearchMatched) && !NameSearchTokens.normalize(result.realName()).contains(normalizedTerm))
-                    throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-                return result;
-            }).toList();
             security.audit("US01_LIST",actor.id,null,"SCOPED_READ");
             return new PageResponse<>(items,page,pageSize,count);
         });
@@ -108,7 +115,7 @@ public class UserService {
                 u.phoneHash=codec.phoneHash(normalized);u.passwordHash=placeholder;u.deptId=deptId;
                 u.createdBy=actor.id;u.tempReason=input.reason().strip();u.source=2;u.status=1;u.passwordInitialized=0;
                 u.sessionVersion=1L;u.grantRevision=1L;u.hrVersion=0L;u.pwdFailedCount=0;
-                users.insertTemporary(u);nameIndex.replace(u,input.realName().strip());
+                users.insertTemporary(u);
                 security.signIdentity(u);security.audit("US03_CREATE",actor.id,u.id,u.tempReason);
                 return new Created(u.id.toString(),u.username,2,mask(normalized),u.deptId.toString(),1);
             });
@@ -144,9 +151,23 @@ public class UserService {
     private static void requireScope(Set<Long> scope,long dept) {if(!scope.contains(dept))throw new BusinessException(ErrorCode.OUT_OF_SCOPE);}
     private UserView view(UserAccount u) {
         security.verifyIdentity(u);
+        return view(u,codec.decrypt(u.realNameCiphertext));
+    }
+    private UserView view(UserAccount u,String name) {
         String phone=SensitiveDataCodec.normalizePhone(codec.decrypt(u.phone));
         if(!codec.phoneHash(phone).equals(u.phoneHash)) throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-        return new UserView(u.id.toString(),u.username,u.employeeNo,codec.decrypt(u.realNameCiphertext),mask(phone),u.deptId.toString(),u.status,u.passwordInitialized==1,u.source);
+        return new UserView(u.id.toString(),u.username,u.employeeNo,name,mask(phone),u.deptId.toString(),u.status,u.passwordInitialized==1,u.source);
+    }
+    /** Literal NFC matching in memory; no key, persisted index or cross-request cache. */
+    private static String normalizeName(String value,ErrorCode invalid) {
+        for(int i=0;i<value.length();i++) {
+            char c=value.charAt(i);
+            if(Character.isHighSurrogate(c)) {
+                if(++i>=value.length() || !Character.isLowSurrogate(value.charAt(i)))
+                    throw new BusinessException(invalid);
+            } else if(Character.isLowSurrogate(c)) throw new BusinessException(invalid);
+        }
+        return java.text.Normalizer.normalize(value.strip(),java.text.Normalizer.Form.NFC);
     }
     private static String mask(String phone){return phone.substring(0,3)+"****"+phone.substring(7);}
     public static long parseId(String value) {

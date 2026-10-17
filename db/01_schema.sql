@@ -1,7 +1,7 @@
 -- ============================================================
 -- 统一权限管理系统 数据库建表脚本
 -- 数据库：MySQL 8.0.16 及以上（已在Docker MySQL 8.0.46执行建表验证）
--- v3.2：25张表（原23表 + 2张姓名盲索引支撑表），Controller-Service-Mapper三层，当前不使用Redis。
+-- v3.1：23张表（13张业务表 + 10张支撑表），Controller-Service-Mapper三层，当前不使用Redis。
 -- 权限直接读MySQL，移除权限发布版本/拒绝栅栏表；补齐会话版本、事件、批量任务和请求nonce。
 -- 仅首次空库建表；不是旧库迁移脚本，不删除现有数据。
 -- 现有表时 CREATE TABLE 将报错，必须停止，不要使用 mysql --force。
@@ -617,23 +617,3 @@ BEGIN
  END IF;
 END$$
 DELIMITER ;
-
--- Explicit, additive migration for an existing MySQL 8 database. Never auto-run.
--- Existing names are NOT decrypted here. Missing state fails closed on keyword searches.
-CREATE TABLE sys_user_name_state (
-  user_id BIGINT NOT NULL,
-  generation CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-  cipher_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-  token_count SMALLINT UNSIGNED NOT NULL,
-  PRIMARY KEY (user_id),
-  CONSTRAINT fk_name_state_user FOREIGN KEY (user_id) REFERENCES sys_user(id),
-  CONSTRAINT ck_name_token_count CHECK (token_count BETWEEN 1 AND 2080)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Versioned encrypted-name index readiness; no plaintext';
-
-CREATE TABLE sys_user_name_token (
-  user_id BIGINT NOT NULL,
-  token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-  PRIMARY KEY (user_id,token),
-  KEY idx_name_token_user (token,user_id),
-  CONSTRAINT fk_name_token_user FOREIGN KEY (user_id) REFERENCES sys_user(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Dedicated-key HMAC-SHA256 name substring index';

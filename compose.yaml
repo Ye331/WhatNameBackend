@@ -26,8 +26,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        # 兼容显式姓名索引迁移前的 23 表库与迁移后的 25 表库。
-        - 'MYSQL_PWD="$$(cat /run/secrets/mysql_app_password)" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''unified_permission'' AND table_type=''BASE TABLE''" | grep -Eqx ''(23|25)'''
+        - 'MYSQL_PWD="$$(cat /run/secrets/mysql_app_password)" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''unified_permission'' AND table_type=''BASE TABLE''" | grep -qx 23'
       interval: 5s
       timeout: 5s
       retries: 20

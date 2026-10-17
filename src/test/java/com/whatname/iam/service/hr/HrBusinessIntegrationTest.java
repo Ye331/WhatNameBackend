@@ -45,7 +45,7 @@ class HrBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.auth","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
-            com.whatname.iam.service.user.NameSearchIndex.class,NameSearchTokens.class,SensitiveDataCodec.class,PasswordHasher.class,PasswordPolicy.class,JwtTokenService.class,
+            SensitiveDataCodec.class,PasswordHasher.class,PasswordPolicy.class,JwtTokenService.class,
             SmsCodeHasher.class,PublicRequestLimiter.class,AuthService.class,AuthController.class,GlobalExceptionHandler.class,
             com.whatname.iam.service.user.UserService.class,com.whatname.iam.controller.user.UserController.class})
     static class TestApplication {
@@ -56,7 +56,7 @@ class HrBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
-            com.whatname.iam.service.user.NameSearchIndex.class,NameSearchTokens.class,SensitiveDataCodec.class,PasswordHasher.class,GlobalExceptionHandler.class,
+            SensitiveDataCodec.class,PasswordHasher.class,GlobalExceptionHandler.class,
             DepartmentIntegrationConfiguration.class,HrIntegrationConfiguration.class,M1SecurityConfiguration.class})
     static class DefaultApplication {}
 
@@ -162,7 +162,6 @@ class HrBusinessIntegrationTest {
         KeyPairGenerator g=KeyPairGenerator.getInstance("RSA");g.initialize(2048);KeyPair keys=g.generateKeyPair();
         List<String> args=new ArrayList<>(List.of("--server.port=18087","--server.address=127.0.0.1",
                 "--iam.security.data-key="+key(0),"--iam.security.phone-hmac-key="+key(1),"--iam.security.sms-hmac-key="+key(2),
-                "--iam.security.name-search-key="+key(3),
                 "--iam.security.jwt-private-key="+Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()),
                 "--iam.security.jwt-public-key="+Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
                 "--iam.security.jwt-issuer=task07","--iam.security.jwt-audience=task07","--iam.security.jwt-key-id=task07",
@@ -223,8 +222,6 @@ class HrBusinessIntegrationTest {
         f.addAll(db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=? ORDER BY id",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_user_role WHERE user_id=? ORDER BY id",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_admin WHERE user_id=?",u.id));
-        f.addAll(db.queryForList("SELECT * FROM sys_user_name_state WHERE user_id=?",u.id));
-        f.addAll(db.queryForList("SELECT * FROM sys_user_name_token WHERE user_id=? ORDER BY token",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_data_signature WHERE data_type='TASK07_USER' AND data_id=?",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_operation_log WHERE source_system='TASK07_TEST' AND target_id=? ORDER BY id",u.id));return f;
     }
@@ -256,10 +253,7 @@ class HrBusinessIntegrationTest {
         http("PUT","/integrations/hr/employees/"+u.employeeNo,r,200);UserAccount after=row(u);
         assertEquals(u.id,after.id);assertEquals(u.username,after.username);assertEquals(stored,after.passwordHash);assertEquals(1,after.passwordInitialized);
         assertEquals(u.sessionVersion,after.sessionVersion);assertEquals(2,after.employmentType);assertEquals(20,after.hrVersion);
-        var search=app.getBean(NameSearchTokens.class);
-        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token WHERE user_id=? AND token=?",Integer.class,u.id,search.token("张三")));
-        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token WHERE user_id=? AND token=?",Integer.class,u.id,search.token("李四")));
-        assertEquals(search.all(r.realName()),new TreeSet<>(db.queryForList("SELECT token FROM sys_user_name_token WHERE user_id=?",String.class,u.id)));
+        assertEquals(r.realName(),codec.decrypt(after.realNameCiphertext));
     }
 
     @Test void hrNameChangeRemovesOldKeywordAndAddsNewKeywordOverRealHttp() throws Exception {
@@ -430,7 +424,7 @@ class HrBusinessIntegrationTest {
         UserAccount u=create();db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)",u.id,role1);
         var before=facts(u);http("POST","/integrations/hr/transfers",transfer(u,3),503);assertEquals(before,facts(u));
         HrService unavailable=new HrService(app.getBean(ExternalEventService.class),app.getBean(com.whatname.iam.mapper.department.OrganizationWriteMapper.class),
-                app.getBean(DepartmentService.class),port,users,port,new HrIntegrationConfiguration().unavailableHrCollaboration(),codec,passwords,clock,app.getBean(com.whatname.iam.service.user.NameSearchIndex.class));
+                app.getBean(DepartmentService.class),port,users,port,new HrIntegrationConfiguration().unavailableHrCollaboration(),codec,passwords,clock);
         expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->unavailable.terminate(actor,termination(u,4,time)));assertEquals(before,facts(u));
     }
     @Test void concurrentPhoneAndSgUniquenessHaveOneWinnerAndNoPartialAccount() throws Exception {

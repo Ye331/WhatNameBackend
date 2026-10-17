@@ -1,6 +1,6 @@
 # Explicit additional configuration only. Never put real keys in this tracked template.
 # Example: --spring.config.additional-location=file:./config/task05-security.example.yml
-# AES and phone/SMS/name-search HMAC keys: four independent random 32-byte keys, standard Base64.
+# AES and phone/SMS HMAC keys: three independent random 32-byte keys, standard Base64.
 # RSA >=2048 bits: PKCS#8 private DER / X.509 public DER, standard Base64 (no PEM headers).
 # Configure issuer/audience/key-id explicitly and agree this A-internal JWT format with D.
 # Keys alone do not enable business: real M1SecurityGateway and SmsSender adapters are required.
@@ -10,7 +10,6 @@ iam:
     data-key: ${IAM_DATA_KEY:}
     phone-hmac-key: ${IAM_PHONE_HMAC_KEY:}
     sms-hmac-key: ${IAM_SMS_HMAC_KEY:}
-    name-search-key: ${IAM_NAME_SEARCH_KEY:}
     jwt-private-key: ${IAM_JWT_PRIVATE_KEY:}
     jwt-public-key: ${IAM_JWT_PUBLIC_KEY:}
     jwt-issuer: ${IAM_JWT_ISSUER:}
