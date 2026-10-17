@@ -25,9 +25,7 @@ services:
       - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
       - ./db/02_add_canonical_path_and_index.sql:/docker-entrypoint-initdb.d/02_add_canonical_path_and_index.sql:ro
     healthcheck:
-      test:
-        - CMD-SHELL
-        - 'MYSQL_PWD="$$(cat /run/secrets/mysql_app_password)" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''unified_permission'' AND table_type=''BASE TABLE''" | grep -qx 23'
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$(cat /run/secrets/mysql_app_password)\" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='unified_permission' AND table_type='BASE TABLE'\" | grep -qx 23"]
       interval: 5s
       timeout: 5s
       retries: 20
