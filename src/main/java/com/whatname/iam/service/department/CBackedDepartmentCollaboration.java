@@ -27,14 +27,23 @@ public class CBackedDepartmentCollaboration implements DepartmentCollaboration {
         return new Manager(Long.toString(session.userId()),session);
     }
     public void prepareManagement(Manager actor) {
-        if(actor.session()==null || !actor.actorId().equals(Long.toString(actor.session().userId())))
-            throw new BusinessException(ErrorCode.INVALID_TOKEN);
+        requirePrincipal(actor);
         policy.prepare(actor.session().userId());
         auth.requireCurrentSession(actor.session());
     }
+    public void prepareDepartmentManagement(Manager actor,long departmentId) {
+        requirePrincipal(actor);
+        policy.prepareDepartment(actor.session().userId(),departmentId);
+        auth.requireCurrentSession(actor.session());
+    }
+    private void requirePrincipal(Manager actor) {
+        if(actor.session()==null || !actor.actorId().equals(Long.toString(actor.session().userId())))
+            throw new BusinessException(ErrorCode.INVALID_TOKEN);
+    }
     public Set<Long> scope(Manager actor,String permission,List<Department> organization) {
-        // Session and current M5 facts are both rechecked in the same transaction.
-        prepareManagement(actor);
+        // The service already acquired C's current locks and checked the session before
+        // any organization read. Do not introduce another lock phase after those reads.
+        requirePrincipal(actor);
         var result=policy.scope(actor.session().userId());
         data.requireFunction(actor.session().userId(),permission);
         return result;

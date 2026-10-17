@@ -356,7 +356,6 @@ CREATE TABLE `sys_external_event` (
   `event_type` VARCHAR(64) NOT NULL COMMENT '事件类型：入职/资料/调岗/离职/部门/合并/OA决定',
   `event_version` BIGINT DEFAULT NULL COMMENT 'HR事件必须有正版本；OA无顺序版本时为空',
   `payload_digest` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '事件载荷SHA-256摘要，同号重发内容比对',
-  `claim_token` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL COMMENT '处理认领令牌；受控恢复换令牌隔离旧工作者',
   `target_type` VARCHAR(16) DEFAULT NULL COMMENT '目标类型：USER / DEPT',
   `target_ref` VARCHAR(64) DEFAULT NULL COMMENT '目标外部标识：SG号或部门编码',
   `processing_status` VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '处理阶段：APPLIED/PROCESSING/PENDING_RECOVERY/REJECTED',

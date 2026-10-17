@@ -75,7 +75,6 @@ public class AdminRules {
         while (current != 0) {
             var department = state.departments().get(current);
             if (!visited.add(current) || department == null || department.parentId() < 0) fail(AUTH_STATE_UNAVAILABLE);
-            if (requireUnfrozen && department.mergedIntoDeptId() != null) fail(PERMISSION_DENIED);
             if (requireUnfrozen && department.status() != 1) fail(PERMISSION_DENIED);
             current = department.parentId();
         }

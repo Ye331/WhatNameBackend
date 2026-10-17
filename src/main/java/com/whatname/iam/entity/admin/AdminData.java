@@ -6,13 +6,7 @@ public final class AdminData {
 
     public record Appointment(Long userId, int adminLevel, Long deptId, int status,
                               int delegableRevision, Long appointedBy) {}
-    public record Department(Long id, Long parentId, int status, Long mergedIntoDeptId) {
-        @org.apache.ibatis.annotations.AutomapConstructor
-        public Department(Long id, Long parentId, int status, Long mergedIntoDeptId) {
-            this.id=id; this.parentId=parentId; this.status=status; this.mergedIntoDeptId=mergedIntoDeptId;
-        }
-        public Department(Long id, Long parentId, int status) { this(id,parentId,status,null); }
-    }
+    public record Department(Long id, Long parentId, int status) {}
     public record User(Long id, Long deptId, int status) {}
     public record Role(Long id, int roleType, int status) {}
     public record Delegation(Long adminUserId, Long roleId, Long configuredBy) {}

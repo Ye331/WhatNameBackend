@@ -11,6 +11,7 @@ import java.util.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
@@ -24,6 +25,7 @@ public class DepartmentService {
 
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> tree(DepartmentCollaboration.Manager actor,boolean descendants) {
+        requireFreshManagementTransaction();
         integration.prepareManagement(actor);
         List<Department> all=mapper.organization(); validateTree(all); integration.verifyOrganization(all);
         Set<Long> allowed=integration.scope(actor,"IAM_DEPTS_VIEW",all);
@@ -44,6 +46,7 @@ public class DepartmentService {
 
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> users(DepartmentCollaboration.Manager actor,long id,boolean descendants,int page,int size) {
+        requireFreshManagementTransaction();
         if(page<1 || page>1_000_000 || size<1 || size>500) fail(ErrorCode.INVALID_ARGUMENT);
         integration.prepareManagement(actor);
         List<Department> all=mapper.organization(); validateTree(all); integration.verifyOrganization(all);
@@ -131,8 +134,9 @@ public class DepartmentService {
 
     @Transactional(isolation=Isolation.SERIALIZABLE,rollbackFor=Exception.class,timeout=30)
     public Map<String,Object> freeze(DepartmentCollaboration.Manager actor,long id,boolean freeze,String reason) {
+        requireFreshManagementTransaction();
         if(reason==null || reason.isBlank() || reason.length()>512) fail(ErrorCode.INVALID_ARGUMENT);
-        integration.prepareManagement(actor);
+        integration.prepareDepartmentManagement(actor,id);
         List<Department> all=locked();
         if(!integration.scope(actor,"IAM_DEPTS_FREEZE",all).contains(id)) fail(ErrorCode.OUT_OF_SCOPE);
         Department d=require(index(all).get(id)); active(d);
@@ -155,6 +159,11 @@ public class DepartmentService {
                 || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),java.sql.Connection.TRANSACTION_SERIALIZABLE))
             throw new IllegalStateException("Serializable organization transaction required");
         List<Department> all=mapper.lockOrganization(); validateTree(all); integration.verifyOrganization(all); return all;
+    }
+    /** Management entry points start their own authorization/DB snapshot boundary.
+     * Joining an existing transaction could expose an older RR snapshot; fail before any work. */
+    private void requireFreshManagementTransaction() {
+        if(!TransactionAspectSupport.currentTransactionStatus().isNewTransaction()) fail(ErrorCode.AUTH_STATE_UNAVAILABLE);
     }
     private void active(Department d) { if(d.getMergedIntoDeptId()!=null) fail(ErrorCode.BUSINESS_RULE_VIOLATION); }
     private void newer(Long version,Department d) { if(version==null || version<=d.getHrVersion()) fail(ErrorCode.INVALID_HR_ORDER); }

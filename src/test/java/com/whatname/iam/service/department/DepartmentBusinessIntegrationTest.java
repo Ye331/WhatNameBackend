@@ -61,10 +61,18 @@ class DepartmentBusinessIntegrationTest {
             args={MappedStatement.class,Object.class,RowBounds.class,ResultHandler.class}))
     static class RecoveryLockObserver implements Interceptor {
         final ThreadLocal<CompletableFuture<Long>> nextLock=new ThreadLocal<>();
+        final ThreadLocal<PausedBusinessLock> beforeBusinessLock=new ThreadLocal<>();
         @Override public Object intercept(Invocation invocation) throws Throwable {
+            boolean eventLock=((MappedStatement)invocation.getArgs()[0]).getId()
+                    .equals("com.whatname.iam.mapper.event.ExternalEventMapper.lock");
+            var pause=beforeBusinessLock.get();
+            // The claim transaction performs its initial lookup and inserted-row lookup first.
+            if(eventLock && pause!=null && ++pause.calls==3) {
+                pause.ready.complete(null);
+                assertTrue(pause.release.await(8,TimeUnit.SECONDS),"paused owner release deadline");
+            }
             var signal=nextLock.get();
-            if(signal!=null && ((MappedStatement)invocation.getArgs()[0]).getId()
-                    .equals("com.whatname.iam.mapper.event.ExternalEventMapper.lock")) {
+            if(signal!=null && eventLock) {
                 nextLock.remove();
                 try(var statement=((Executor)invocation.getTarget()).getTransaction().getConnection().createStatement();
                     var result=statement.executeQuery("SELECT CONNECTION_ID()")) {
@@ -73,6 +81,11 @@ class DepartmentBusinessIntegrationTest {
             }
             return invocation.proceed();
         }
+    }
+    static class PausedBusinessLock {
+        int calls;
+        final CompletableFuture<Void> ready=new CompletableFuture<>();
+        final CountDownLatch release=new CountDownLatch(1);
     }
     @TestConfiguration(proxyBeanMethods=false)
     @EnableAutoConfiguration
@@ -295,18 +308,19 @@ class DepartmentBusinessIntegrationTest {
         error(ErrorCode.IDEMPOTENCY_CONFLICT,() -> service.sync(hr,code,new DepartmentRequests.Sync("HR",request.eventId(),1L,code,"changed","",null,time)));
         assertTrue(db.queryForObject("SELECT payload_ciphertext FROM sys_external_event WHERE event_id=?",String.class,request.eventId()).startsWith("gcm1:"));
     }
-    @Test void oaNullVersionStableDigestFailureClassificationAndControlledRecovery() {
+    @Test void oaNullVersionStableDigestFailureClassificationAndRecoveryRefusal() {
         var oa=new TrustedEventContext("OA","task06-test-oa","request-1");String event=event();AtomicInteger applied=new AtomicInteger();
         var c=new ExternalEventService.Command(event,"OA_DECISION",null,"USER","test-subject",null,Map.of("decision","APPROVE","nonce","nonce-1","requestId","r1"));
         Map<String,Object> first=events.execute(oa,c,() -> {applied.incrementAndGet();return Map.of("eventId",event,"processingStatus","APPLIED");});
         var retry=new ExternalEventService.Command(event,"OA_DECISION",null,"USER","test-subject",null,Map.of("requestId","r2","nonce","nonce-2","decision","APPROVE"));
         assertEquals(first,events.execute(oa,retry,() -> {fail("replayed callback");return Map.of();}));assertEquals(1,applied.get());
+        assertEquals(first,events.recover(oa,retry,() -> {fail("APPLIED must not rerun");return Map.of();}));
         String failed=event();var fc=new ExternalEventService.Command(failed,"OA_DECISION",null,"USER","test-subject",null,Map.of("decision","APPROVE"));
         error(ErrorCode.AUDIT_UNAVAILABLE,() -> events.execute(oa,fc,() -> {throw new BusinessException(ErrorCode.AUDIT_UNAVAILABLE);}));
         error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.execute(oa,fc,Map::of));
         port.denyRecovery=true;error(ErrorCode.PERMISSION_DENIED,() -> events.recover(oa,fc,Map::of));port.denyRecovery=false;
-        assertEquals(Map.of("done",true),events.recover(oa,fc,() -> Map.of("done",true)));
-        assertEquals(Map.of("done",true),events.recover(oa,fc,() -> {fail("APPLIED must not rerun");return Map.of();}));
+        error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,fc,() -> {fail("authorization does not prove stopped workers");return Map.of();}));
+        assertEquals("PENDING_RECOVERY",db.queryForObject("SELECT processing_status FROM sys_external_event WHERE event_id=?",String.class,failed));
         String rejected=event();var rc=new ExternalEventService.Command(rejected,"OA_DECISION",null,"USER","test-subject",null,Map.of("decision","REJECT"));
         error(ErrorCode.BUSINESS_RULE_VIOLATION,() -> events.execute(oa,rc,() -> {throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);}));
         error(ErrorCode.BUSINESS_RULE_VIOLATION,() -> events.recover(oa,rc,Map::of));
@@ -353,20 +367,21 @@ class DepartmentBusinessIntegrationTest {
             } finally {base=previous;}
         }
     }
-    @Test void controlledCrashRecoveryRotatesOwnerAndFencesOldToken() {
+    @Test void crashedEventCannotBeTakenOverWithoutProvableStoppedWorkers() {
         var oa=new TrustedEventContext("OA","task06-test-oa","recovery-test");String event=event();
         var command=new ExternalEventService.Command(event,"OA_DECISION",null,"USER","test-subject",null,Map.of("decision","APPROVE"));
         error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.execute(oa,command,() -> {throw new IllegalStateException("simulated crash");}));
-        String oldToken=db.queryForObject("SELECT claim_token FROM sys_external_event WHERE event_id=?",String.class,event);
+        var failed=eventState(event);
+        error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,command,() -> {fail("pending recovery callback");return Map.of();}));
+        assertEquals(failed,eventState(event));
         db.update("UPDATE sys_external_event SET processing_status='PROCESSING' WHERE event_id=?",event);
         error(ErrorCode.VERSION_CONFLICT,() -> events.execute(oa,command,Map::of));
-        AtomicInteger count=new AtomicInteger();events.recover(oa,command,() -> {count.incrementAndGet();return Map.of("done",true);});
-        assertEquals(1,count.get());assertNotEquals(oldToken,db.queryForObject("SELECT claim_token FROM sys_external_event WHERE event_id=?",String.class,event));
-        assertEquals(0,db.update("UPDATE sys_external_event SET processing_status='REJECTED' WHERE event_id=? AND claim_token=? AND processing_status='PROCESSING'",event,oldToken));
-        assertEquals("APPLIED",db.queryForObject("SELECT processing_status FROM sys_external_event WHERE event_id=?",String.class,event));
+        var processing=eventState(event);
+        error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,command,() -> {fail("processing recovery callback");return Map.of();}));
+        assertEquals(processing,eventState(event));assertNull(processing.get("result_data"));
     }
 
-    @Test void activeOwnerRecoveryWaitsForCommitAndReplaysWithoutRotatingToken() throws Exception {
+    @Test void activeOwnerRecoveryWaitsForCommitAndReplaysSavedTerminalResult() throws Exception {
         String dept=code("ACTIVE");long id=create(dept,"",10);String event=event();
         var oa=new TrustedEventContext("OA","task06-test-oa","task16-owner");
         var command=interleavingCommand(event,dept,"first","nonce-1");
@@ -379,8 +394,7 @@ class DepartmentBusinessIntegrationTest {
         try {
             owner=pool.submit(() -> events.execute(oa,command,() -> {
                 var result=applyInterleavingFact(id,event);
-                ownerReady.complete(Map.of("connection",db.queryForObject("SELECT CONNECTION_ID()",Long.class),
-                        "claim",eventState(event).get("claim_token")));
+                ownerReady.complete(Map.of("connection",db.queryForObject("SELECT CONNECTION_ID()",Long.class)));
                 try { assertTrue(release.await(8,TimeUnit.SECONDS),"owner release deadline"); }
                 catch(InterruptedException interrupted) {Thread.currentThread().interrupt();throw new IllegalStateException(interrupted);}
                 return result;
@@ -390,7 +404,6 @@ class DepartmentBusinessIntegrationTest {
             assertEquals(0,auditCount(event));assertEquals(0,signatureCount(id));
             var processing=eventState(event);
             assertEquals("PROCESSING",processing.get("processing_status"));assertNull(processing.get("result_data"));
-            assertEquals(owned.get("claim"),processing.get("claim_token"));
             // A separate transaction's NOWAIT failure proves the event record is really locked.
             try(Connection probe=Objects.requireNonNull(db.getDataSource()).getConnection()) {
                 probe.setAutoCommit(false);
@@ -425,12 +438,115 @@ class DepartmentBusinessIntegrationTest {
             var first=owner.get(5,TimeUnit.SECONDS);var replay=recovery.get(5,TimeUnit.SECONDS);
             assertEquals(semanticResult(first),semanticResult(replay));
             assertInterleavingCommitted(id,event,first);
-            assertEquals(owned.get("claim"),eventState(event).get("claim_token"));
-            System.out.println("TASK16 active-owner: NOWAIT=3572; recovery SQL observed on distinct connection; bounded wait; APPLIED replay; version=11; audit=1; signature=1; claim unchanged");
+            System.out.println("TASK20 active-owner: NOWAIT=3572; recovery SQL observed on distinct connection; bounded wait; terminal APPLIED replay; version=11; audit=1; signature=1");
         } finally {
             release.countDown();pool.shutdownNow();
             assertTrue(pool.awaitTermination(6,TimeUnit.SECONDS),"event workers must terminate");
         }
+    }
+
+    @Test void authorizedRecoveryCannotOvertakeOwnerBetweenClaimAndBusinessLock() throws Exception {
+        String dept=code("CLAIM-GAP");long id=create(dept,"",10);String event=event();
+        var oa=new TrustedEventContext("OA","task06-test-oa","claim-gap");
+        var command=interleavingCommand(event,dept,"first","nonce-1");
+        var pause=new PausedBusinessLock();var observer=app.getBean(RecoveryLockObserver.class);
+        ExecutorService pool=Executors.newSingleThreadExecutor();
+        try {
+            Future<Map<String,Object>> owner=pool.submit(() -> {
+                observer.beforeBusinessLock.set(pause);
+                try {return events.execute(oa,command,() -> applyInterleavingFact(id,event));}
+                finally {observer.beforeBusinessLock.remove();}
+            });
+            pause.ready.get(4,TimeUnit.SECONDS);
+            var before=eventState(event);
+            assertEquals("PROCESSING",before.get("processing_status"));assertNull(before.get("result_data"));
+            error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,command,() -> {
+                fail("authorization must not start a second worker before the original business lock");return Map.of();
+            }));
+            error(ErrorCode.VERSION_CONFLICT,() -> events.execute(oa,command,() -> {
+                fail("ordinary retry must not take over");return Map.of();
+            }));
+            assertEquals(before,eventState(event));assertEquals(10L,((Number)row(id).get("hr_version")).longValue());
+            assertEquals(0,auditCount(event));assertEquals(0,signatureCount(id));
+            pause.release.countDown();
+            assertInterleavingCommitted(id,event,owner.get(5,TimeUnit.SECONDS));
+        } finally {
+            pause.release.countDown();pool.shutdownNow();
+            assertTrue(pool.awaitTermination(6,TimeUnit.SECONDS),"paused owner must terminate");
+        }
+    }
+
+    @Test void lostCommitAcknowledgementReconcilesAppliedWithoutWritingFailure() throws Exception {
+        String dept=code("COMMIT-ACK");long id=create(dept,"",10);String event=event();
+        var oa=new TrustedEventContext("OA","task06-test-oa","lost-commit-ack");
+        var command=interleavingCommand(event,dept,"first","nonce-1");
+        var delegate=app.getBean(PlatformTransactionManager.class);
+        var businessStatuses=ConcurrentHashMap.<org.springframework.transaction.TransactionStatus>newKeySet();
+        var lost=new java.util.concurrent.atomic.AtomicBoolean();
+        // Delegate a real commit, then simulate loss of its acknowledgement. The service must
+        // discover the committed APPLIED record before attempting to record any failure.
+        PlatformTransactionManager ambiguousCommit=new PlatformTransactionManager() {
+            @Override public org.springframework.transaction.TransactionStatus getTransaction(TransactionDefinition definition) {
+                var status=delegate.getTransaction(definition);
+                if(definition.getIsolationLevel()==TransactionDefinition.ISOLATION_SERIALIZABLE) businessStatuses.add(status);
+                return status;
+            }
+            @Override public void commit(org.springframework.transaction.TransactionStatus status) {
+                boolean business=businessStatuses.remove(status);
+                delegate.commit(status);
+                if(business && lost.compareAndSet(false,true))
+                    throw new org.springframework.transaction.TransactionSystemException("test lost commit acknowledgement");
+            }
+            @Override public void rollback(org.springframework.transaction.TransactionStatus status) {
+                businessStatuses.remove(status);delegate.rollback(status);
+            }
+        };
+        var uncertainEvents=new ExternalEventService(app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
+                codec,port,json,ambiguousCommit);
+        var result=uncertainEvents.execute(oa,command,() -> applyInterleavingFact(id,event));
+        assertTrue(lost.get());assertTrue(businessStatuses.isEmpty());
+        assertInterleavingCommitted(id,event,result);
+        var committed=eventState(event);assertEquals("OK",committed.get("result_summary"));
+        assertEquals(semanticResult(result),semanticResult(events.execute(oa,command,() -> {
+            fail("unknown-commit retry must replay persisted result");return Map.of();
+        })));
+        assertEquals(committed,eventState(event));
+    }
+
+    @Test void lostReceiptCommitAcknowledgementNeverStartsOrTransfersBusinessWork() {
+        String event=event();var oa=new TrustedEventContext("OA","task06-test-oa","lost-receipt-ack");
+        var command=new ExternalEventService.Command(event,"OA_DECISION",null,"USER","test-subject",null,
+                Map.of("decision","APPROVE"));
+        var delegate=app.getBean(PlatformTransactionManager.class);
+        var receiptStatuses=ConcurrentHashMap.<org.springframework.transaction.TransactionStatus>newKeySet();
+        var lost=new java.util.concurrent.atomic.AtomicBoolean();
+        PlatformTransactionManager ambiguousReceipt=new PlatformTransactionManager() {
+            @Override public org.springframework.transaction.TransactionStatus getTransaction(TransactionDefinition definition) {
+                var status=delegate.getTransaction(definition);
+                if(definition.getIsolationLevel()==TransactionDefinition.ISOLATION_READ_COMMITTED) receiptStatuses.add(status);
+                return status;
+            }
+            @Override public void commit(org.springframework.transaction.TransactionStatus status) {
+                boolean receipt=receiptStatuses.remove(status);delegate.commit(status);
+                if(receipt && lost.compareAndSet(false,true))
+                    throw new org.springframework.transaction.TransactionSystemException("test lost receipt acknowledgement");
+            }
+            @Override public void rollback(org.springframework.transaction.TransactionStatus status) {
+                receiptStatuses.remove(status);delegate.rollback(status);
+            }
+        };
+        var uncertainEvents=new ExternalEventService(app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
+                codec,port,json,ambiguousReceipt);
+        AtomicInteger applied=new AtomicInteger();
+        java.util.function.Supplier<Map<String,Object>> work=() -> {applied.incrementAndGet();return Map.of("done",true);};
+        error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> uncertainEvents.execute(oa,command,work));
+        assertTrue(lost.get());assertTrue(receiptStatuses.isEmpty());assertEquals(0,applied.get());
+        var retained=eventState(event);
+        assertEquals("PROCESSING",retained.get("processing_status"));assertEquals("RECEIVED",retained.get("processing_stage"));
+        assertNull(retained.get("result_data"));assertNull(retained.get("result_summary"));
+        error(ErrorCode.VERSION_CONFLICT,() -> events.execute(oa,command,work));
+        error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,command,work));
+        assertEquals(0,applied.get());assertEquals(retained,eventState(event));
     }
 
     @Test void committedResultLostBeforeDeliveryRetriesSavedResultWithOnePersistentApplication() throws Exception {
@@ -460,7 +576,7 @@ class DepartmentBusinessIntegrationTest {
                 Map.of("decision","APPROVE","version",11,"requestId",request,"nonce",nonce));
     }
     Map<String,Object> eventState(String event) {
-        return db.queryForMap("SELECT processing_status,processing_stage,claim_token,result_data,result_summary,payload_digest FROM sys_external_event WHERE source_system='OA' AND event_id=?",event);
+        return db.queryForMap("SELECT processing_status,processing_stage,result_data,result_summary,payload_digest FROM sys_external_event WHERE source_system='OA' AND event_id=?",event);
     }
     int auditCount(String event) {
         return db.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE source_system='OA' AND external_event_id=? AND operation_type='TASK16_EVENT_APPLY'",Integer.class,event);
@@ -545,10 +661,10 @@ class DepartmentBusinessIntegrationTest {
         assertThrows(IllegalStateException.class,() -> tx.execute(status -> events.execute(oa,command,Map::of)));
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?",Integer.class,event));
         error(ErrorCode.AUDIT_UNAVAILABLE,() -> events.execute(oa,command,() -> {throw new BusinessException(ErrorCode.AUDIT_UNAVAILABLE);}));
-        String token=db.queryForObject("SELECT claim_token FROM sys_external_event WHERE event_id=?",String.class,event);
         db.update("UPDATE sys_external_event SET payload_ciphertext=? WHERE event_id=?",codec.encrypt("tampered retained canonical payload"),event);
+        var before=eventState(event);
         error(ErrorCode.INTEGRITY_FAILURE,() -> events.recover(oa,command,() -> {fail("tampered payload callback");return Map.of();}));
-        assertEquals(token,db.queryForObject("SELECT claim_token FROM sys_external_event WHERE event_id=?",String.class,event));
+        assertEquals(before,eventState(event));
         assertEquals("PENDING_RECOVERY",db.queryForObject("SELECT processing_status FROM sys_external_event WHERE event_id=?",String.class,event));
     }
 }

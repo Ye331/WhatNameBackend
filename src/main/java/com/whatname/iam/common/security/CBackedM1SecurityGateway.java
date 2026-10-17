@@ -12,6 +12,7 @@ public class CBackedM1SecurityGateway implements M1SecurityGateway {
         this.policy=policy; this.data=data;
     }
     public void prepareManagement(long actorId,long... targets) { policy.prepare(actorId,targets); }
+    public void prepareDepartmentManagement(long actorId,long departmentId) { policy.prepareDepartment(actorId,departmentId); }
     public void verifyIdentity(UserAccount user) { data.verifyIdentity(user); }
     public Set<Long> authorizeManagement(UserAccount actor,String permission) {
         var scope=policy.scope(actor.id);

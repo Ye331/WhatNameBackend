@@ -17,6 +17,8 @@ public interface DepartmentCollaboration {
     }
     /** Must precede organization/user reads and locks in every management transaction. */
     default void prepareManagement(Manager actor) { }
+    /** First call for a department write; production delegates to C's existing department check. */
+    default void prepareDepartmentManagement(Manager actor,long departmentId) { prepareManagement(actor); }
     Manager authenticateManager(HttpServletRequest request, String permission);
     TrustedEventContext authenticateHr(HttpServletRequest request, String eventType);
     void verifyTrustedEvent(TrustedEventContext context, String eventType);

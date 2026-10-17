@@ -48,6 +48,7 @@ public class UserService {
         final String phone=phoneHash;
         var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            requireFreshTransaction(status.isNewTransaction());
             security.prepareManagement(principal.userId());
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
@@ -86,6 +87,7 @@ public class UserService {
     public UserView detail(String bearer,String userId) {
         long id=parseId(userId);var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            requireFreshTransaction(status.isNewTransaction());
             security.prepareManagement(principal.userId(),id);
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
@@ -102,7 +104,8 @@ public class UserService {
         // Unrecoverable random secret is never returned and is never password history.
         try {
             return tx.execute(status->{
-                security.prepareManagement(principal.userId());
+                requireFreshTransaction(status.isNewTransaction());
+                security.prepareDepartmentManagement(principal.userId(),deptId);
                 UserAccount actor=auth.requireCurrentSession(principal);
                 requireScope(scope(actor,"IAM_USERS_WRITE"),deptId);
                 if(users.lockEligibleDepartment(deptId)==null) throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -125,6 +128,7 @@ public class UserService {
     public StatusResult changeStatus(String bearer,String userId,Status input) {
         long id=parseId(userId);var principal=jwt.verifyBearer(bearer);
         return tx.execute(status->{
+            requireFreshTransaction(status.isNewTransaction());
             security.prepareManagement(principal.userId(),id);
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_WRITE");
@@ -147,6 +151,9 @@ public class UserService {
         if(result==null || result.isEmpty() || result.stream().anyMatch(id->id==null || id<=0))
             throw new BusinessException(ErrorCode.PERMISSION_DENIED);
         return Set.copyOf(result);
+    }
+    private static void requireFreshTransaction(boolean fresh) {
+        if(!fresh) throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
     }
     private static void requireScope(Set<Long> scope,long dept) {if(!scope.contains(dept))throw new BusinessException(ErrorCode.OUT_OF_SCOPE);}
     private UserView view(UserAccount u) {

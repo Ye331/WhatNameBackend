@@ -73,16 +73,6 @@ public class AdminPolicyService {
         rules.requireActive(state, actorId);
         return state;
     }
-    /** A management context: all M5 tables, then the COMPLETE sorted actor/target user set.
-     * Always locking/current reads, even for A's scoped reads; never a cached RR snapshot. */
-    public AdminState requireManagementContext(long actorId, List<Long> targetUserIds) {
-        var ids = LongStream.concat(LongStream.of(actorId), targetUserIds.stream().mapToLong(Long::longValue))
-                .distinct().toArray();
-        var state = loader.load(true, ids);
-        integrity.verify(state);
-        rules.requireActive(state, actorId);
-        return state;
-    }
     private AdminState verified(long... userIds) {
         var state = loader.load(true, userIds);
         integrity.verify(state);

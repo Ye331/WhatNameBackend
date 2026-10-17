@@ -189,10 +189,54 @@ class Task12M5MySqlIntegrationTest {
         db.update("UPDATE sys_admin SET dept_id=? WHERE user_id=?",merged,actor.id);
         http("GET","/users",null,bearer,403);
     }
-    @Test void mergedDepartmentCannotReceiveCAppointmentOrNewAUsers() throws Exception {
-        assertThrows(BusinessException.class,()->app.getBean(AdminService.class).appoint(new AdminDtos.AppointmentRequest(other.id.toString(),2,Long.toString(merged),"task12")));
-        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_admin WHERE user_id=?",Integer.class,other.id));
+    @Test void mergedPersonnelDepartmentCannotAuthorizeThroughA() throws Exception {
+        db.update("UPDATE sys_user SET dept_id=? WHERE id=?",merged,actor.id);
+        data.seed(users.findById(actor.id));
+        http("GET","/users",null,bearer,403);
+        http("PATCH","/users/"+target.id+"/status",Map.of("status",2,"reason",prefix),bearer,403);
+        assertEquals(1,users.findById(target.id).status);
+    }
+    @Test void mergedDepartmentCannotReceiveNewAUsers() throws Exception {
+        // C is restored unchanged; its appointment/grant lifecycle gap is a team follow-up.
+        // This suite verifies the rule only at the A entry point owned by this change.
         http("POST","/users/temporary",temporary(merged),"Bearer "+jwt.issue(superior.id,1),422);
+    }
+    @Test void administratorPersonnelDepartmentMayBeOutsideOwnManagementRoot() throws Exception {
+        db.update("UPDATE sys_user SET dept_id=? WHERE id=?",outside,actor.id);
+        data.seed(users.findById(actor.id));
+        assertEquals(1,http("GET","/users?keyword="+prefix,null,bearer,200).at("/data/total").asInt());
+        http("GET","/users/"+target.id,null,bearer,200);
+        http("PATCH","/users/"+target.id+"/status",Map.of("status",2,"reason",prefix),bearer,200);
+        var created=http("POST","/users/temporary",temporary(child),bearer,200);
+        accountIds.add(Long.parseLong(created.at("/data/userId").asText()));
+        http("POST","/departments/"+child+"/freeze",Map.of("reason",prefix),bearer,200);
+    }
+    @Test void existingADepartmentTargetErrorsRemainOutOfScope() throws Exception {
+        http("POST","/users/temporary",temporary(outside),bearer,403);
+        http("POST","/departments/"+outside+"/freeze",Map.of("reason",prefix),bearer,403);
+        assertEquals(1,db.queryForObject("SELECT status FROM sys_dept WHERE id=?",Integer.class,outside));
+    }
+    @Test void managementEntrypointsRejectAnExistingSnapshotBeforeTakingAuthorityOrWriting() {
+        int integrityBefore=integrity.calls.get();
+        int evidenceBefore=db.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE source_system='TASK12_TEST' AND user_id=?",Integer.class,actor.id);
+        var outer=new TransactionTemplate(manager);
+        outer.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        outer.executeWithoutResult(status->{
+            // Establish an older caller snapshot; A must neither use it nor split the caller transaction.
+            assertEquals(1,db.queryForObject("SELECT status FROM sys_user WHERE id=?",Integer.class,target.id));
+            var userFailure=assertThrows(BusinessException.class,()->app.getBean(com.whatname.iam.service.user.UserService.class)
+                    .changeStatus(bearer,target.id.toString(),new com.whatname.iam.dto.user.UserRequests.Status(2,prefix)));
+            assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE,userFailure.errorCode());
+            var actorContext=new com.whatname.iam.service.department.DepartmentCollaboration.Manager(actor.id.toString(),jwt.verifyBearer(bearer));
+            var departmentFailure=assertThrows(BusinessException.class,()->app.getBean(com.whatname.iam.service.department.DepartmentService.class)
+                    .freeze(actorContext,child,true,prefix));
+            assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE,departmentFailure.errorCode());
+            status.setRollbackOnly();
+        });
+        assertEquals(integrityBefore,integrity.calls.get());
+        assertEquals(1,users.findById(target.id).status);assertEquals(1,users.findById(target.id).sessionVersion);
+        assertEquals(1,db.queryForObject("SELECT status FROM sys_dept WHERE id=?",Integer.class,child));
+        assertEquals(evidenceBefore,db.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE source_system='TASK12_TEST' AND user_id=?",Integer.class,actor.id));
     }
     @Test void malformedOrganizationCannotCreateManagementScope() throws Exception {
         try {
@@ -259,13 +303,15 @@ class Task12M5MySqlIntegrationTest {
     @Test void waitingRequestRechecksRealCRevocationAfterLockRelease() throws Exception { waitingChange("revoke"); }
     @Test void waitingRequestRechecksChangedScopeAfterLockRelease() throws Exception { waitingChange("scope"); }
     @Test void waitingRequestRechecksTargetMoveAfterLockRelease() throws Exception { waitingChange("target"); }
-    private void waitingChange(String change) throws Exception {
+    @Test void waitingListRechecksRealCRevocationBeforeBuildingItsSnapshot() throws Exception { waitingChange("revoke",true); }
+    private void waitingChange(String change) throws Exception { waitingChange(change,false); }
+    private void waitingChange(String change,boolean list) throws Exception {
         var held=new CountDownLatch(1);var release=new CountDownLatch(1);var started=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(2)) {
             var blocker=pool.submit(()-> {
                 data.cActor.set(superior.id);
                 try { return new TransactionTemplate(manager).execute(tx->{
-                    app.getBean(AManagementPolicy.class).prepare(superior.id,actor.id,target.id);
+                    if(change.equals("target")) app.getBean(AManagementPolicy.class).prepare(superior.id,target.id);
                     if(change.equals("revoke") || change.equals("scope"))
                         app.getBean(AdminService.class).revoke(actor.id.toString(),new AdminDtos.RevokeRequest("task12 concurrent revoke"));
                     if(change.equals("scope")) app.getBean(AdminService.class).appoint(new AdminDtos.AppointmentRequest(actor.id.toString(),2,Long.toString(outside),"task12 concurrent reappointment"));
@@ -276,7 +322,11 @@ class Task12M5MySqlIntegrationTest {
             });
             try {
                 assertTrue(held.await(10,TimeUnit.SECONDS));
-                var request=pool.submit(()->{started.countDown();return http("PATCH","/users/"+target.id+"/status",Map.of("status",2,"reason",prefix),bearer,change.equals("revoke")?403:404);});
+                var request=pool.submit(()->{
+                    started.countDown();
+                    return list?http("GET","/users?keyword="+prefix,null,bearer,403):
+                            http("PATCH","/users/"+target.id+"/status",Map.of("status",2,"reason",prefix),bearer,change.equals("revoke")?403:404);
+                });
                 assertTrue(started.await(5,TimeUnit.SECONDS));
                 Thread.sleep(250);assertFalse(request.isDone(),"request must wait for real M5 locks");
                 release.countDown();blocker.get(10,TimeUnit.SECONDS);request.get(10,TimeUnit.SECONDS);

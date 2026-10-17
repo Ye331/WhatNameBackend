@@ -1,5 +1,7 @@
 # Task06 integration contract
 
+**Historical Task06 record; superseded by Task20 (2026-10-18).** The unapproved event-owner column and migration02 below have been withdrawn; do not execute that historical migration. Current event schema matches main. Only the approved department-merge migration remains. Nonterminal online recovery is refused because existing interfaces cannot prove former workers have stopped. Current A-to-unchanged-C adaptation and limits are described in [the current integration section](task12-c-integration.md). Historical evidence below does not prove current source passed.
+
 This module provides DP01/02/03/04, HR01/05 and ExternalEventService. HR02/03/04 personnel handling is outside this implementation. C/D implementations are absent in the baseline. DepartmentIntegrationConfiguration installs a refusal adapter (503) when no DepartmentCollaboration bean exists. Only src/test has an allowing fixture. No production property enables it.
 
 ## Existing database

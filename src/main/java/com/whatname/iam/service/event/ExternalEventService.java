@@ -31,7 +31,7 @@ public class ExternalEventService {
                           String targetRef, OffsetDateTime occurredAt, Object businessPayload) {
         @Override public String toString() { return "ExternalEventCommand[redacted]"; }
     }
-    private record Claim(long id, String token, Map<String,Object> replay) { }
+    private record Claim(long id, Map<String,Object> replay) { }
     private final ExternalEventMapper mapper;
     private final SensitiveDataCodec codec;
     private final DepartmentCollaboration integration;
@@ -57,13 +57,13 @@ public class ExternalEventService {
         return run(context,command,applyAndAudit,false);
     }
 
-    /** Explicit operator-authorized recovery only. Row locking waits for an active business
-     * transaction; rotating the token fences a crashed/delayed former owner. APPLIED never reruns.
-     * Caller must use the handler registered for this event type, never a client-provided callback.
+    /** Existing terminal results may be replayed after recovery authorization. Nonterminal events
+     * are refused: authorization and a row lock cannot prove that an earlier worker has stopped.
+     * Offline recovery requires operators to stop event processing and verify that all former
+     * workers and database transactions have ended; this method does not perform that procedure.
      */
     public Map<String,Object> recover(TrustedEventContext context, Command command,
                                       Supplier<Map<String,Object>> applyAndAudit) {
-        integration.authorizeRecovery(context,command.eventType());
         return run(context,command,applyAndAudit,true);
     }
 
@@ -73,24 +73,32 @@ public class ExternalEventService {
             throw new IllegalStateException("Event orchestration must be called outside a caller transaction");
         validate(ctx,c);
         integration.verifyTrustedEvent(ctx,c.eventType());
+        if(recovery) integration.authorizeRecovery(ctx,c.eventType());
         String canonical=canonical(ctx,c);
         String digest=digest(canonical);
         Claim claim;
-        try { claim=claim(ctx,c,digest,canonical,recovery); }
-        catch (DuplicateKeyException raced) { claim=claim(ctx,c,digest,canonical,recovery); }
+        try {
+            try { claim=claim(ctx,c,digest,canonical,recovery); }
+            catch (DuplicateKeyException raced) { claim=claim(ctx,c,digest,canonical,recovery); }
+        } catch (RuntimeException receiptUnavailable) {
+            if(receiptUnavailable instanceof BusinessException) throw receiptUnavailable;
+            // An unknown receipt commit never grants permission to execute or to take over.
+            throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
+        }
         if (claim.replay()!=null) return claim.replay();
         Claim owned=claim;
         try {
             return businessTx.execute(tx -> {
                 // Always event row first, then organization, then users, then C/D facts/audit.
                 Map<String,Object> row=mapper.lock(ctx.sourceSystem(),c.eventId());
-                if (row==null || !owned.token().equals(row.get("token")) || !"PROCESSING".equals(row.get("status")))
+                if (row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))
+                        || !"PROCESSING".equals(row.get("status")))
                     throw new BusinessException(ErrorCode.VERSION_CONFLICT);
                 Map<String,Object> result=Objects.requireNonNull(work.get());
                 assertSafeResult(json.valueToTree(result));
                 String encoded=encode(result);
                 if (encoded.length()>65536) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
-                if (mapper.applied(owned.id(),owned.token(),encoded)!=1)
+                if (mapper.applied(owned.id(),encoded)!=1)
                     throw new BusinessException(ErrorCode.VERSION_CONFLICT);
                 return result;
             });
@@ -98,10 +106,19 @@ public class ExternalEventService {
             ErrorCode code=error instanceof BusinessException b ? b.errorCode() : ErrorCode.AUTH_STATE_UNAVAILABLE;
             boolean definitive=code.status().is4xxClientError();
             try {
-                shortTx.executeWithoutResult(tx -> mapper.failed(owned.id(),owned.token(),
-                        definitive ? "REJECTED" : "PENDING_RECOVERY",code.name()));
+                Map<String,Object> committed=shortTx.execute(tx -> {
+                    // A commit acknowledgement can be lost. Inspect the real locked state before
+                    // recording a failure, and never replace an already committed result.
+                    Map<String,Object> row=mapper.lock(ctx.sourceSystem(),c.eventId());
+                    if(row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))) return null;
+                    if("APPLIED".equals(row.get("status"))) return decode((String)row.get("result"));
+                    if("PROCESSING".equals(row.get("status")))
+                        mapper.failed(owned.id(),definitive ? "REJECTED" : "PENDING_RECOVERY",code.name());
+                    return null;
+                });
+                if(committed!=null) return committed;
             } catch (RuntimeException failureRecordUnavailable) {
-                // Retained PROCESSING remains fenced; only explicit controlled recovery is allowed.
+                // Preserve the retained state. Ordinary retries and online recovery never take over.
             }
             if (error instanceof BusinessException) throw error;
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
@@ -114,7 +131,7 @@ public class ExternalEventService {
             if (row!=null) {
                 if (!digest.equals(row.get("digest"))) throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
                 String status=(String)row.get("status");
-                if ("APPLIED".equals(status)) return new Claim(id(row),null,decode((String)row.get("result")));
+                if ("APPLIED".equals(status)) return new Claim(id(row),decode((String)row.get("result")));
                 if ("REJECTED".equals(status)) {
                     ErrorCode code;
                     try { code=ErrorCode.valueOf((String)row.get("summary")); }
@@ -123,19 +140,16 @@ public class ExternalEventService {
                 }
                 if (!recovery) throw new BusinessException("PROCESSING".equals(status)
                         ? ErrorCode.VERSION_CONFLICT : ErrorCode.AUTH_STATE_UNAVAILABLE);
-                // Verify encrypted retained payload before recovering, not just a caller's digest.
+                // Verify retained evidence, but do not confuse authorization with proof of quiescence.
                 if (!plaintext.equals(codec.decrypt((String)row.get("ciphertext"))))
                     throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-                String token=UUID.randomUUID().toString();
-                if (mapper.recover(id(row),token)!=1) throw new BusinessException(ErrorCode.VERSION_CONFLICT);
-                return new Claim(id(row),token,null);
+                throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
             }
             if (recovery) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
-            String token=UUID.randomUUID().toString();
             mapper.insert(ctx.sourceSystem(),c.eventId(),c.eventType(),c.eventVersion(),c.targetType(),
                     c.targetRef(),digest,codec.encrypt(plaintext),c.occurredAt()==null?null:
-                    c.occurredAt().withOffsetSameInstant(ZoneOffset.ofHours(8)).toLocalDateTime(),token);
-            return new Claim(id(mapper.lock(ctx.sourceSystem(),c.eventId())),token,null);
+                    c.occurredAt().withOffsetSameInstant(ZoneOffset.ofHours(8)).toLocalDateTime());
+            return new Claim(id(mapper.lock(ctx.sourceSystem(),c.eventId())),null);
         });
     }
     private static long id(Map<String,Object> row) { return ((Number)row.get("id")).longValue(); }

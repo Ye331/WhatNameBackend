@@ -27,10 +27,10 @@ $catalog = @{
     AMySql = [ordered]@{
         'com.whatname.iam.service.auth.M1MySqlIntegrationTest'=37
         'com.whatname.iam.service.hr.HrBusinessIntegrationTest'=21
-        'com.whatname.iam.service.department.DepartmentBusinessIntegrationTest'=20
+        'com.whatname.iam.service.department.DepartmentBusinessIntegrationTest'=23
         'com.whatname.iam.mapper.department.DepartmentMapperTest'=3
     }
-    ACM5 = [ordered]@{ 'com.whatname.iam.service.auth.Task12M5MySqlIntegrationTest'=17 }
+    ACM5 = [ordered]@{ 'com.whatname.iam.service.auth.Task12M5MySqlIntegrationTest'=22 }
 }
 $environmentNames = @('JAVA_HOME','Path','TASK05_DB_TEST','TASK07_DB_TEST','TASK12_DB_TEST',
     'DEPARTMENT_DB_TEST','DEPARTMENT_DB_URL','DEPARTMENT_DB_USERNAME','DEPARTMENT_DB_PASSWORD')

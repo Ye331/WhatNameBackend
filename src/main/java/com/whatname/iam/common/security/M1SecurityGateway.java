@@ -9,9 +9,11 @@ import java.util.Set;
  * and persist required signature/audit before returning. No production allow implementation.
  */
 public interface M1SecurityGateway {
-    /** Acquire M5 facts before any user/organization lock. Include ALL existing target users.
-     * Test gateways may substitute the entire boundary; production uses C's ordered context. */
+    /** First call in a fresh A transaction, before A user/organization reads or locks.
+     * Include the operation's existing target user so C obtains actor/target in ID order. */
     default void prepareManagement(long actorId, long... targetUserIds) { }
+    /** Existing C department-scope check is the first lock acquisition for new-user writes. */
+    default void prepareDepartmentManagement(long actorId,long departmentId) { prepareManagement(actorId); }
     void verifyIdentity(UserAccount user);
     /** M5 current scope and M6 function check after prepareManagement; IDs are trusted DB facts. */
     Set<Long> authorizeManagement(UserAccount actor, String permission);

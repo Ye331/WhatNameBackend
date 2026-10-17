@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.whatname.iam.common.api.ErrorCode.*;
 import static org.assertj.core.api.Assertions.*;
 
-@SpringBootTest(properties = "spring.config.import=")
+@SpringBootTest
 @Import(AdminIT.TestIntegrations.class)
 @Testcontainers
 class AdminIT {

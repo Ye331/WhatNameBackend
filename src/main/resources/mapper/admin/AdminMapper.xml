@@ -8,7 +8,7 @@
         <if test="lock">FOR UPDATE</if>
     </select>
     <select id="selectDepartments" resultType="com.whatname.iam.entity.admin.AdminData$Department">
-        SELECT id, parent_id, status, merged_into_dept_id FROM sys_dept ORDER BY id
+        SELECT id, parent_id, status FROM sys_dept ORDER BY id
         <if test="lock">FOR UPDATE</if>
     </select>
     <select id="selectRoles" resultType="com.whatname.iam.entity.admin.AdminData$Role">
