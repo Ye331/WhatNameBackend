@@ -5,7 +5,7 @@ Java 21 + Spring Boot + MyBatis + MySQL。Controller → Service → Mapper 三�
 ## 启动
 
 1. IDEA 打开 `pom.xml`，项目 SDK 和 Maven Runner 选择 JDK 21。
-2. 打开 Docker Desktop。首次在 `backend` 目录的 Terminal 执行：
+2. 打开 Docker Desktop。首次在后端仓库根目录（`pom.xml` 所在目录）的 Terminal 执行：
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
@@ -14,7 +14,7 @@ Java 21 + Spring Boot + MyBatis + MySQL。Controller → Service → Mapper 三�
 
    自动生成本地配置并建立23张表。之后在 Docker Desktop 启动 `whatname-iam` 即可，停止不会删除数据。
 3. 检查 `config/application-local.yml` 的数据库连接信息，默认Docker方式由脚本自动填写，无需再改；修改方法见下方。
-4. 打开 `IamApplication.java`，点击绿色运行按钮。工作目录为 `backend`，后端端口 `8080`。
+4. 打开 `IamApplication.java`，点击绿色运行按钮。工作目录为后端仓库根目录，后端端口 `8080`。
 
 ## 本地配置
 
@@ -48,4 +48,4 @@ IDEA 的 **Database → ＋ → MySQL**：地址 `127.0.0.1`，端口 `3307`，�
 - `main` 受保护，成员从最新 `main` 拉任务分支，提交PR/MR审查，由组织者合并。见 [Git开发规范](GIT_WORKFLOW.md)。
 - 本地配置、密码文件不提交；已有数据库改表使用迁移，不重复执行建表脚本。
 
-当前是骨架，业务功能待开发；不使用 Redis 或 DAO 层。
+C 第一阶段提供管理员规则与清单、单人授予与精确回收、异步批量基础，共 12 个接口。范围、请求示例及 A/B/D 接入约束见 [功能与接入说明](docs/C_STAGE1.md)，可复现命令与实际结果见 [测试报告](docs/C_STAGE1_TEST_REPORT.md)。真实认证、功能鉴权、签名和审计未接入时默认拒绝；完整权限链路仍待团队联调。
