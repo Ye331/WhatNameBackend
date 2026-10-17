@@ -53,4 +53,33 @@ public final class RouteTemplateUtils {
         }
         return "/" + String.join("/", canonical);
     }
+
+    public static boolean overlapsTemplate(String normalizedLeft, String normalizedRight) {
+        String[] leftParts = splitTemplate(normalizedLeft);
+        String[] rightParts = splitTemplate(normalizedRight);
+        if (leftParts.length != rightParts.length) {
+            return false;
+        }
+        for (int i = 0; i < leftParts.length; i++) {
+            String leftPart = leftParts[i];
+            String rightPart = rightParts[i];
+            boolean leftVariable = VARIABLE_PATTERN.matcher(leftPart).matches();
+            boolean rightVariable = VARIABLE_PATTERN.matcher(rightPart).matches();
+            if (leftVariable || rightVariable) {
+                continue;
+            }
+            if (!leftPart.equals(rightPart)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String[] splitTemplate(String normalizedTemplate) {
+        String[] parts = normalizedTemplate.substring(1).split("/");
+        if (parts.length == 1 && parts[0].isEmpty()) {
+            return new String[0];
+        }
+        return parts;
+    }
 }

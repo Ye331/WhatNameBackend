@@ -329,14 +329,13 @@ public class ResourceService {
     }
 
     private void validateTemplateConflict(long appId, String method, String apiPath, Long excludeApiId) {
-        String targetCanonical = RouteTemplateUtils.canonicalTemplate(apiPath);
         List<ApiEntity> existing = mapper.listApisByAppAndMethod(appId, method);
         for (ApiEntity candidate : existing) {
             if (excludeApiId != null && excludeApiId.equals(candidate.getId())) {
                 continue;
             }
-            String candidateCanonical = RouteTemplateUtils.canonicalTemplate(RouteTemplateUtils.normalizeTemplate(candidate.getApiPath()));
-            if (candidateCanonical.equals(targetCanonical)) {
+            String candidateTemplate = RouteTemplateUtils.normalizeTemplate(candidate.getApiPath());
+            if (RouteTemplateUtils.overlapsTemplate(apiPath, candidateTemplate)) {
                 throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
             }
         }
