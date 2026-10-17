@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 @Service
 public class ResourceService {
@@ -134,7 +135,7 @@ public class ResourceService {
         return new CreateMenuResult(entity.getId(), entity.getMenuType(), entity.getStatus());
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public UpdateMenuResult updateMenu(long menuId, UpdateMenuRequest request) {
         MenuEntity existing = requireMenu(menuId);
         lockApplication(existing.getAppId());
