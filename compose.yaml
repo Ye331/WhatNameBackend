@@ -23,6 +23,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/02_add_canonical_path_and_index.sql:/docker-entrypoint-initdb.d/02_add_canonical_path_and_index.sql:ro
     healthcheck:
       test:
         - CMD-SHELL
