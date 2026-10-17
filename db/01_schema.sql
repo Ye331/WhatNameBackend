@@ -144,6 +144,7 @@ CREATE TABLE `sys_dept` (
   `manager_id` BIGINT DEFAULT NULL COMMENT '部门经理用户ID',
   `sort_order` INT NOT NULL DEFAULT 0 COMMENT '排序',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1正常 0冻结',
+  `merged_into_dept_id` BIGINT DEFAULT NULL COMMENT '已合并去向，NULL未合并；status独立表示冻结',
   `hr_version` BIGINT NOT NULL DEFAULT 0 COMMENT '最后成功应用的HR部门事件版本',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -592,5 +593,26 @@ BEGIN
   IF EXISTS (SELECT 1 FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE ma.api_id=OLD.id AND m.app_id<>NEW.app_id) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='API update would break application boundary';
   END IF;
+END$$
+DELIMITER ;
+
+ALTER TABLE sys_dept
+ ADD KEY idx_dept_merged_into (merged_into_dept_id),
+ ADD CONSTRAINT fk_dept_merged_into FOREIGN KEY (merged_into_dept_id) REFERENCES sys_dept(id);
+DELIMITER $$
+CREATE TRIGGER tr_dept_merge_self BEFORE UPDATE ON sys_dept FOR EACH ROW
+BEGIN
+ IF NEW.merged_into_dept_id = NEW.id THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Department cannot merge into itself';
+ END IF;
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER tr_dept_merge_insert BEFORE INSERT ON sys_dept FOR EACH ROW
+BEGIN
+ IF NEW.merged_into_dept_id IS NOT NULL THEN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='New department cannot start merged';
+ END IF;
 END$$
 DELIMITER ;

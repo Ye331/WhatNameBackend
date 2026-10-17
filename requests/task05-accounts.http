@@ -1,0 +1,71 @@
+# All nine M1 routes. Supply private variables locally; do not commit credentials/responses.
+# Positive MySQL/HTTP demonstration with isolated C/D + SMS test doubles:
+# TASK05_DB_TEST=true, Maven -Dtest=M1MySqlIntegrationTest -DargLine=-Xmx768m test
+# See task05 handoff for the exclusive build lock and explicit Maven settings.
+# The suite starts/stops 127.0.0.1:18085 and tests the default-deny context on 18086.
+# A normally launched application refuses necessary C/D/SMS operations until real adapters exist.
+@baseUrl = http://127.0.0.1:18085/api/v1
+
+### AU01: USERNAME or PHONE, password only; unknown/uninitialized/paused/terminated/locked => 401 INVALID_CREDENTIALS
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"loginType":"USERNAME","identifier":"{{username}}","password":"{{password}}"}
+
+### AU05: proof is delivered only through the configured channel; never in this response
+POST {{baseUrl}}/auth/sms/send
+Content-Type: application/json
+
+{"phone":"{{phone}}","purpose":"SET_PASSWORD"}
+
+### AU07: repeat => 401 INVALID_CREDENTIALS; password policy/history => 422 BUSINESS_RULE_VIOLATION
+POST {{baseUrl}}/auth/password/initialize
+Content-Type: application/json
+
+{"phone":"{{phone}}","code":"{{setPasswordCode}}","newPassword":"{{newPassword}}"}
+
+### AU08: first request AU05 with purpose RESET_PASSWORD; password policy/history => 422, proof remains unconsumed
+POST {{baseUrl}}/auth/password/reset
+Content-Type: application/json
+
+{"phone":"{{phone}}","code":"{{resetPasswordCode}}","newPassword":"{{newPassword}}"}
+
+### AU04: repeat safely; only this jti is revoked
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{accessToken}}
+
+### US01: username/employee-number keyword, or complete mobile exact match
+# Name substring search remains unresolved; original design keyword=张 example is retained there.
+# Optional status/source: 1/2/3; page 1..1000000, pageSize 1..500. All filters intersect current scope.
+GET {{baseUrl}}/users?keyword={{keyword}}&page=1&pageSize=20
+Authorization: Bearer {{managerToken}}
+
+### US01: combine department, account state and origin with keyword
+GET {{baseUrl}}/users?keyword={{keyword}}&deptId={{deptId}}&status=2&source=1&page=1&pageSize=20
+Authorization: Bearer {{managerToken}}
+
+### US01: upper page boundary; empty items can still have a nonzero filtered total
+GET {{baseUrl}}/users?status=3&source=1&page=1000000&pageSize=500
+Authorization: Bearer {{managerToken}}
+
+### US01: 400 INVALID_ARGUMENT (also status=4, source=HR, pageSize=501)
+GET {{baseUrl}}/users?page=1000001
+Authorization: Bearer {{managerToken}}
+
+### US02
+GET {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{managerToken}}
+
+### US03: no initial password, SG number or automatic role; unique conflict => 409 DUPLICATE_RESOURCE
+POST {{baseUrl}}/users/temporary
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{"realName":"{{realName}}","phone":"{{phone}}","deptId":"{{deptId}}","reason":"temporary support"}
+
+### US04: 2 pauses, 1 resumes; old sessions stay invalid; HR/terminated target => 422, absent/outside => 404
+PATCH {{baseUrl}}/users/{{userId}}/status
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{"status":2,"reason":"temporary account paused"}
