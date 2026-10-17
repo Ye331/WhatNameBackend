@@ -11,6 +11,7 @@ import com.whatname.iam.mapper.department.OrganizationWriteMapper;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.auth.PasswordHasher;
 import com.whatname.iam.service.auth.NamePinyin;
+import com.whatname.iam.service.user.NameSearchIndex;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
 import java.time.Clock;
@@ -37,12 +38,14 @@ public class HrService {
     private final SensitiveDataCodec codec;
     private final PasswordHasher passwords;
     private final Clock clock;
+    private final NameSearchIndex nameIndex;
 
     public HrService(ExternalEventService events,OrganizationWriteMapper organization,DepartmentService departments,
             DepartmentCollaboration trusted,UserAccountMapper users,M1SecurityGateway identity,HrCollaboration grants,
-            SensitiveDataCodec codec,PasswordHasher passwords,@Qualifier("hrClock") Clock clock) {
+            SensitiveDataCodec codec,PasswordHasher passwords,@Qualifier("hrClock") Clock clock,NameSearchIndex nameIndex) {
         this.events=events;this.organization=organization;this.departments=departments;this.trusted=trusted;
         this.users=users;this.identity=identity;this.grants=grants;this.codec=codec;this.passwords=passwords;this.clock=clock;
+        this.nameIndex=nameIndex;
     }
 
     public Map<String,Object> employee(TrustedEventContext actor,String path,Employee r) {
@@ -86,6 +89,7 @@ public class HrService {
             if(!u.deptId.equals(target.getId())) move(actor,r.eventId(),u,target);
             profile(u,r,phone); update(u);
         }
+        nameIndex.replace(u,r.realName().strip());
         finish("HR_EMPLOYEE",actor,r.eventId(),u);
         return Map.of("eventId",r.eventId(),"processingStatus","APPLIED","userId",u.id.toString(),"username",u.username);
     }

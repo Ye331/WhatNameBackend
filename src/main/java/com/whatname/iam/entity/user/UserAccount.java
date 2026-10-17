@@ -14,5 +14,7 @@ public class UserAccount {
     public Long createdBy;
     public String tempReason;
     public LocalDateTime lastLoginAt,createdAt,updatedAt;
+    /** Query-only projection, never persisted or part of an HTTP account view. */
+    public Boolean nameSearchMatched;
     @Override public String toString(){return "UserAccount[redacted]";}
 }

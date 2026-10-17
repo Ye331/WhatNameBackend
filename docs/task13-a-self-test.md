@@ -13,8 +13,8 @@ $jdk = 'C:\path\to\jdk-21'
 
 | 套件 | 精确测试类（类名均唯一，实际 Maven 使用完整包名） | 当前用例数与证明边界 |
 |---|---|---|
-| `Unit`（默认） | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest | 50（含参数化实例）；密码/历史规则、JWT、编码和拼音，无数据库 |
-| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 30+20+20+3=73（Task16更新）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
+| `Unit`（默认） | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest、NameSearchTokensTest | 55（含参数化实例）；密码/历史规则、JWT、编码和拼音，无数据库 |
+| `AMySql`（显式） | M1MySqlIntegrationTest、HrBusinessIntegrationTest、DepartmentBusinessIntegrationTest、DepartmentMapperTest | 37+21+20+3=81（Task17更新）；真实 MySQL/HTTP，C/D 及需要时 SMS 为测试替身 |
 | `ACM5`（显式） | Task12M5MySqlIntegrationTest | 17；真实 A+C M5/SQL，D 是测试替身；包含生产依赖缺失时拒绝的断言 |
 
 Task15于2026-10-16北京时间19:32:43、19:33:16使用本入口分别验证当前AMySql 71项、ACM5 17项，均0失败/错误/跳过，Maven均为0；新增4项JUnit，Unit50未重跑。当前结果与限制见 [Task15修复报告](task15-account-password-fixes.md)，下文Task13原134项历史验证保持原事实。
@@ -23,7 +23,7 @@ Task16新增两个事件事务交错用例，Department当前20项、AMySql cata
 
 ## 显式写库套件
 
-仅用于自己已准备好的本地开发 MySQL：已有 23 表、111 条 `DEV-DEPT-R0002` 至 `DEV-DEPT-R0112` 受控基础部门，已按项目流程应用 `db/migrations/20261016_01_department_merge.sql` 和 `20261016_02_external_event_owner.sql`。本入口绝不执行 SQL 导入或迁移。保留 CHECK、外键、禁止物理删除与历史触发器。测试会创建随机前缀隔离部门、账号、授权/事件/审计夹具；收尾按既有机制暂停或离职账号、冻结部门、撤销夹具资格和有效关系，保留账号、来源、事件、签名和审计历史。故障/中断后应核查本次前缀，不能直接清库。
+仅用于自己已准备好的本地开发 MySQL：已有 25 表（原23表及两张姓名索引表）、111 条 `DEV-DEPT-R0002` 至 `DEV-DEPT-R0112` 受控基础部门，已按项目流程应用 `db/migrations/20261016_01_department_merge.sql` 、`20261016_02_external_event_owner.sql` 和 `20261017_01_user_name_search.sql`。本入口绝不执行 SQL 导入或迁移。保留 CHECK、外键、禁止物理删除与历史触发器。测试会创建随机前缀隔离部门、账号、授权/事件/审计夹具；收尾按既有机制暂停或离职账号、冻结部门、撤销夹具资格和有效关系，保留账号、来源、事件、签名和审计历史。故障/中断后应核查本次前缀，不能直接清库。
 
 启动前用私有终端环境设置三个变量；密码不要输入到带字面值的命令，也不要放入仓库模板。以下交互读取不会将密码值写到 PowerShell 命令历史：
 
@@ -58,7 +58,7 @@ try {
 
 Maven 非零、预期类/报告缺失、陈旧时间戳、零执行、计数变化、重复 testcase、失败、错误或任何 skip 均非零失败；不以 `BUILD SUCCESS` 作为唯一依据。源码新增用例后应审查并同步脚本中明确的预期计数，不能为使脚本通过而降低断言。已有输出/缺配置/锁占用等启动前失败只输出原因，不改已有证据；已启动的运行会留下失败 summary 与已取得报告。
 
-Task12 历史本机命令见 `docs/task12-c-integration.md`，同伴复现应使用本页仓库内入口。此前 C 自有 95 项不在此入口范围，不能与Task13历史134项（Unit50+A67+M5 17）重复累加为新的完整联调成绩。当前catalog共140项（Unit50+A73+M5 17）；这是可执行计数，具体新跑结果见对应任务报告。真实 D、HR 专用 C 来源回收/组织重审、姓名搜索口径、真实员工导入和性能仍未验收。
+Task12 历史本机命令见 `docs/task12-c-integration.md`，同伴复现应使用本页仓库内入口。此前 C 自有 95 项不在此入口范围，不能与Task13历史134项（Unit50+A67+M5 17）重复累加为新的完整联调成绩。当前catalog共153项（Unit55+A81+M5 17）；这是可执行计数，具体新跑结果见对应任务报告。Task17姓名搜索与受控回填说明见 [姓名搜索报告](task17-name-search.md)。真实 D、HR 专用 C 来源回收/组织重审、真实员工导入和完整性能仍未验收。
 
 ## Task13历史实际验证（2026-10-16，北京时间，保留原134项证据）
 

@@ -29,7 +29,7 @@
     session_version=#{sessionVersion},pwd_failed_count=0,pwd_locked_until=NULL WHERE id=#{id}</update>
   <update id="updateLoginState">UPDATE sys_user SET pwd_failed_count=#{pwdFailedCount},pwd_locked_until=#{pwdLockedUntil},last_login_at=#{lastLoginAt} WHERE id=#{id}</update>
   <update id="updateStatus">UPDATE sys_user SET status=#{status},session_version=#{sessionVersion} WHERE id=#{id} AND source=2</update>
-  <sql id="filter">
+  <sql id="scopeFilter">
     <where>
       <choose><when test="scope != null and !scope.isEmpty()">
         dept_id IN <foreach collection="scope" item="dept" open="(" separator="," close=")">#{dept}</foreach>
@@ -37,10 +37,22 @@
       <if test="deptId != null">AND dept_id=#{deptId}</if>
       <if test="accountStatus != null">AND status=#{accountStatus}</if>
       <if test="source != null">AND source=#{source}</if>
-      <if test="keyword != null">AND (LOCATE(#{keyword},username)&gt;0 OR LOCATE(#{keyword},employee_no)&gt;0
-        <if test="phoneHash != null">OR phone_hash=#{phoneHash}</if>)</if>
     </where>
   </sql>
-  <select id="list" resultMap="account">SELECT <include refid="columns"/> FROM sys_user <include refid="filter"/> ORDER BY id LIMIT #{limit} OFFSET #{offset}</select>
+  <sql id="filter">
+      <include refid="scopeFilter"/>
+      <if test="keyword != null">AND (LOCATE(#{keyword},username)&gt;0 OR LOCATE(#{keyword},employee_no)&gt;0
+        <if test="nameToken != null">OR EXISTS (SELECT 1 FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id AND nt.token=#{nameToken})</if>
+        <if test="phoneHash != null">OR phone_hash=#{phoneHash}</if>)</if>
+  </sql>
+  <select id="unreadyNames" resultType="int">
+    SELECT COUNT(*) FROM sys_user <include refid="scopeFilter"/>
+    AND NOT EXISTS (SELECT 1 FROM sys_user_name_state ns WHERE ns.user_id=sys_user.id
+      AND ns.generation=#{generation} AND ns.cipher_digest=SHA2(sys_user.real_name_ciphertext,256)
+      AND ns.token_count=(SELECT COUNT(*) FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id))
+  </select>
+  <select id="list" resultMap="account">SELECT <include refid="columns"/>
+    <if test="nameToken != null">,EXISTS (SELECT 1 FROM sys_user_name_token nt WHERE nt.user_id=sys_user.id AND nt.token=#{nameToken}) AS name_search_matched</if>
+    FROM sys_user <include refid="filter"/> ORDER BY id LIMIT #{limit} OFFSET #{offset}</select>
   <select id="count" resultType="int">SELECT COUNT(*) FROM sys_user <include refid="filter"/></select>
 </mapper>

@@ -19,10 +19,12 @@ public interface UserAccountMapper {
     int updateStatus(UserAccount user);
     Long lockEligibleDepartment(@Param("id") long id);
     List<UserAccount> list(@Param("scope") Set<Long> scope,@Param("deptId") Long deptId,
-                           @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,
+                           @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,@Param("nameToken") String nameToken,
                            @Param("accountStatus") Integer accountStatus,@Param("source") Integer source,
                            @Param("offset") long offset,@Param("limit") int limit);
     int count(@Param("scope") Set<Long> scope,@Param("deptId") Long deptId,
-              @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,
+              @Param("keyword") String keyword,@Param("phoneHash") String phoneHash,@Param("nameToken") String nameToken,
               @Param("accountStatus") Integer accountStatus,@Param("source") Integer source);
+    int unreadyNames(@Param("scope") Set<Long> scope,@Param("deptId") Long deptId,
+              @Param("accountStatus") Integer accountStatus,@Param("source") Integer source,@Param("generation") String generation);
 }

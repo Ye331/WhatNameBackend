@@ -109,7 +109,7 @@ class Task12M5MySqlIntegrationTest {
         KeyPairGenerator generator=KeyPairGenerator.getInstance("RSA"); generator.initialize(2048); var keys=generator.generateKeyPair();
         settings=new HashMap<>();
         settings.put("server.port",18089); settings.put("server.address","127.0.0.1");
-        for(String key:List.of("data-key","phone-hmac-key","sms-hmac-key")) {
+        for(String key:List.of("data-key","phone-hmac-key","sms-hmac-key","name-search-key")) {
             byte[] value=new byte[32];new SecureRandom().nextBytes(value);settings.put("iam.security."+key,Base64.getEncoder().encodeToString(value));
         }
         settings.put("iam.security.jwt-private-key",Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()));
@@ -156,6 +156,15 @@ class Task12M5MySqlIntegrationTest {
         http("GET","/users?deptId="+outside,null,bearer,403);
         assertEquals(1,http("GET","/users?keyword="+prefix+"&deptId="+child,null,bearer,200).at("/data/total").asInt());
         http("GET","/users/"+target.id,null,bearer,200);
+        // Same encrypted name inside/outside the real C subtree; outside must not be decrypted.
+        db.update("UPDATE sys_user SET real_name_ciphertext='task17-outside-unreadable' WHERE id=?",other.id);
+        try {
+            var first=http("GET","/users?keyword=Twelve&pageSize=1",null,bearer,200);
+            var second=http("GET","/users?keyword=Twelve&pageSize=1&page=2",null,bearer,200);
+            assertEquals(2,first.at("/data/total").asInt());assertEquals(2,second.at("/data/total").asInt());
+            assertEquals(Set.of(actor.id.toString(),target.id.toString()),Set.of(first.at("/data/items/0/userId").asText(),second.at("/data/items/0/userId").asText()));
+            assertEquals(1,http("GET","/users?keyword=Twelve&deptId="+child+"&source=2&status=1",null,bearer,200).at("/data/total").asInt());
+        } finally { db.update("UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",other.realNameCiphertext,other.id); }
     }
     @Test void levelOneSeesOtherRootsAndInvalidInputDoesNotCreateAuthority() throws Exception {
         String top="Bearer "+jwt.issue(superior.id,1);
@@ -306,7 +315,11 @@ class Task12M5MySqlIntegrationTest {
         db.update(c->{var s=c.prepareStatement("INSERT INTO sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized,temp_reason,created_by) VALUES(?,?,?,?,?,?,?,1,1,?,?)",new String[]{"id"});
             Object[] values={prefix+"user"+n,codec.encrypt("Task Twelve"),codec.encrypt(phone),codec.phoneHash(phone),"test-only-unusable-hash",dept,source,source==2?prefix:null,source==2?superior.id:null};
             for(int i=0;i<values.length;i++)s.setObject(i+1,values[i]);return s;},key);
-        long id=key.getKey().longValue();accountIds.add(id);var user=users.findById(id);data.seed(user);return user;
+        long id=key.getKey().longValue();accountIds.add(id);var user=users.findById(id);data.seed(user);
+        // Fixture initialization is not a maintenance operation and must not add business audit.
+        new TransactionTemplate(manager).executeWithoutResult(status->{
+            var current=users.lockById(id);app.getBean(com.whatname.iam.service.user.NameSearchIndex.class).replace(current,codec.decrypt(current.realNameCiphertext));
+        });return user;
     }
     private void appointment(long user,int level,long dept) {db.update("INSERT INTO sys_admin(user_id,admin_level,dept_id,status) VALUES(?,?,?,1)",user,level,dept);}
     private Map<String,Object> temporary(long dept) {return Map.of("deptId",Long.toString(dept),"realName","Task Twelve","phone","13912%06d".formatted(new SecureRandom().nextInt(1000000)),"reason",prefix);}

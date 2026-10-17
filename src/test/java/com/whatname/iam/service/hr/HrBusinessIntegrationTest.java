@@ -45,8 +45,9 @@ class HrBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.auth","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
-            SensitiveDataCodec.class,PasswordHasher.class,PasswordPolicy.class,JwtTokenService.class,
-            SmsCodeHasher.class,PublicRequestLimiter.class,AuthService.class,AuthController.class,GlobalExceptionHandler.class})
+            com.whatname.iam.service.user.NameSearchIndex.class,NameSearchTokens.class,SensitiveDataCodec.class,PasswordHasher.class,PasswordPolicy.class,JwtTokenService.class,
+            SmsCodeHasher.class,PublicRequestLimiter.class,AuthService.class,AuthController.class,GlobalExceptionHandler.class,
+            com.whatname.iam.service.user.UserService.class,com.whatname.iam.controller.user.UserController.class})
     static class TestApplication {
         @Bean TestPort testPort(JdbcTemplate db) { return new TestPort(db); }
         @Bean(name="hrClock") MutableClock hrClock() { return new MutableClock(); }
@@ -55,7 +56,7 @@ class HrBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods=false) @EnableAutoConfiguration
     @MapperScan({"com.whatname.iam.mapper.user","com.whatname.iam.mapper.department","com.whatname.iam.mapper.event"})
     @Import({HrService.class,HrController.class,DepartmentService.class,ExternalEventService.class,
-            SensitiveDataCodec.class,PasswordHasher.class,GlobalExceptionHandler.class,
+            com.whatname.iam.service.user.NameSearchIndex.class,NameSearchTokens.class,SensitiveDataCodec.class,PasswordHasher.class,GlobalExceptionHandler.class,
             DepartmentIntegrationConfiguration.class,HrIntegrationConfiguration.class,M1SecurityConfiguration.class})
     static class DefaultApplication {}
 
@@ -68,6 +69,8 @@ class HrBusinessIntegrationTest {
      * they do not implement or validate C's production algorithms or D's Ed25519/service auth. */
     static class TestPort implements DepartmentCollaboration,HrCollaboration,M1SecurityGateway {
         final JdbcTemplate db;volatile String fault="";
+        volatile long managementActor;
+        volatile Set<Long> managementScope=Set.of();
         TestPort(JdbcTemplate db){this.db=db;}
         void stage(String s){assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             if(fault.equals(s))throw new BusinessException(s.equals("audit")?ErrorCode.AUDIT_UNAVAILABLE:ErrorCode.INTEGRITY_FAILURE);}
@@ -97,7 +100,10 @@ class HrBusinessIntegrationTest {
             String stored=db.queryForObject("SELECT signature FROM sys_data_signature WHERE data_type='TASK07_USER' AND data_id=?",String.class,u.id);
             if(!fingerprint(u).equals(stored))throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
         }
-        public Set<Long> authorizeManagement(UserAccount a,String p){throw new BusinessException(ErrorCode.PERMISSION_DENIED);}
+        public Set<Long> authorizeManagement(UserAccount a,String p){
+            if(a.id!=managementActor || !"IAM_USERS_VIEW".equals(p))throw new BusinessException(ErrorCode.PERMISSION_DENIED);
+            return managementScope;
+        }
         public void signIdentity(UserAccount u){
             stage("identity");seedSignature(u);stage("afterIdentity");
         }
@@ -156,6 +162,7 @@ class HrBusinessIntegrationTest {
         KeyPairGenerator g=KeyPairGenerator.getInstance("RSA");g.initialize(2048);KeyPair keys=g.generateKeyPair();
         List<String> args=new ArrayList<>(List.of("--server.port=18087","--server.address=127.0.0.1",
                 "--iam.security.data-key="+key(0),"--iam.security.phone-hmac-key="+key(1),"--iam.security.sms-hmac-key="+key(2),
+                "--iam.security.name-search-key="+key(3),
                 "--iam.security.jwt-private-key="+Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()),
                 "--iam.security.jwt-public-key="+Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
                 "--iam.security.jwt-issuer=task07","--iam.security.jwt-audience=task07","--iam.security.jwt-key-id=task07",
@@ -216,6 +223,8 @@ class HrBusinessIntegrationTest {
         f.addAll(db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=? ORDER BY id",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_user_role WHERE user_id=? ORDER BY id",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_admin WHERE user_id=?",u.id));
+        f.addAll(db.queryForList("SELECT * FROM sys_user_name_state WHERE user_id=?",u.id));
+        f.addAll(db.queryForList("SELECT * FROM sys_user_name_token WHERE user_id=? ORDER BY token",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_data_signature WHERE data_type='TASK07_USER' AND data_id=?",u.id));
         f.addAll(db.queryForList("SELECT * FROM sys_operation_log WHERE source_system='TASK07_TEST' AND target_id=? ORDER BY id",u.id));return f;
     }
@@ -247,6 +256,31 @@ class HrBusinessIntegrationTest {
         http("PUT","/integrations/hr/employees/"+u.employeeNo,r,200);UserAccount after=row(u);
         assertEquals(u.id,after.id);assertEquals(u.username,after.username);assertEquals(stored,after.passwordHash);assertEquals(1,after.passwordInitialized);
         assertEquals(u.sessionVersion,after.sessionVersion);assertEquals(2,after.employmentType);assertEquals(20,after.hrVersion);
+        var search=app.getBean(NameSearchTokens.class);
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token WHERE user_id=? AND token=?",Integer.class,u.id,search.token("张三")));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token WHERE user_id=? AND token=?",Integer.class,u.id,search.token("李四")));
+        assertEquals(search.all(r.realName()),new TreeSet<>(db.queryForList("SELECT token FROM sys_user_name_token WHERE user_id=?",String.class,u.id)));
+    }
+
+    @Test void hrNameChangeRemovesOldKeywordAndAddsNewKeywordOverRealHttp() throws Exception {
+        UserAccount manager=create();initializeFixture(manager);port.managementActor=manager.id;
+        String code=prefix+"N17";long dept=department(code,null);port.managementScope=Set.of(dept);
+        String sg=sg();Employee first=new Employee("HR",event(),1L,sg,prefix.replace("-","")+"赵子龙",phone(),code,Action.UPSERT,EmploymentType.FORMAL,time);
+        long id=http("PUT","/integrations/hr/employees/"+sg,first,200).at("/data/userId").asLong();
+        String bearer="Bearer "+jwt.issue(manager.id,row(manager).sessionVersion);
+        assertEquals(id,searchName(bearer,dept,"子龙",1).at("/data/items/0/userId").asLong());
+        Employee update=new Employee("HR",event(),2L,sg,prefix.replace("-","")+"李小明",first.phone(),code,Action.SUSPEND,EmploymentType.FORMAL,time);
+        http("PUT","/integrations/hr/employees/"+sg,update,200);
+        searchName(bearer,dept,"子龙",0);assertEquals(id,searchName(bearer,dept,"小明",1).at("/data/items/0/userId").asLong());
+        assertEquals(users.findById(id).username,users.lockByEmployeeNo(sg).username);
+        port.managementActor=0;port.managementScope=Set.of();
+    }
+    JsonNode searchName(String bearer,long dept,String term,int count) throws Exception {
+        var request=HttpRequest.newBuilder(URI.create(base+"/users?deptId="+dept+"&source=1&keyword="+java.net.URLEncoder.encode(term,StandardCharsets.UTF_8)))
+                .header("Authorization",bearer).GET().build();
+        var response=HttpClient.newHttpClient().send(request,HttpResponse.BodyHandlers.ofString());
+        assertEquals(200,response.statusCode());JsonNode result=json.readTree(response.body());assertEquals(count,result.at("/data/total").asInt());
+        assertEquals(count,result.at("/data/items").size());return result;
     }
     @Test void unsupportedProfileNamesRejectCreationAndSuspendMoveWithoutChangingBusinessFactsOverHttp() throws Exception {
         UserAccount u=create();sources(u);initializeFixture(u);
@@ -396,7 +430,7 @@ class HrBusinessIntegrationTest {
         UserAccount u=create();db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)",u.id,role1);
         var before=facts(u);http("POST","/integrations/hr/transfers",transfer(u,3),503);assertEquals(before,facts(u));
         HrService unavailable=new HrService(app.getBean(ExternalEventService.class),app.getBean(com.whatname.iam.mapper.department.OrganizationWriteMapper.class),
-                app.getBean(DepartmentService.class),port,users,port,new HrIntegrationConfiguration().unavailableHrCollaboration(),codec,passwords,clock);
+                app.getBean(DepartmentService.class),port,users,port,new HrIntegrationConfiguration().unavailableHrCollaboration(),codec,passwords,clock,app.getBean(com.whatname.iam.service.user.NameSearchIndex.class));
         expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->unavailable.terminate(actor,termination(u,4,time)));assertEquals(before,facts(u));
     }
     @Test void concurrentPhoneAndSgUniquenessHaveOneWinnerAndNoPartialAccount() throws Exception {

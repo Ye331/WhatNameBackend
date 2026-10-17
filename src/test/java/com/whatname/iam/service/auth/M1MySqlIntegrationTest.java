@@ -57,6 +57,7 @@ class M1MySqlIntegrationTest {
         settings.put("server.port","18085");settings.put("server.address","127.0.0.1");
         settings.put("iam.security.data-key",randomKey());settings.put("iam.security.phone-hmac-key",randomKey());
         settings.put("iam.security.sms-hmac-key",randomKey());
+        settings.put("iam.security.name-search-key",randomKey());
         settings.put("iam.security.jwt-private-key",Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded()));
         settings.put("iam.security.jwt-public-key",Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
         settings.put("iam.security.jwt-issuer","task05-issuer");settings.put("iam.security.jwt-audience","task05-api");settings.put("iam.security.jwt-key-id","task05-random");
@@ -425,6 +426,196 @@ class M1MySqlIntegrationTest {
         http("GET",query,null,adminToken,401);
     }
 
+    @Test void chineseSingleCharacterNameSearchOverRealHttp() throws Exception {
+        long dept=nameDepartment("single17");
+        UserAccount u=seed("name17",1,1,dept,2);
+        db.update("UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",codec.encrypt("张小明"),u.id);
+        gateway.seedSignature(mapper.findById(u.id));
+        context.getBean(com.whatname.iam.service.user.NameSearchIndex.class).backfillBatch(u.id-1,u.id,1);
+        JsonNode result=http("GET","/users?deptId="+dept+"&keyword="+java.net.URLEncoder.encode("张",StandardCharsets.UTF_8),null,adminToken,200);
+        assertEquals(1,result.at("/data/total").asInt());
+        assertEquals(u.id.toString(),result.at("/data/items/0/userId").asText());
+    }
+
+    @Test void literalNameSubstringsUnicodeAndLegacyIdentifiersCoexistOverHttp() throws Exception {
+        long dept=nameDepartment("literal17");
+        UserAccount chinese=named("张小明",dept,1,1),latin=named("José Test%_\\Person",dept,1,2);
+        for(String term:List.of("张","张小明","小明","小"))assertNameIds(dept,term,Set.of(chinese.id));
+        for(String term:List.of("José","Jose\u0301","Test","%_\\","\\","Person"))assertNameIds(dept,term,Set.of(latin.id));
+        assertNameIds(dept,"_",Set.of(chinese.id,latin.id)); // Both existing usernames literally contain underscores.
+        for(String term:List.of("张明","jose","Jose","test","%Person"))assertNameIds(dept,term,Set.of());
+        for(String term:List.of(chinese.username,chinese.employeeNo,phone(chinese)))assertNameIds(dept,term,Set.of(chinese.id));
+        // A single row matching both username and name stays one result.
+        renameFixture(latin,latin.username);assertNameIds(dept,latin.username,Set.of(latin.id));
+        assertNameIds(dept,"  ",Set.of(chinese.id,latin.id));
+    }
+
+    @Test void nameScopeFilterIntersectionAndExactTotalAcrossPagesOverHttp() throws Exception {
+        long first=nameDepartment("matrix17a"),second=nameDepartment("matrix17b");
+        gateway.managers.put(admin.id,Set.of(first,second));
+        Set<Long> expected=new TreeSet<>();
+        for(long dept:List.of(first,second,outsideDept))for(int source=1;source<=3;source++)for(int state=1;state<=3;state++) {
+            UserAccount u=named("张小明",dept,state,source);
+            if(dept==first && state==2 && source==1)expected.add(u.id);
+        }
+        // Outside-scope unreadable ciphertext and stale index must not affect count/decryption.
+        UserAccount corrupt=named("张小明",outsideDept,2,1);
+        db.update("UPDATE sys_user SET real_name_ciphertext='unreadable-name17' WHERE id=?",corrupt.id);
+        String base="/users?keyword="+encoded("张")+"&status=2&source=1";
+        Set<String> seen=new HashSet<>();
+        for(int page=1;page<=3;page++) {
+            JsonNode r=http("GET",base+"&pageSize=1&page="+page,null,adminToken,200);
+            assertEquals(2,r.at("/data/total").asInt());assertEquals(page<=2?1:0,r.at("/data/items").size());
+            for(JsonNode item:r.at("/data/items"))assertTrue(seen.add(item.path("userId").asText()));
+        }
+        JsonNode exact=http("GET",base+"&deptId="+first,null,adminToken,200);
+        assertEquals(1,exact.at("/data/total").asInt());assertEquals(expected.iterator().next().toString(),exact.at("/data/items/0/userId").asText());
+        http("GET",base+"&deptId="+outsideDept,null,adminToken,403);
+        gateway.denyFunction=true;http("GET",base,null,adminToken,403);gateway.denyFunction=false;
+        db.update("UPDATE sys_user SET session_version=session_version+1 WHERE id=?",admin.id);
+        http("GET",base,null,adminToken,401);
+    }
+
+    @Test void oldMissingStaleOrIncompleteIndexesRejectThenExplicitBackfillIsIdempotentOverHttp() throws Exception {
+        long dept=nameDepartment("backfill17");UserAccount u=named("张三",dept,1,2);
+        var index=context.getBean(com.whatname.iam.service.user.NameSearchIndex.class);
+        var state=db.queryForList("SELECT * FROM sys_user_name_state WHERE user_id=?",u.id);
+        var tokens=db.queryForList("SELECT * FROM sys_user_name_token WHERE user_id=? ORDER BY token",u.id);
+        db.update("DELETE FROM sys_user_name_state WHERE user_id=?",u.id);
+        db.update("DELETE FROM sys_user_name_token WHERE user_id=?",u.id);
+        assertEquals("INTEGRITY_FAILURE",http("GET","/users?deptId="+dept+"&keyword="+encoded("张"),null,adminToken,503).path("code").asText());
+        // Empty keyword needs no index and still returns the authorized encrypted profile.
+        assertNameIds(dept,"",Set.of(u.id));
+        JsonNode excluded=http("GET","/users?deptId="+dept+"&source=1&keyword="+encoded("张"),null,adminToken,200);
+        assertEquals(0,excluded.at("/data/total").asInt());
+        for(int i=0;i<2;i++)assertEquals(u.id,index.backfillBatch(u.id-1,u.id,1));
+        assertEquals(state,db.queryForList("SELECT * FROM sys_user_name_state WHERE user_id=?",u.id));
+        assertEquals(tokens,db.queryForList("SELECT * FROM sys_user_name_token WHERE user_id=? ORDER BY token",u.id));
+        assertNameIds(dept,"张",Set.of(u.id));
+        db.update("UPDATE sys_user_name_state SET generation=REPEAT('0',64) WHERE user_id=?",u.id);
+        http("GET","/users?deptId="+dept+"&keyword="+u.username,null,adminToken,503);
+        index.backfillBatch(u.id-1,u.id,1);
+        db.update("DELETE FROM sys_user_name_token WHERE user_id=? AND token=?",u.id,context.getBean(NameSearchTokens.class).token("张"));
+        http("GET","/users?deptId="+dept+"&keyword="+encoded("张"),null,adminToken,503);
+        index.backfillBatch(u.id-1,u.id,1);
+        // Audit failure must preserve a stale checkpoint, rather than falsely marking it ready.
+        db.update("UPDATE sys_user_name_state SET generation=REPEAT('0',64) WHERE user_id=?",u.id);
+        gateway.failAudit=true;
+        expect(ErrorCode.AUDIT_UNAVAILABLE,()->index.backfillBatch(u.id-1,u.id,1));gateway.failAudit=false;
+        assertEquals("0".repeat(64),db.queryForObject("SELECT generation FROM sys_user_name_state WHERE user_id=?",String.class,u.id));
+        assertEquals(tokens,db.queryForList("SELECT * FROM sys_user_name_token WHERE user_id=? ORDER BY token",u.id));
+        index.backfillBatch(u.id-1,u.id,1);
+        assertNameIds(dept,"张",Set.of(u.id));
+        // Simulated full-token false positive preserves row count; fail, never drop a page item.
+        db.update("UPDATE sys_user_name_token SET token=? WHERE user_id=? AND token=?",context.getBean(NameSearchTokens.class).token("李"),u.id,context.getBean(NameSearchTokens.class).token("三"));
+        http("GET","/users?deptId="+dept+"&keyword="+encoded("李"),null,adminToken,503);
+        index.backfillBatch(u.id-1,u.id,1);
+        // Execute the real opt-in local non-web maintenance runner on this fixture only.
+        var maintenance=new SpringApplicationBuilder(TestBootstrap.class,TestWiring.class).profiles("task05-test").properties(settings)
+                .run(LocalTestDatabase.arguments("--spring.main.web-application-type=none","--iam.maintenance.name-index=true",
+                        "--iam.maintenance.after-id="+(u.id-1),"--iam.maintenance.through-id="+u.id,"--iam.maintenance.batch-size=1","--logging.level.root=WARN"));
+        assertFalse(maintenance.isActive());
+        // Partial batch failure is resumable from the old checkpoint; no plaintext checkpoint file.
+        UserAccount first=named("许文强",dept,1,2),second=named("赵子龙",dept,1,2);
+        db.update("DELETE FROM sys_user_name_state WHERE user_id=?",first.id);
+        db.update("UPDATE sys_user SET real_name_ciphertext='invalid-gcm-name17' WHERE id=?",second.id);
+        gateway.seedSignature(mapper.findById(second.id));
+        expect(ErrorCode.INTEGRITY_FAILURE,()->index.backfillBatch(first.id-1,second.id,100));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_state WHERE user_id=?",Integer.class,first.id));
+        db.update("UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",second.realNameCiphertext,second.id);gateway.seedSignature(second);
+        assertEquals(second.id,index.backfillBatch(first.id-1,second.id,100));
+        assertNameIds(dept,"子龙",Set.of(second.id));
+    }
+
+    @Test void concurrentReplacementAndBackfillSerializeAndReadersSeeCompleteCommittedNamesOverHttp() throws Exception {
+        long dept=nameDepartment("concurrent17");UserAccount u=named("张三",dept,1,2);
+        TestNameIndex index=context.getBean(TestNameIndex.class);
+        var manager=context.getBean(org.springframework.transaction.PlatformTransactionManager.class);
+        var pool=Executors.newFixedThreadPool(2);
+        index.written=new CountDownLatch(1);index.release=new CountDownLatch(1);index.pauseId=u.id;
+        try {
+            Future<?> writer=pool.submit(()->new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(status->{
+                UserAccount current=mapper.lockById(u.id);
+                current.realNameCiphertext=codec.encrypt("李小明");
+                db.update("UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",current.realNameCiphertext,u.id);
+                index.replace(current,"李小明");gateway.seedSignature(current);
+            }));
+            assertTrue(index.written.await(10,TimeUnit.SECONDS));
+            Future<Long> backfill=pool.submit(()->index.backfillBatch(u.id-1,u.id,1));
+            // The writer has replaced real SQL tokens but has not committed the profile/signature.
+            assertNameIds(dept,"张",Set.of(u.id));assertNameIds(dept,"李",Set.of());
+            assertFalse(backfill.isDone());
+            index.pauseId=0;index.release.countDown();writer.get(15,TimeUnit.SECONDS);
+            assertEquals(u.id,backfill.get(15,TimeUnit.SECONDS));
+            assertNameIds(dept,"张",Set.of());assertNameIds(dept,"小明",Set.of(u.id));
+            assertEquals(context.getBean(NameSearchTokens.class).all("李小明").size(),db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token WHERE user_id=?",Integer.class,u.id));
+        } finally {
+            index.pauseId=0;index.release.countDown();pool.shutdownNow();assertTrue(pool.awaitTermination(20,TimeUnit.SECONDS));
+        }
+    }
+
+    @Test void temporaryCreationIndexesNamesAtomicallyAndFaultsLeaveNoIndexOrAccountOverHttp() throws Exception {
+        long dept=nameDepartment("create17");
+        String phone=nextPhone();
+        JsonNode r=http("POST","/users/temporary",Map.of("realName","张小明","phone",phone,"deptId",String.valueOf(dept),"reason",PREFIX+"name17"),adminToken,200);
+        long id=r.at("/data/userId").asLong();fixtureIds.add(id);fixturePhones.add(codec.phoneHash(phone));
+        assertNameIds(dept,"小明",Set.of(id));
+        int before=db.queryForObject("SELECT COUNT(*) FROM sys_user_name_state",Integer.class);
+        int tokenBefore=db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token",Integer.class);
+        for(String fault:List.of("sign","audit","index")) {
+            String fresh=nextPhone();gateway.failSign=fault.equals("sign");gateway.failAudit=fault.equals("audit");
+            context.getBean(TestNameIndex.class).fail=fault.equals("index");
+            try {
+                http("POST","/users/temporary",Map.of("realName","张三","phone",fresh,"deptId",String.valueOf(dept),"reason",PREFIX+"fault17"),adminToken,503);
+                assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",Integer.class,codec.phoneHash(fresh)));
+                assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_state",Integer.class));
+                assertEquals(tokenBefore,db.queryForObject("SELECT COUNT(*) FROM sys_user_name_token",Integer.class));
+            } finally {
+                gateway.failSign=false;gateway.failAudit=false;
+                context.getBean(TestNameIndex.class).fail=false;
+            }
+        }
+    }
+
+    @Test void missingMalformedAndReusedNameKeysRejectSearchAndCreationOverRealHttp() throws Exception {
+        long dept=nameDepartment("keys17");UserAccount u=named("张三",dept,1,2);
+        for(String bad:List.of("","bad",(String)settings.get("iam.security.data-key"))) {
+            Map<String,Object> defaults=new HashMap<>(settings);defaults.put("server.port","18086");
+            try(var broken=new SpringApplicationBuilder(TestBootstrap.class,TestWiring.class).profiles("task05-test").properties(defaults)
+                    .run(LocalTestDatabase.arguments("--server.port=18086","--server.address=127.0.0.1","--iam.security.name-search-key="+bad,"--logging.level.root=WARN"))) {
+                broken.getBean(TestGateway.class).managers.put(admin.id,Set.of(dept));
+                for(String path:List.of("/users?deptId="+dept+"&keyword="+encoded("张"),"/users?deptId="+dept+"&keyword="+u.username)) {
+                    var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:18086/api/v1"+path)).header("Authorization",adminToken).GET().build();
+                    var response=HttpClient.newHttpClient().send(request,HttpResponse.BodyHandlers.ofString());
+                    assertEquals(503,response.statusCode());assertEquals("INTEGRITY_FAILURE",json.readTree(response.body()).path("code").asText());
+                }
+                int before=db.queryForObject("SELECT COUNT(*) FROM sys_user",Integer.class);
+                expect(ErrorCode.INTEGRITY_FAILURE,()->broken.getBean(UserService.class).createTemporary(adminToken,
+                        new UserRequests.Temporary("张三",nextPhone(),String.valueOf(dept),PREFIX+"bad-key")));
+                assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM sys_user",Integer.class));
+            }
+        }
+        assertNameIds(dept,"张",Set.of(u.id));
+    }
+
+    private long nameDepartment(String suffix) {
+        long dept=department(allowedDept,db.queryForObject("SELECT dept_path FROM sys_dept WHERE id=?",String.class,allowedDept),suffix,1,null);
+        gateway.managers.put(admin.id,Set.of(dept));return dept;
+    }
+    private UserAccount named(String name,long dept,int state,int source) {
+        UserAccount u=seed("name17",1,state,dept,source);renameFixture(u,name);return mapper.findById(u.id);
+    }
+    private void renameFixture(UserAccount u,String name) {
+        db.update("UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",codec.encrypt(name),u.id);
+        gateway.seedSignature(mapper.findById(u.id));context.getBean(com.whatname.iam.service.user.NameSearchIndex.class).backfillBatch(u.id-1,u.id,1);
+    }
+    private static String encoded(String term){return java.net.URLEncoder.encode(term,StandardCharsets.UTF_8);}
+    private void assertNameIds(long dept,String term,Set<Long> expected) throws Exception {
+        JsonNode r=http("GET","/users?deptId="+dept+"&keyword="+encoded(term),null,adminToken,200);
+        Set<Long> ids=new HashSet<>();for(JsonNode item:r.at("/data/items"))assertTrue(ids.add(item.path("userId").asLong()));
+        assertEquals(expected,ids);assertEquals(expected.size(),r.at("/data/total").asInt());
+    }
+
     @Test void invalidFilterEnumsTypesAndPageBoundsReturnUnified400OverHttp() throws Exception {
         for(String query:List.of("status=0","status=4","status=-1","status=ACTIVE","status=1.5","status=2147483648",
                 "source=0","source=4","source=-1","source=HR","source=1.5","source=2147483648",
@@ -536,7 +727,8 @@ class M1MySqlIntegrationTest {
             for(int i=0;i<values.length;i++)s.setObject(i+1,values[i]);return s;},key);
         long id=Objects.requireNonNull(key.getKey()).longValue();fixtureIds.add(id);UserAccount u=mapper.findById(id);
         if(initialized==1)db.update("INSERT INTO sys_password_history(user_id,password_hash) VALUES(?,?)",id,originalHash);
-        gateway.seedSignature(u);return u;
+        gateway.seedSignature(u);
+        context.getBean(com.whatname.iam.service.user.NameSearchIndex.class).backfillBatch(id-1,id,1);return u;
     }
     private long department(long parent,String parentPath,String suffix,int status,Long merged) {
         var key=new GeneratedKeyHolder();
@@ -568,6 +760,28 @@ class M1MySqlIntegrationTest {
     public static class TestWiring {
         @Bean @Primary TestGateway task05Gateway(JdbcTemplate db){return new TestGateway(db);}
         @Bean @Primary TestSms task05Sms(){return new TestSms();}
+        @Bean @Primary TestNameIndex task17Index(com.whatname.iam.mapper.user.NameSearchMapper index,UserAccountMapper users,
+                NameSearchTokens tokens,SensitiveDataCodec codec,M1SecurityGateway security,org.springframework.transaction.PlatformTransactionManager manager) {
+            return new TestNameIndex(index,users,tokens,codec,security,manager);
+        }
+    }
+    /** Fault only after actual SQL replacement, entirely src/test; no schema/trigger changes. */
+    public static class TestNameIndex extends com.whatname.iam.service.user.NameSearchIndex {
+        volatile boolean fail;
+        volatile long pauseId;
+        volatile CountDownLatch written,release;
+        TestNameIndex(com.whatname.iam.mapper.user.NameSearchMapper index,UserAccountMapper users,NameSearchTokens tokens,
+                SensitiveDataCodec codec,M1SecurityGateway security,org.springframework.transaction.PlatformTransactionManager manager) {
+            super(index,users,tokens,codec,security,manager);
+        }
+        @Override public void replace(UserAccount user,String name) {
+            super.replace(user,name);if(fail)throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
+            if(user.id==pauseId) {
+                written.countDown();
+                try {if(!release.await(15,TimeUnit.SECONDS))throw new AssertionError("name index barrier timed out");}
+                catch(InterruptedException e){Thread.currentThread().interrupt();throw new AssertionError(e);}
+            }
+        }
     }
     public static class TestSms implements SmsSender {
         final Map<String,String> deliveries=new ConcurrentHashMap<>();volatile boolean fail,failSend;

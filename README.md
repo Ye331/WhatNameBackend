@@ -12,7 +12,7 @@ Java 21 + Spring Boot + MyBatis + MySQL。Controller → Service → Mapper 三�
    docker compose up -d --wait
    ```
 
-   自动生成本地配置并建立23张表。之后在 Docker Desktop 启动 `whatname-iam` 即可，停止不会删除数据。
+   自动生成本地配置并建立25张表（原23表及2张姓名盲索引表）。之后在 Docker Desktop 启动 `whatname-iam` 即可，停止不会删除数据。
 3. 检查 `config/application-local.yml` 的数据库连接信息，默认Docker方式由脚本自动填写，无需再改；修改方法见下方。
 4. 打开 `IamApplication.java`，点击绿色运行按钮。工作目录为 `backend`，后端端口 `8080`。
 
@@ -53,3 +53,5 @@ IDEA 的 **Database → ＋ → MySQL**：地址 `127.0.0.1`，端口 `3307`，�
 单人授予、按来源精确回收、用户角色和授权来源查询已提供第一阶段实现，见 [授权模块说明](docs/GRANTS_STAGE1.md) 和 [授权测试报告](docs/GRANTS_STAGE1_TEST_REPORT.md)。支持多来源共存、用户授权版本保护和事务内签名/审计接入；依赖未接入时默认拒绝。
 
 批量基础复用单人业务，提供异步任务、逐项独立事务、幂等提交及范围过滤后的分页结果，见 [批量模块说明](docs/BATCH_STAGE1.md) 和 [批量测试报告](docs/BATCH_STAGE1_TEST_REPORT.md)。本阶段不含 dryRun、重启恢复和自动重试；OA、HR 及真实认证／签名／审计联调仍待后续完成。
+
+US01 支持单字及中间片段姓名包含搜索，保留用户名/SG 子串与完整手机号查询。现有库须显式执行 `db/migrations/20261017_01_user_name_search.sql`，配置独立 `iam.security.name-search-key` 并对旧账号受控回填；未就绪的范围内关键词查询返回503。归一化、维护命令、泄露与真实D待复核边界见 [姓名搜索](docs/task17-name-search.md)。

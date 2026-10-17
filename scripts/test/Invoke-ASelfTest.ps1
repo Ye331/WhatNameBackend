@@ -22,11 +22,12 @@ $catalog = @{
         'com.whatname.iam.service.auth.PasswordPolicyTest'=20
         'com.whatname.iam.common.security.JwtTokenServiceTest'=4
         'com.whatname.iam.common.security.SensitiveDataCodecTest'=3
+        'com.whatname.iam.common.security.NameSearchTokensTest'=5
         'com.whatname.iam.service.auth.NamePinyinTest'=2
     }
     AMySql = [ordered]@{
-        'com.whatname.iam.service.auth.M1MySqlIntegrationTest'=30
-        'com.whatname.iam.service.hr.HrBusinessIntegrationTest'=20
+        'com.whatname.iam.service.auth.M1MySqlIntegrationTest'=37
+        'com.whatname.iam.service.hr.HrBusinessIntegrationTest'=21
         'com.whatname.iam.service.department.DepartmentBusinessIntegrationTest'=20
         'com.whatname.iam.mapper.department.DepartmentMapperTest'=3
     }
@@ -114,8 +115,8 @@ try {
         $hash = (Get-FileHash -LiteralPath (Join-Path $repo $inputPath) -Algorithm SHA256).Hash.ToLowerInvariant()
         $result.sourceManifest += [pscustomobject]@{path=$inputPath;sha256=$hash}
     }
-    # git ls-files omits new test configuration files until committed.
-    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $repo 'src/test') -Recurse -File) {
+    # git ls-files omits new production/test files until committed.
+    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Recurse -File) {
         $relative = $file.FullName.Substring($repo.Length+1).Replace('\','/')
         if ($relative -notin $result.sourceManifest.path) {
             $result.sourceManifest += [pscustomobject]@{path=$relative;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}

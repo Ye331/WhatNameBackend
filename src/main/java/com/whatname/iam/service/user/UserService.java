@@ -25,10 +25,14 @@ public class UserService {
     private final SensitiveDataCodec codec;
     private final M1SecurityGateway security;
     private final PasswordHasher hasher;
+    private final NameSearchIndex nameIndex;
+    private final NameSearchTokens nameTokens;
     private final TransactionTemplate tx;
     public UserService(UserAccountMapper users,AuthService auth,JwtTokenService jwt,SensitiveDataCodec codec,
-                         M1SecurityGateway security,PasswordHasher hasher,PlatformTransactionManager manager) {
+                         M1SecurityGateway security,PasswordHasher hasher,PlatformTransactionManager manager,
+                         NameSearchIndex nameIndex,NameSearchTokens nameTokens) {
         this.users=users;this.auth=auth;this.jwt=jwt;this.codec=codec;this.security=security;this.hasher=hasher;
+        this.nameIndex=nameIndex;this.nameTokens=nameTokens;
         tx=new TransactionTemplate(manager);tx.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);tx.setTimeout(30);
     }
     public record UserView(String userId,String username,String sgNo,String realName,String phoneMasked,
@@ -51,8 +55,22 @@ public class UserService {
             UserAccount actor=auth.requireCurrentSession(principal);
             Set<Long> scope=scope(actor,"IAM_USERS_VIEW");
             if(department!=null) requireScope(scope,department);
-            int count=users.count(scope,department,term,phone,accountStatus,source);
-            List<UserView> items=users.list(scope,department,term,phone,accountStatus,source,((long)page-1)*pageSize,pageSize).stream().map(this::view).toList();
+            String nameToken=null;
+            if(term!=null) {
+                String generation=nameTokens.generation();
+                if(users.unreadyNames(scope,department,accountStatus,source,generation)>0)
+                    throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
+                nameToken=nameTokens.token(NameSearchTokens.normalize(term));
+            }
+            int count=users.count(scope,department,term,phone,nameToken,accountStatus,source);
+            String normalizedTerm=term==null?null:NameSearchTokens.normalize(term);
+            List<UserView> items=users.list(scope,department,term,phone,nameToken,accountStatus,source,((long)page-1)*pageSize,pageSize).stream().map(u->{
+                UserView result=view(u);
+                // A collision/corrupt membership is an integrity error, never a post-page filter.
+                if(Boolean.TRUE.equals(u.nameSearchMatched) && !NameSearchTokens.normalize(result.realName()).contains(normalizedTerm))
+                    throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
+                return result;
+            }).toList();
             security.audit("US01_LIST",actor.id,null,"SCOPED_READ");
             return new PageResponse<>(items,page,pageSize,count);
         });
@@ -90,7 +108,8 @@ public class UserService {
                 u.phoneHash=codec.phoneHash(normalized);u.passwordHash=placeholder;u.deptId=deptId;
                 u.createdBy=actor.id;u.tempReason=input.reason().strip();u.source=2;u.status=1;u.passwordInitialized=0;
                 u.sessionVersion=1L;u.grantRevision=1L;u.hrVersion=0L;u.pwdFailedCount=0;
-                users.insertTemporary(u);security.signIdentity(u);security.audit("US03_CREATE",actor.id,u.id,u.tempReason);
+                users.insertTemporary(u);nameIndex.replace(u,input.realName().strip());
+                security.signIdentity(u);security.audit("US03_CREATE",actor.id,u.id,u.tempReason);
                 return new Created(u.id.toString(),u.username,2,mask(normalized),u.deptId.toString(),1);
             });
         } catch(DuplicateKeyException e) {throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);}
