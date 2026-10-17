@@ -4,7 +4,7 @@ import com.whatname.iam.entity.admin.AdminData.*;
 import com.whatname.iam.mapper.admin.AdminMapper;
 import java.util.*;
 
-/** An in-memory boundary for service tests; transaction behavior is tested against MySQL in AdminIT. */
+/** 为服务测试提供内存数据替身；真实事务行为由 AdminIT 使用 MySQL 验证。 */
 public class AdminTestFixture implements AdminMapper {
     public final Map<Long, Appointment> appointments = new TreeMap<>();
     public final Map<Long, Department> departments = new TreeMap<>();

@@ -2,13 +2,13 @@ package com.whatname.iam.service.grant;
 
 import com.whatname.iam.service.admin.AdminState;
 
-/** Adapters must verify canonical records and join the calling database transaction. */
+/** 适配器必须验证完整规范记录，并加入调用方的数据库事务。 */
 public final class GrantPorts {
     private GrantPorts() {}
     public interface Integrity {
-        // Verify full canonical user identity (including grant revision), sources and relationship sets.
+        // 验证完整规范用户身份（含授权修订号）、授权来源和角色关系集合。
         void verify(GrantState state);
-        // Sign updated user identity and sets, including empty sets after final revocation.
+        // 为更新后的用户身份及集合签名，包括回收最后一份来源后的空集合。
         void sign(GrantState state);
     }
     public interface Audit { void record(Change change); }

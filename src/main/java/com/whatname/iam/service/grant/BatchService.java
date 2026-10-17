@@ -32,8 +32,13 @@ public class BatchService {
     public BatchService(BatchMapper mapper, AdminPolicyService policy, AdminRules rules, AdminPorts.Identity identity,
                         AdminPorts.Functions functions, BatchWorker worker, @Qualifier("grantBatchExecutor") Executor executor,
                         PlatformTransactionManager manager) {
-        this.mapper = mapper; this.policy = policy; this.rules = rules; this.identity = identity;
-        this.functions = functions; this.worker = worker; this.executor = executor;
+        this.mapper = mapper;
+        this.policy = policy;
+        this.rules = rules;
+        this.identity = identity;
+        this.functions = functions;
+        this.worker = worker;
+        this.executor = executor;
         write = new TransactionTemplate(manager);
         write.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         read = new TransactionTemplate(manager);
@@ -71,7 +76,7 @@ public class BatchService {
                 return new Submission(true, new Accepted(batch.id().toString(), "PENDING", items.size()));
             });
         } catch (DuplicateKeyException race) {
-            // A unique-key loser must read the winner in a fresh transaction, not its failed snapshot.
+            // 唯一键竞争失败后，必须开启新事务读取已成功提交的任务，不能沿用失败事务的旧快照。
             return read.execute(tx -> {
                 functions.require(actor, "IAM_GRANTS_WRITE");
                 var batch = mapper.byKey(actor, key);
@@ -81,7 +86,8 @@ public class BatchService {
         }
     }
     public Result result(String batchId, int page, int pageSize) {
-        long batch = BatchInput.id(batchId), actor = actor();
+        long batch = BatchInput.id(batchId);
+        long actor = actor();
         if (page < 1 || pageSize < 1 || pageSize > 500) throw new BusinessException(INVALID_ARGUMENT);
         return read.execute(tx -> view(actor, batch, page, pageSize));
     }
@@ -111,7 +117,7 @@ public class BatchService {
             }
         }
         String status = batch.processingStatus();
-        // Completed facts remain authoritative even if the worker stopped before refreshing the header.
+        // 即使执行线程在更新汇总前停止，也以已提交的逐项结果判断完成状态。
         if (all.stream().noneMatch(i -> "PENDING".equals(i.processingStatus()))) {
             long applied = all.stream().filter(i -> "APPLIED".equals(i.processingStatus())).count();
             status = applied == all.size() ? "COMPLETED" : applied == 0 ? "FAILED" : "PARTIAL_SUCCESS";

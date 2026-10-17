@@ -16,7 +16,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import static com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE;
 
-/** First-stage dispatch only: no startup scan or automatic retry. */
+/** 仅实现第一阶段任务调度，不包含启动扫描或自动重试。 */
 @Service
 public class BatchWorker {
     private static final Logger log = LoggerFactory.getLogger(BatchWorker.class);
@@ -26,7 +26,10 @@ public class BatchWorker {
     private final ObjectMapper json;
     private final TransactionTemplate transaction;
     public BatchWorker(BatchMapper mapper, GrantOperations grants, GrantMapper grantMapper, ObjectMapper json, PlatformTransactionManager manager) {
-        this.mapper = mapper; this.grants = grants; this.grantMapper = grantMapper; this.json = json;
+        this.mapper = mapper;
+        this.grants = grants;
+        this.grantMapper = grantMapper;
+        this.json = json;
         this.transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -45,7 +48,7 @@ public class BatchWorker {
                 try {
                     transaction.executeWithoutResult(tx -> apply(batch, item.id()));
                 } catch (BusinessException failure) {
-                    // The failed business transaction has already rolled back, including any evidence writes.
+                    // 失败的业务事务及其中的证据写入已全部回滚，此处单独记录失败结果。
                     transaction.executeWithoutResult(tx -> {
                         var current = mapper.lockItem(item.id());
                         if (current != null && "PENDING".equals(current.processingStatus())) mapper.failed(item.id(), failure.errorCode().name());
@@ -54,7 +57,7 @@ public class BatchWorker {
             }
             transaction.executeWithoutResult(tx -> mapper.refresh(batchId));
         } catch (RuntimeException failure) {
-            // Preserve committed outcomes; uncertain/infrastructure failures remain inspectable, never retried here.
+            // 保留已提交结果；无法确认的异常或基础设施故障留下可查询的未完成项，此处不重试。
             log.warn("Batch {} stopped with unfinished work: {}", batchId, failure.getClass().getSimpleName());
         }
     }
@@ -66,12 +69,15 @@ public class BatchWorker {
         if ("GRANT".equals(batch.operation())) {
             var applied = grants.grant(batch.actorUserId(), new GrantRequest(item.userId().toString(), batch.roleId().toString(),
                     item.sourceType(), item.sourceRef(), item.sourceDeptId() == null ? null : item.sourceDeptId().toString(), batch.reason(), null));
-            source = Long.parseLong(applied.grantSourceId()); result = applied;
+            source = Long.parseLong(applied.grantSourceId());
+            result = applied;
         } else if ("REVOKE".equals(batch.operation())) {
             source = item.grantSourceId();
             result = grants.revoke(batch.actorUserId(), new RevokeRequest(item.userId().toString(), batch.roleId().toString(),
                     Long.toString(source), batch.reason(), null));
-        } else throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+        } else {
+            throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+        }
         try {
             ObjectNode evidence = json.valueToTree(result);
             if (result instanceof Revoked) {
@@ -80,6 +86,8 @@ public class BatchWorker {
                 evidence.put("permissionRevision", "v" + revision);
             }
             if (mapper.applied(itemId, source, json.writeValueAsString(evidence)) != 1) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
-        } catch (JsonProcessingException e) { throw new IllegalStateException("Cannot serialize batch result", e); }
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialize batch result", e);
+        }
     }
 }

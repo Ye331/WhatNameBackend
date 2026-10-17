@@ -23,7 +23,7 @@ import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** Runs the real production executor, with no thread-local identity installed on its thread. */
+/** 使用正式后台执行器，执行线程中不设置请求线程的身份上下文。 */
 @SpringBootTest(properties = "spring.config.import=")
 @AutoConfigureMockMvc
 @Import(GrantIT.Integrations.class)

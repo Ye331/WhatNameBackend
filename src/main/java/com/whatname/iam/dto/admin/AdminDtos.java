@@ -30,7 +30,7 @@ public final class AdminDtos {
     public record Scope(boolean appointed, Integer adminLevel, String deptId,
                         List<String> scopeRootIds, String delegableRolesVersion) {}
 
-    /** Keep the documented JSON types strict without changing other modules' ObjectMapper settings. */
+    /** 严格遵守契约中的 JSON 类型，不修改其他模块的 ObjectMapper 配置。 */
     public static final class StrictString extends JsonDeserializer<String> {
         @Override public String deserialize(JsonParser parser, DeserializationContext context) throws IOException {
             if (!parser.hasToken(JsonToken.VALUE_STRING)) return context.reportInputMismatch(String.class, "Expected a JSON string");

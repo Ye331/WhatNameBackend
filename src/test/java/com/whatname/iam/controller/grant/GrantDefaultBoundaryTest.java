@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 
-/** No database or real identity: production entry points must fail closed. */
+/** 没有数据库或真实身份时，正式业务入口必须默认拒绝。 */
 @SpringBootTest(properties = "spring.config.import=")
 @AutoConfigureMockMvc
 @Import(GrantDefaultBoundaryTest.NoDatabaseTransactions.class)

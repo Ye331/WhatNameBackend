@@ -8,7 +8,7 @@ import java.security.*;
 import java.util.*;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_ARGUMENT;
 
-/** Canonical input excludes transport ordering and identical duplicate targets. */
+/** 规范化输入，消除请求中目标排列顺序和完全重复目标的影响。 */
 record BatchInput(String operation, long roleId, List<Target> targets, String reason, String digest) {
     static BatchInput parse(String key, Request request) {
         if (key == null || !key.matches("[!-~]{1,128}") || request == null || Boolean.TRUE.equals(request.dryRun())) invalid();
@@ -47,18 +47,26 @@ record BatchInput(String operation, long roleId, List<Target> targets, String re
         try {
             var bytes = new ByteArrayOutputStream();
             var out = new DataOutputStream(bytes);
-            field(out, request.operation()); field(out, request.roleId()); field(out, request.reason());
+            field(out, request.operation());
+            field(out, request.roleId());
+            field(out, request.reason());
             out.writeInt(targets.size());
             for (var t : targets) {
-                field(out, t.userId()); field(out, t.sourceType()); field(out, t.sourceRef());
-                field(out, t.sourceDeptId()); field(out, t.grantSourceId());
+                field(out, t.userId());
+                field(out, t.sourceType());
+                field(out, t.sourceRef());
+                field(out, t.sourceDeptId());
+                field(out, t.grantSourceId());
             }
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray()));
-        } catch (IOException | NoSuchAlgorithmException e) { throw new IllegalStateException("Cannot digest batch input", e); }
+        } catch (IOException | NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Cannot digest batch input", e);
+        }
     }
     private static void field(DataOutputStream out, String value) throws IOException {
         if (value == null) { out.writeInt(-1); return; }
         byte[] data = value.getBytes(StandardCharsets.UTF_8);
-        out.writeInt(data.length); out.write(data);
+        out.writeInt(data.length);
+        out.write(data);
     }
 }

@@ -6,7 +6,7 @@ import com.whatname.iam.service.admin.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
-/** In-memory database boundary; SQL, locks and rollback are separately exercised in GrantIT. */
+/** 内存数据库替身；SQL、锁与回滚由 GrantIT 单独验证。 */
 public class GrantTestFixture implements GrantMapper {
     public final AdminTestFixture admins = new AdminTestFixture();
     public final Map<Long, Long> revisions = new HashMap<>();

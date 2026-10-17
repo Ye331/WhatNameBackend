@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_ARGUMENT;
 
-/** Single-user HTTP operations retain mandatory optimistic version checks. */
+/** 单人 HTTP 写入操作保留强制的乐观版本检查。 */
 @Service
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class GrantService {

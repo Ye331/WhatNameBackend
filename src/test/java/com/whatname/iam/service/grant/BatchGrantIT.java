@@ -3,6 +3,7 @@ package com.whatname.iam.service.grant;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.service.admin.*;
+import com.whatname.iam.dto.admin.AdminDtos;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -48,6 +49,7 @@ class BatchGrantIT {
     @Autowired ObjectMapper json;
     @Autowired JdbcTemplate jdbc;
     @Autowired GrantIT.TestState state;
+    @Autowired AdminService admins;
     @TestBean(name = "grantBatchExecutor", methodName = "testExecutor", enforceOverride = true) Executor executor;
     private QueueExecutor dispatch;
     static Executor testExecutor() { return new QueueExecutor(); }
@@ -61,6 +63,8 @@ class BatchGrantIT {
         base = NEXT.getAndAdd(10000);
         state.actor.set(id(1));
         state.failure = null;
+        state.deniedPermission = null;
+        state.afterGrantCommit = null;
         dispatch.tasks.clear();
         dispatch.reject = false;
         var data = new AdminTestFixture();
@@ -79,6 +83,13 @@ class BatchGrantIT {
         for (var d : data.delegations) jdbc.update("INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by) VALUES(?,?,?)",
                 id(d.adminUserId()), id(d.roleId()), id(d.configuredBy()));
     }
+    @AfterEach void clearTestContext() {
+        state.actor.remove();
+        state.failure = null;
+        state.deniedPermission = null;
+        state.afterGrantCommit = null;
+    }
+
     private void insertUser(long user, long dept, int status) {
         jdbc.update("INSERT INTO sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status) VALUES(?,?,?,?,?,?,?,?,?)",
                 user, "batch_user_" + user, "test-only-ciphertext", "test-only-ciphertext", String.format("%064x", user),
@@ -163,7 +174,7 @@ class BatchGrantIT {
         var body = request(List.of(target(6, "CHECK")));
         switch (variant) {
             case "dryRun" -> body.put("dryRun", true);
-            // The application serializer intentionally emits Long as JSON strings; use Integer to send an actual JSON number.
+            // 应用序列化器会将 Long 输出为 JSON 字符串；此处用 Integer 发送真正的 JSON 数值。
             case "numericId" -> body.put("roleId", Math.toIntExact(id(100)));
             case "unknown" -> body.put("actorId", sid(1));
             case "empty" -> body.put("targets", List.of());
@@ -290,6 +301,125 @@ class BatchGrantIT {
         }
         assertThat(count("sys_user_role_source")).isEqualTo(1);
         assertThat(revision()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
+    }
+
+    // 防止执行时沿用提交时的旧资格，或因后续失败回滚此前已提交的任务项。
+    @ParameterizedTest @ValueSource(strings = {"REVOKE", "SHRINK"})
+    void authorityChangeBetweenItemsPreservesCommittedSuccess(String change) throws Exception {
+        insertUser(id(7), id(21), 1);
+        state.actor.set(id(2));
+        String batch = accepted("mid-flight", request(List.of(target(6, "FIRST"), target(7, "SECOND"))));
+        var firstCommitted = new CountDownLatch(1);
+        var continueBatch = new CountDownLatch(1);
+        state.afterGrantCommit = user -> {
+            if (user == id(6)) {
+                firstCommitted.countDown();
+                try {
+                    if (!continueBatch.await(30, TimeUnit.SECONDS)) throw new AssertionError("batch coordination timeout");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(exception);
+                }
+            }
+        };
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var running = pool.submit(dispatch.tasks.remove());
+            try {
+                assertThat(firstCommitted.await(30, TimeUnit.SECONDS)).as("first item committed").isTrue();
+                assertThat(jdbc.queryForObject("SELECT processing_status FROM sys_grant_batch_item WHERE batch_id=? AND user_id=?",
+                        String.class, batch, id(6))).isEqualTo("APPLIED");
+                state.actor.set(id(1));
+                if ("REVOKE".equals(change)) {
+                    admins.revoke(sid(2), new AdminDtos.RevokeRequest("mid-flight revocation"));
+                } else {
+                    admins.replaceDelegableRoles(sid(2), new AdminDtos.DelegationRequest(List.of(), "v1", "mid-flight shrink"));
+                }
+            } finally {
+                continueBatch.countDown();
+            }
+            running.get(30, TimeUnit.SECONDS);
+        } finally {
+            state.afterGrantCommit = null;
+        }
+        var result = query(batch, 1, 20);
+        assertThat(result.get("processingStatus").asText()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.get("succeeded").asInt()).isEqualTo(1);
+        assertThat(result.get("failed").asInt()).isEqualTo(1);
+        assertThat(result.get("items").get(1).get("code").asText())
+                .isEqualTo("REVOKE".equals(change) ? "PERMISSION_DENIED" : "ROLE_NOT_DELEGABLE");
+        assertThat(count("sys_user_role_source")).isEqualTo(1);
+        assertThat(count("sys_user_role")).isEqualTo(1);
+        assertThat(revision()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_id=?", Long.class, id(6))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT grant_revision FROM sys_user WHERE id=?", Long.class, id(7))).isEqualTo(1);
+        for (String table : List.of("sys_user_role_source", "sys_user_role")) {
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE user_id=?", Long.class, id(7))).isZero();
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(7))).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_data_signature WHERE data_id=?", Long.class, id(7))).isZero();
+    }
+
+    // 防止将幂等键错误地视为全局唯一，或在重放查询中忽略当前操作者。
+    @Test void sameKeyIsIsolatedByInitiator() throws Exception {
+        var body = request(List.of(target(6, "SHARED")));
+        String first = accepted("shared-key", body);
+        state.actor.set(id(2));
+        String second = accepted("shared-key", body);
+        assertThat(second).isNotEqualTo(first);
+        assertThat(data(submit("shared-key", body), 200).get("batchId").asText()).isEqualTo(second);
+        state.actor.set(id(1));
+        assertThat(data(submit("shared-key", body), 200).get("batchId").asText()).isEqualTo(first);
+        assertThat(dispatch.tasks).hasSize(2);
+        runTasks();
+        assertThat(query(first, 1, 20).get("succeeded").asInt()).isEqualTo(1);
+        assertThat(query(second, 1, 20).get("succeeded").asInt()).isEqualTo(1);
+        assertThat(count("sys_user_role_source")).isEqualTo(1);
+        assertThat(revision()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
+    }
+
+    // 防止使用旧管理范围，或在按当前范围过滤之前统计数量和分页。
+    @Test void queryUsesChangedScopeAndHidesBatchWhenNoTargetsRemainVisible() throws Exception {
+        String batch = accepted("scope-change", request(List.of(target(3, "FIRST"), target(4, "SECOND"), target(6, "THIRD"))));
+        runTasks();
+        state.actor.set(id(2));
+        assertThat(query(batch, 1, 1).get("total").asInt()).isEqualTo(3);
+        // 仅在隔离测试数据中模拟可信的组织或任命变更。
+        jdbc.update("UPDATE sys_admin SET dept_id=? WHERE user_id=?", id(22), id(2));
+        var restricted = query(batch, 1, 1);
+        assertThat(restricted.get("total").asInt()).isEqualTo(1);
+        assertThat(restricted.get("succeeded").asInt()).isEqualTo(1);
+        assertThat(restricted.get("failed").asInt()).isZero();
+        assertThat(restricted.get("pending").asInt()).isZero();
+        assertThat(restricted.get("items")).hasSize(1);
+        assertThat(restricted.get("items").get(0).get("userId").asText()).isEqualTo(sid(4));
+        assertThat(query(batch, 2, 1).get("items")).isEmpty();
+        jdbc.update("UPDATE sys_admin SET dept_id=? WHERE user_id=?", id(30), id(2));
+        var hidden = mvc.perform(get("/api/v1/grants/batches/" + batch)).andReturn();
+        assertThat(hidden.getResponse().getStatus()).isEqualTo(404);
+        assertThat(json.readTree(hidden.getResponse().getContentAsString()).get("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
+    }
+
+    // 防止重放请求提前返回，绕过当前写权限或查看权限检查。
+    @ParameterizedTest @ValueSource(strings = {"IAM_GRANTS_WRITE", "IAM_GRANTS_VIEW"})
+    void replayRequiresCurrentFunctionPermissions(String permission) throws Exception {
+        var body = request(List.of(target(6, "PERMISSIONS")));
+        String batch = accepted("permission-change", body);
+        runTasks();
+        state.deniedPermission = permission;
+        try {
+            var replay = submit("permission-change", body);
+            assertThat(replay.getResponse().getStatus()).isEqualTo(403);
+            assertThat(json.readTree(replay.getResponse().getContentAsString()).get("code").asText()).isEqualTo("PERMISSION_DENIED");
+        } finally {
+            state.deniedPermission = null;
+        }
+        assertThat(dispatch.tasks).isEmpty();
+        assertThat(data(submit("permission-change", body), 200).get("batchId").asText()).isEqualTo(batch);
+        assertThat(revision()).isEqualTo(2);
+        assertThat(count("sys_user_role_source")).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_operation_log WHERE target_id=?", Long.class, id(6))).isEqualTo(1);
     }
 
