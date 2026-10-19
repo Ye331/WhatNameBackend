@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.apache.ibatis.annotations.*;
 
-/** All organization writers must take lockOrganization first in a SERIALIZABLE transaction.
+/** Organization writers take C's preparation locks, then lockOrganization in a SERIALIZABLE transaction.
  * Full PRIMARY scan locks existing rows and insertion gaps; concurrent writes cannot invalidate
  * cycle/path checks. This deliberately favors correctness over parallel organization throughput.
  */

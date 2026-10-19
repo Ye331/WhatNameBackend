@@ -127,7 +127,7 @@ public class GrantOperations {
         return after;
     }
 
-    private static void consistent(GrantState state) {
+    static void consistent(GrantState state) {
         Set<Long> backedRoles = new HashSet<>(), effectiveRoles = new HashSet<>();
         for (var source : state.sources()) {
             if (source.userId() != state.userId() || (source.status() != 0 && source.status() != 1)) fail(INTEGRITY_FAILURE);

@@ -13,6 +13,12 @@ final class AdminStateLoader {
     AdminStateLoader(AdminMapper mapper) { this.mapper = mapper; }
 
     AdminState load(boolean lock, long... userIds) {
+        return load(lock, false, userIds);
+    }
+
+    AdminState loadOrganization() { return load(true, true); }
+
+    private AdminState load(boolean lock, boolean allUsers, long... userIds) {
         // 第一阶段将 M5 写入串行化，包括委派清单的递归变更。
         // 使用当前读和固定加锁顺序，避免并发写入时依赖可重复读事务中的旧快照。
         var appointments = index(mapper.selectAppointments(lock), Appointment::userId);
@@ -20,7 +26,7 @@ final class AdminStateLoader {
         var roles = index(mapper.selectRoles(lock), Role::id);
         var delegations = mapper.selectDelegations(lock);
         var ids = Arrays.stream(userIds).distinct().sorted().boxed().toList();
-        var users = index(mapper.selectUsers(ids, lock), User::id);
+        var users = index(allUsers ? mapper.selectAllUsers() : mapper.selectUsers(ids, lock), User::id);
         return new AdminState(appointments, departments, users, roles, delegations);
     }
 

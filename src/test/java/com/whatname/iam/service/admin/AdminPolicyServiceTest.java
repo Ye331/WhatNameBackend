@@ -30,4 +30,25 @@ class AdminPolicyServiceTest {
         db.revoke(2);
         rejects(PERMISSION_DENIED, () -> policy.requireUserScope(2, 6));
     }
+    @Test void mergedRootAndAncestorBlockManagementAndNewGrants() {
+        db.departments.put(20L, new com.whatname.iam.entity.admin.AdminData.Department(20L, 10L, 1, 30L));
+        rejects(PERMISSION_DENIED, () -> policy.requireAdministrator(2));
+        rejects(PERMISSION_DENIED, () -> policy.requireAdministrator(3));
+        rejects(PERMISSION_DENIED, () -> policy.requireGrantContext(1, 6, 100L, true, true));
+        rejects(PERMISSION_DENIED, () -> db.service().appoint(
+                new com.whatname.iam.dto.admin.AdminDtos.AppointmentRequest("6", 3, "20", "merged")));
+        // Historical records remain visible to an eligible superior for review/revocation.
+        assertThatCode(() -> policy.requireDepartmentScope(1, 20)).doesNotThrowAnyException();
+    }
+    @Test void frozenTargetIsLocatableButCannotReceiveNewGrant() {
+        db.departments.put(20L, new com.whatname.iam.entity.admin.AdminData.Department(20L, 10L, 0));
+        assertThatCode(() -> policy.requireDepartmentScope(1, 20)).doesNotThrowAnyException();
+        rejects(PERMISSION_DENIED, () -> policy.requireGrantContext(1, 6, 100L, true, true));
+    }
+    @Test void manualRevokeStillRequiresCurrentRoleQualification() {
+        db.roles.put(100L, new com.whatname.iam.entity.admin.AdminData.Role(100L, 1, 0));
+        rejects(ROLE_NOT_DELEGABLE, () -> policy.requireGrantContext(1, 6, 100L, false, true));
+        rejects(ROLE_NOT_DELEGABLE, () -> policy.requireDelegableRole(1, 200));
+        rejects(ROLE_NOT_DELEGABLE, () -> policy.requireDelegableRole(1, 300));
+    }
 }

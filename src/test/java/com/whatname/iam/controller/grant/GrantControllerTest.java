@@ -22,7 +22,7 @@ class GrantControllerTest {
              "reason":"test","expectedVersion":"v1"}
             """;
     @BeforeEach void setup() {
-        mvc = MockMvcBuilders.standaloneSetup(new GrantController(db.service()))
+        mvc = MockMvcBuilders.standaloneSetup(new GrantController(db.service(), null))
                 .setControllerAdvice(new GlobalExceptionHandler()).addFilters(new RequestIdFilter()).build();
     }
     @Test void fourRouteRoundTripUsesContractFieldsAndRetainsRevokedSource() throws Exception {

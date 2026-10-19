@@ -41,4 +41,7 @@ public final class GrantDtos {
                           boolean roleEffective, String permissionRevision) {}
     public record Revoked(String userId, String roleId, String revokedSourceId,
                           boolean roleEffective, int remainingActiveSources) {}
+    public record HistoryItem(String eventId, String userId, String roleId, String grantSourceId,
+                              String operation, String occurredAt) {}
+    public record HistoryPage(List<HistoryItem> items, int page, int pageSize, long total) {}
 }

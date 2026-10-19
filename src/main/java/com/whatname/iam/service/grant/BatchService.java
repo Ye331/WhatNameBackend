@@ -7,14 +7,12 @@ import com.whatname.iam.mapper.grant.BatchMapper;
 import com.whatname.iam.service.admin.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.*;
 import java.util.*;
-import java.util.concurrent.Executor;
 import static com.whatname.iam.common.api.ErrorCode.*;
 
 @Service
@@ -25,20 +23,18 @@ public class BatchService {
     private final AdminRules rules;
     private final AdminPorts.Identity identity;
     private final AdminPorts.Functions functions;
-    private final BatchWorker worker;
-    private final Executor executor;
+    private final BatchRecoveryService recovery;
     private final TransactionTemplate write;
     private final TransactionTemplate read;
     public BatchService(BatchMapper mapper, AdminPolicyService policy, AdminRules rules, AdminPorts.Identity identity,
-                        AdminPorts.Functions functions, BatchWorker worker, @Qualifier("grantBatchExecutor") Executor executor,
+                        AdminPorts.Functions functions, BatchRecoveryService recovery,
                         PlatformTransactionManager manager) {
         this.mapper = mapper;
         this.policy = policy;
         this.rules = rules;
         this.identity = identity;
         this.functions = functions;
-        this.worker = worker;
-        this.executor = executor;
+        this.recovery = recovery;
         write = new TransactionTemplate(manager);
         write.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         read = new TransactionTemplate(manager);
@@ -46,6 +42,8 @@ public class BatchService {
         read.setReadOnly(true);
     }
     public Submission submit(String key, Request request) {
+        // 必须在本入口的新事务中先加 M5 锁，再建立 D 的一致视图。
+        if (TransactionSynchronizationManager.isActualTransactionActive()) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
         var input = BatchInput.parse(key, request);
         long actor = actor();
         try {
@@ -67,7 +65,7 @@ public class BatchService {
                 }
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override public void afterCommit() {
-                        try { executor.execute(() -> worker.run(batch.id())); }
+                        try { recovery.dispatch(batch.id()); }
                         catch (RuntimeException failure) {
                             log.warn("Batch {} persisted but not dispatched: {}", batch.id(), failure.getClass().getSimpleName());
                         }
@@ -117,6 +115,8 @@ public class BatchService {
             }
         }
         String status = batch.processingStatus();
+        // 调度锁事务可能尚未提交 start；执行预留/结果已由逐项事务持久化。
+        if ("PENDING".equals(status) && all.stream().anyMatch(i -> i.attempts() > 0)) status = "PROCESSING";
         // 即使执行线程在更新汇总前停止，也以已提交的逐项结果判断完成状态。
         if (all.stream().noneMatch(i -> "PENDING".equals(i.processingStatus()))) {
             long applied = all.stream().filter(i -> "APPLIED".equals(i.processingStatus())).count();

@@ -60,7 +60,7 @@ public class DataSignatureService {
             if (!verifyBytes(data, signature, keyId)) throw new GeneralSecurityException("Key pair mismatch");
             mapper.save(type.name(), id, Base64.getEncoder().encodeToString(signature), keyId);
         } catch (BusinessException e) { throw e; }
-        catch (Exception e) { throw new BusinessException(AUTH_STATE_UNAVAILABLE); }
+        catch (Exception e) { throw new BusinessException(AUTH_STATE_UNAVAILABLE, e); }
     }
 
     /** Safe evidence references, never ciphertext, password hashes, or the private key. */

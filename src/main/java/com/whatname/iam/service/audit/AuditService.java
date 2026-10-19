@@ -71,7 +71,7 @@ public class AuditService {
             String encoded = CanonicalEvidence.json(retained);
             if (encoded.length() > 1_000_000) throw new BusinessException(AUDIT_UNAVAILABLE);
             entry.put("evidence", encoded); mapper.insert(entry);
-        } catch (RuntimeException failure) { throw new BusinessException(AUDIT_UNAVAILABLE); }
+        } catch (RuntimeException failure) { throw new BusinessException(AUDIT_UNAVAILABLE, failure); }
     }
 
     private void rejectSensitive(Object value) {

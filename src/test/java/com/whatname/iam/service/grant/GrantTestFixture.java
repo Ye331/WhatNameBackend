@@ -8,6 +8,12 @@ import java.util.*;
 
 /** 内存数据库替身；SQL、锁与回滚由 GrantIT 单独验证。 */
 public class GrantTestFixture implements GrantMapper {
+    public int insertOaSource(long userId,long roleId,String approvalId) { throw new UnsupportedOperationException("OA uses MySQL integration tests"); }
+    public int insertOaEffectiveRole(long userId,long roleId) { throw new UnsupportedOperationException("OA uses MySQL integration tests"); }
+    public int revokeOaSource(long userId,long roleId,long sourceId) { throw new UnsupportedOperationException("OA uses MySQL integration tests"); }
+    public int revokeHrSource(long userId, long roleId, long sourceId) {
+        throw new UnsupportedOperationException("HR uses the real MySQL integration fixture");
+    }
     public final AdminTestFixture admins = new AdminTestFixture();
     public final Map<Long, Long> revisions = new HashMap<>();
     public final List<Source> sources = new ArrayList<>();

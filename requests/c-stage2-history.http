@@ -1,0 +1,45 @@
+@baseUrl = http://localhost:8080/api/v1
+@accessToken = replace-with-current-human-jwt
+@userId = 101
+@roleId = 5
+@eventId = replace-with-decimal-operation-log-id
+
+### GR04：当前范围内的来源级历史（默认 page=1、pageSize=20）
+# 需要当前有效会话、管理员任命、IAM_GRANTS_VIEW；对象使用目标用户当前部门。
+GET {{baseUrl}}/grants/history
+Authorization: Bearer {{accessToken}}
+
+### 人工/岗位：同一来源的授予和回收是两条记录，回收后历史仍保留
+GET {{baseUrl}}/grants/history?userId={{userId}}&roleId={{roleId}}&page=1&pageSize=1
+Authorization: Bearer {{accessToken}}
+
+### 第二页；total 是展开来源并做当前范围和用户/角色/时间筛选后的数量
+# HR 一次撤销多个来源会产生相同 eventId、不同 grantSourceId 的多条记录。
+GET {{baseUrl}}/grants/history?userId={{userId}}&roleId={{roleId}}&page=2&pageSize=1
+Authorization: Bearer {{accessToken}}
+
+### 时间闭区间：使用已封存的来源创建/撤销时间，按瞬时值比较
+# +08:00 中的加号必须编码；等价 Z 时间同样支持。
+GET {{baseUrl}}/grants/history?userId={{userId}}&from=2026-10-01T00:00:00%2B08:00&to=2026-10-31T23:59:59%2B08:00&page=1&pageSize=500
+Authorization: Bearer {{accessToken}}
+
+### HR 调岗/离职、OA 批准/回收、GR03 批量成功后的统一查询
+# 仍使用同一个 GR04；没有按 sourceSystem/batchId/operation 扩展公共参数。
+# OA 重放、changed=false 以及批量失败/重复执行不会成为新的变更记录。
+GET {{baseUrl}}/grants/history?userId={{userId}}&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### LG04：凭 GR04 的 eventId 查看 D 当时证据（另需 IAM_AUDIT_VIEW 及 D 当前范围）
+# eventId 是十进制 sys_operation_log ID，不是外部 HR/OA eventId。
+# reason、sourceType/sourceRef、当时资格及 batchId/itemId 在封存证据中；GR04 不扩展六个字段。
+GET {{baseUrl}}/audit/evidence/{{eventId}}
+Authorization: Bearer {{accessToken}}
+
+### GR05：来源状态查询，不能用其结果代替 GR04
+GET {{baseUrl}}/users/{{userId}}/roles/{{roleId}}/sources
+Authorization: Bearer {{accessToken}}
+
+# 400 INVALID_ARGUMENT：非法 ID、page 越界、pageSize>500、无时区/非法时间或 from>to。
+# 401：缺失/失效会话；403：当前任命或功能不足。
+# 当前范围外或筛选无匹配：200，items=[]、total=0。
+# 可见候选缺少可信历史/内容矛盾：503 INTEGRITY_FAILURE，不补签、不从当前来源反推历史。
