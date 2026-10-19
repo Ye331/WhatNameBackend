@@ -71,6 +71,7 @@ public class HrService {
             // 64 random hex characters, discarded after real scrypt; never a delivered password/history.
             u.passwordHash=passwords.hash(UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-",""));
             profile(u,r,phone); users.insertHr(u);
+            com.whatname.iam.common.security.AAccountCreation.inserted(u);
         } else {
             verify(u,r.sgNo(),r.eventVersion());
             if(u.status==3) {
@@ -158,7 +159,9 @@ public class HrService {
     }
     private void update(UserAccount u) { if(users.updateHr(u)!=1) fail(ErrorCode.VERSION_CONFLICT); }
     private void finish(String operation,TrustedEventContext actor,String eventId,UserAccount u) {
-        UserAccount current=users.lockById(u.id); // includes C's current grant_revision; never overwrite it in A SQL
+        // New inserts have not called C; preserve the generated-key entity for empty-grants
+        // initialization. Existing accounts reload C's grant_revision before D signs.
+        UserAccount current=com.whatname.iam.common.security.AAccountCreation.contains(u)?u:users.lockById(u.id);
         identity.signIdentity(current);
         trusted.signAndAudit(operation,actor,Map.of("eventId",eventId,"userId",current.id.toString(),
                 "deptId",current.deptId.toString(),"status",current.status,"hrVersion",current.hrVersion,

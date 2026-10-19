@@ -26,7 +26,12 @@ public class M1SecurityConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ManagementDataSecurity.class)
-    public ManagementDataSecurity unavailableManagementDataSecurity() {
+    public ManagementDataSecurity unavailableManagementDataSecurity(
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.permission.DataSignatureService> signatures,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.permission.PermissionService> permissions,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.audit.AuditService> audit) {
+        if(signatures.getIfAvailable()!=null && permissions.getIfAvailable()!=null && audit.getIfAvailable()!=null)
+            return new DBackedManagementDataSecurity(signatures.getObject(),permissions.getObject(),audit.getObject());
         return new ManagementDataSecurity() {
             public void verifyIdentity(UserAccount u) { throw new BusinessException(ErrorCode.INTEGRITY_FAILURE); }
             public void requireFunction(long actor,String permission) { throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE); }

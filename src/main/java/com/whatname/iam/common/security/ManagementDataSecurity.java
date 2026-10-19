@@ -7,10 +7,12 @@ import java.util.Map;
 
 /** D boundary for A management. All calls join the caller's transaction. Implementations must
  * not acquire M5 locks from identity verification, nor open independent evidence transactions.
- * No production implementation exists yet; the configured fallback rejects every operation. */
+ * DBackedManagementDataSecurity adapts D's complete canonical records. Partial contexts fail closed. */
 public interface ManagementDataSecurity {
     void verifyIdentity(UserAccount user);
     void requireFunction(long actorId, String permission);
+    /** Existing accounts must first pass verifyIdentity in this transaction. A insert callers
+     * register their generated-key entity with AAccountCreation to initialize empty grants. */
     void signIdentity(UserAccount user);
     void audit(String operation, Long actorId, Long targetId, String reason);
     void verifyOrganization(List<Department> organization);

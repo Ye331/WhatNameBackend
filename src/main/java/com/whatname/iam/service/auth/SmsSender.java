@@ -1,6 +1,6 @@
 package com.whatname.iam.service.auth;
 
-/** Replace with an actual provider; failure must throw, never silently accept. */
+/** Replaceable channel, including the isolated course-demo sender; failures must throw. */
 public interface SmsSender {
     /** Validate provider/channel configuration for every request, including unknown phones. */
     default void requireAvailable() {}

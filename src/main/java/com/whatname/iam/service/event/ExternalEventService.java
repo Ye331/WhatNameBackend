@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** No proxy self-invocation: every boundary is an explicit TransactionTemplate.
  * Call outside a caller transaction: receive/failure are independent short transactions;
@@ -94,6 +96,10 @@ public class ExternalEventService {
                 if (row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))
                         || !"PROCESSING".equals(row.get("status")))
                     throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+                // Recheck service authority in the actual write transaction, including HR01/05.
+                // Only this private path can register A's transaction-local execution evidence.
+                integration.verifyTrustedEvent(ctx,c.eventType());
+                TransactionSynchronizationManager.registerSynchronization(new Applying(ctx,c));
                 Map<String,Object> result=Objects.requireNonNull(work.get());
                 assertSafeResult(json.valueToTree(result));
                 String encoded=encode(result);
@@ -124,6 +130,18 @@ public class ExternalEventService {
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
         }
     }
+
+    /** A-only implementation detail, not a service-authentication or recovery entry point.
+     * Synchronizations suspend with REQUIRES_NEW and disappear when this transaction ends. */
+    public static Command applying(TrustedEventContext context,String eventType,String eventId) {
+        if(!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive())return null;
+        return TransactionSynchronizationManager.getSynchronizations().stream()
+                .filter(sync -> sync instanceof Applying applying && applying.context.equals(context)
+                        && applying.command.eventType().equals(eventType) && applying.command.eventId().equals(eventId))
+                .map(sync -> ((Applying)sync).command).findFirst().orElse(null);
+    }
+    private record Applying(TrustedEventContext context,Command command) implements TransactionSynchronization { }
 
     private Claim claim(TrustedEventContext ctx, Command c, String digest,String plaintext,boolean recovery) {
         return shortTx.execute(tx -> {
