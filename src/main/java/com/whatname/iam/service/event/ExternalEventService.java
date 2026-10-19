@@ -16,6 +16,8 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.function.Supplier;
 import org.springframework.dao.DuplicateKeyException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -29,11 +31,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Service
 public class ExternalEventService {
+    private static final Logger log = LoggerFactory.getLogger(ExternalEventService.class);
     public record Command(String eventId, String eventType, Long eventVersion, String targetType,
                           String targetRef, OffsetDateTime occurredAt, Object businessPayload) {
         @Override public String toString() { return "ExternalEventCommand[redacted]"; }
     }
     private record Claim(long id, Map<String,Object> replay) { }
+    private record FailureDisposition(Map<String,Object> replay, String state) { }
     private final ExternalEventMapper mapper;
     private final SensitiveDataCodec codec;
     private final DepartmentCollaboration integration;
@@ -85,6 +89,8 @@ public class ExternalEventService {
         } catch (RuntimeException receiptUnavailable) {
             if(receiptUnavailable instanceof BusinessException) throw receiptUnavailable;
             // An unknown receipt commit never grants permission to execute or to take over.
+            log.warn("External event receipt unavailable source={} type={} failure={}",
+                    ctx.sourceSystem(),c.eventType(),receiptUnavailable.getClass().getSimpleName());
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
         }
         if (claim.replay()!=null) return claim.replay();
@@ -112,19 +118,31 @@ public class ExternalEventService {
             ErrorCode code=error instanceof BusinessException b ? b.errorCode() : ErrorCode.AUTH_STATE_UNAVAILABLE;
             boolean definitive=code.status().is4xxClientError();
             try {
-                Map<String,Object> committed=shortTx.execute(tx -> {
+                FailureDisposition disposition=shortTx.execute(tx -> {
                     // A commit acknowledgement can be lost. Inspect the real locked state before
                     // recording a failure, and never replace an already committed result.
                     Map<String,Object> row=mapper.lock(ctx.sourceSystem(),c.eventId());
-                    if(row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))) return null;
-                    if("APPLIED".equals(row.get("status"))) return decode((String)row.get("result"));
-                    if("PROCESSING".equals(row.get("status")))
-                        mapper.failed(owned.id(),definitive ? "REJECTED" : "PENDING_RECOVERY",code.name());
-                    return null;
+                    if(row==null || owned.id()!=id(row) || !digest.equals(row.get("digest")))
+                        return new FailureDisposition(null,"UNMATCHED");
+                    String state=(String)row.get("status");
+                    if("APPLIED".equals(state)) return new FailureDisposition(decode((String)row.get("result")),state);
+                    if("PROCESSING".equals(state)) {
+                        state=definitive ? "REJECTED" : "PENDING_RECOVERY";
+                        if(mapper.failed(owned.id(),state,code.name())!=1)
+                            throw new IllegalStateException("External event failure state was not saved");
+                    }
+                    return new FailureDisposition(null,state);
                 });
-                if(committed!=null) return committed;
+                if(disposition.replay()!=null) return disposition.replay();
+                if(!(error instanceof BusinessException) || "UNMATCHED".equals(disposition.state()))
+                    log.warn("External event failed rowId={} source={} type={} code={} failure={} state={}",
+                            owned.id(),ctx.sourceSystem(),c.eventType(),code.name(),
+                            error.getClass().getSimpleName(),disposition.state());
             } catch (RuntimeException failureRecordUnavailable) {
                 // Preserve the retained state. Ordinary retries and online recovery never take over.
+                log.warn("External event failure record unavailable rowId={} source={} type={} code={} failure={} recordFailure={}",
+                        owned.id(),ctx.sourceSystem(),c.eventType(),code.name(),
+                        error.getClass().getSimpleName(),failureRecordUnavailable.getClass().getSimpleName());
             }
             if (error instanceof BusinessException) throw error;
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);

@@ -256,6 +256,18 @@ class HrBusinessIntegrationTest {
         assertEquals(r.realName(),codec.decrypt(after.realNameCiphertext));
     }
 
+    private void assertExactSgNoLookup() {
+        UserAccount u=create();
+        String differentCase=u.employeeNo.toLowerCase(Locale.ROOT);
+        assertNotEquals(u.employeeNo,differentCase);
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE employee_no=?",Integer.class,differentCase));
+        assertNull(users.lockByEmployeeNo(differentCase));
+        assertEquals(u.id,users.lockByEmployeeNo(u.employeeNo).id);
+        expect(ErrorCode.RESOURCE_NOT_FOUND,()->hr.transfer(actor,
+                new Transfer("HR",event(),2L,differentCase,deptA,deptB,time)));
+        assertEquals(1,row(u).hrVersion);
+    }
+
     @Test void hrNameChangeRemovesOldKeywordAndAddsNewKeywordOverRealHttp() throws Exception {
         UserAccount manager=create();initializeFixture(manager);port.managementActor=manager.id;
         String code=prefix+"N17";long dept=department(code,null);port.managementScope=Set.of(dept);
@@ -388,6 +400,7 @@ class HrBusinessIntegrationTest {
         assertEquals("IDEMPOTENCY_CONFLICT",http("PUT","/integrations/hr/employees/"+u.employeeNo,changed,409).path("code").asText());
         assertEquals("INVALID_HR_ORDER",http("PUT","/integrations/hr/employees/"+u.employeeNo,request(u.employeeNo,49,deptA,Action.SUSPEND),422).path("code").asText());assertEquals(before,facts(u));
         UserAccount independent=create();assertEquals(1,independent.hrVersion);
+        assertExactSgNoLookup();
     }
     @Test void concurrentSameEventAppliesOnceAndDistinctVersionsNeverRegress() throws Exception {
         UserAccount u=create();Employee r=request(u.employeeNo,5,deptA,Action.SUSPEND);

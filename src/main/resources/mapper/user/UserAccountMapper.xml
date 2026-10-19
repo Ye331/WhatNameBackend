@@ -7,7 +7,7 @@
   <select id="lockById" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE id=#{id} FOR UPDATE</select>
   <select id="lockByUsername" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE username=#{username} FOR UPDATE</select>
   <select id="lockByPhoneHash" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE phone_hash=#{phoneHash} FOR UPDATE</select>
-  <select id="lockByEmployeeNo" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE employee_no=#{sgNo} FOR UPDATE</select>
+  <select id="lockByEmployeeNo" resultMap="account">SELECT <include refid="columns"/> FROM sys_user WHERE employee_no=#{sgNo} AND BINARY employee_no=BINARY #{sgNo} FOR UPDATE</select>
   <insert id="insertHr" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,employee_no,dept_id,
       source,employment_type,status,password_initialized,session_version,grant_revision,hr_version,pwd_failed_count)
