@@ -48,8 +48,12 @@ public final class DManagementDataSecurity implements ManagementDataSecurity {
         for (long id:ids(evidence,"affectedDepartmentIds")) signatures.sign(SignedDataType.DEPARTMENT,id);
         for (long id:userIds(evidence)) signatures.sign(SignedDataType.USER_IDENTITY,id);
         Long actorId=actor instanceof DepartmentCollaboration.Manager m && m.session()!=null ? m.session().userId() : null;
-        Long target=firstId(evidence,"userId","targetId");
-        audit.change(operation,actorId,target,"",evidence==null?Map.of():evidence);
+        boolean userTarget=evidence!=null && evidence.get("userId")!=null;
+        Long target=userTarget ? firstId(evidence,"userId") : firstId(evidence,"targetId");
+        if (target==null && !userTarget) target=firstCollectionId(evidence,"affectedDepartmentIds");
+        String targetType=userTarget ? "USER" : "DEPARTMENT";
+        String externalEventId=evidence==null ? null : stringValue(evidence.get("eventId"));
+        audit.change(operation,actorId,target,targetType,externalEventId,evidence==null?Map.of():evidence);
     }
     private static long id(Map<String,Object> row,String... keys) {
         for(String key:keys) if(row!=null && row.get(key)!=null) return parse(row.get(key));
@@ -69,5 +73,13 @@ public final class DManagementDataSecurity implements ManagementDataSecurity {
         return out.stream().distinct().sorted().toList();
     }
     private static Long firstId(Map<String,Object> e,String... keys){ try{return id(e,keys);}catch(BusinessException x){return null;} }
+    private static Long firstCollectionId(Map<String,Object> e,String key) {
+        List<Long> values=ids(e,key); return values.isEmpty()?null:values.getFirst();
+    }
+    private static String stringValue(Object value) {
+        if (value==null) return null;
+        String result=String.valueOf(value);
+        return result.isBlank() ? null : result;
+    }
     private static long parse(Object value){ try{return Long.parseLong(String.valueOf(value));}catch(Exception e){throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);} }
 }
