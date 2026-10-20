@@ -99,7 +99,8 @@ public class ServiceRequestAuthenticator {
             throw new BusinessException(INVALID_SERVICE);
         String key = proofKey(context.clientId(), context.requestId());
         AuthenticatedRequest proof = authenticated.get(key);
-        if (proof == null || proof.expiresAtEpochSecond() < clock.instant().getEpochSecond()
+        if (proof == null || !context.isIssuedBy(proof)
+                || proof.expiresAtEpochSecond() < clock.instant().getEpochSecond()
                 || !requiredScope.equals(proof.requiredScope())) {
             authenticated.remove(key, proof);
             throw new BusinessException(INVALID_SERVICE);
@@ -111,6 +112,16 @@ public class ServiceRequestAuthenticator {
                 || ("API_AUTH".equals(requiredScope) != (identity.get("app_id") != null))
                 || !(identity.get("status") instanceof Number status) || status.intValue() != 1)
             throw new BusinessException(INVALID_SERVICE);
+    }
+
+    public com.whatname.iam.service.event.TrustedEventContext issuedContext(String sourceSystem,
+                                                                              String clientId,
+                                                                              String nonce,
+                                                                              String requiredScope) {
+        AuthenticatedRequest proof = authenticated.get(proofKey(clientId, nonce));
+        if (proof == null || !requiredScope.equals(proof.requiredScope()))
+            throw new BusinessException(INVALID_SERVICE);
+        return com.whatname.iam.service.event.TrustedEventContext.issued(sourceSystem, clientId, nonce, proof);
     }
 
     private static String required(HttpServletRequest request, String name, int maxLength) {
