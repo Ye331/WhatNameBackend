@@ -361,7 +361,7 @@ class TrustedServiceE2EIT {
         // An app-unbound OA identity cannot act as an app-bound API caller.
         byte[] body = json.writeValueAsBytes(Map.of("httpMethod", "GET", "routeTemplate", "/records/{id}"));
         var response = http.perform(signed(oaClient, "oa-key", now(), "nonce-appid", "POST", API_PATH, body)
-                        .contentType("application/json").header("Authorization", bearer(20)).content(body))
+                        .contentType("application/json").header("Authorization", bearer(id(20))).content(body))
                 .andExpect(status().is(401)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("INVALID_SERVICE");
     }
