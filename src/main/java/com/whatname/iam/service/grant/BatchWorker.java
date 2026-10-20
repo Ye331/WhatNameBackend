@@ -14,9 +14,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.dao.TransientDataAccessException;
+import java.sql.SQLException;
 import static com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE;
 
-/** 仅实现第一阶段任务调度，不包含启动扫描或自动重试。 */
+/** 任务锁仅保护调度；次数预留、每项业务和失败结果各自独立提交。 */
 @Service
 public class BatchWorker {
     private static final Logger log = LoggerFactory.getLogger(BatchWorker.class);
@@ -25,6 +27,7 @@ public class BatchWorker {
     private final GrantMapper grantMapper;
     private final ObjectMapper json;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate guard;
     public BatchWorker(BatchMapper mapper, GrantOperations grants, GrantMapper grantMapper, ObjectMapper json, PlatformTransactionManager manager) {
         this.mapper = mapper;
         this.grants = grants;
@@ -33,37 +36,76 @@ public class BatchWorker {
         this.transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        guard = new TransactionTemplate(manager);
+        guard.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
     public void run(long batchId) {
         try {
-            Batch batch = transaction.execute(tx -> {
-                var found = mapper.batch(batchId);
-                if (found != null) mapper.start(batchId);
-                return found;
-            });
-            if (batch == null) return;
-            var items = transaction.execute(tx -> mapper.items(batchId));
-            for (var item : items) {
-                if (!"PENDING".equals(item.processingStatus())) continue;
-                try {
-                    transaction.executeWithoutResult(tx -> apply(batch, item.id()));
-                } catch (BusinessException failure) {
-                    // 失败的业务事务及其中的证据写入已全部回滚，此处单独记录失败结果。
-                    transaction.executeWithoutResult(tx -> {
-                        var current = mapper.lockItem(item.id());
-                        if (current != null && "PENDING".equals(current.processingStatus())) mapper.failed(item.id(), failure.errorCode().name());
-                    });
+            guard.executeWithoutResult(task -> {
+                // NOWAIT：另一进程正在运行时退出；进程退出由数据库释放锁，不按超时猜测接管。
+                Batch batch = mapper.lockBatch(batchId);
+                if (batch == null) return;
+                mapper.start(batchId);
+                while (true) {
+                    var items = transaction.execute(tx -> mapper.pendingItems(batchId, 100));
+                    if (items.isEmpty()) break;
+                    for (var item : items) executeItem(batch, item.id());
                 }
-            }
-            transaction.executeWithoutResult(tx -> mapper.refresh(batchId));
+                mapper.refresh(batchId);
+            });
         } catch (RuntimeException failure) {
-            // 保留已提交结果；无法确认的异常或基础设施故障留下可查询的未完成项，此处不重试。
+            // 无法核实/写入结果时停止；保留已提交项，后续扫描重新取得任务锁。
             log.warn("Batch {} stopped with unfinished work: {}", batchId, failure.getClass().getSimpleName());
         }
+    }
+    private void executeItem(Batch batch, long itemId) {
+        while (true) {
+            boolean reserved = Boolean.TRUE.equals(transaction.execute(tx -> {
+                var item = mapper.lockItem(itemId);
+                if (item == null || !"PENDING".equals(item.processingStatus())) return false;
+                if (item.attempts() >= 4) {
+                    mapper.failed(itemId, AUTH_STATE_UNAVAILABLE.name());
+                    return false;
+                }
+                if (mapper.reserve(itemId) != 1) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+                return true;
+            }));
+            if (!reserved) return;
+            try {
+                transaction.executeWithoutResult(tx -> apply(batch, itemId));
+                return;
+            } catch (RuntimeException failure) {
+                boolean retry = Boolean.TRUE.equals(transaction.execute(tx -> {
+                    // 包括 COMMIT 确认丢失：必须先看真实状态，不覆盖已经提交的 APPLIED。
+                    var current = mapper.lockItem(itemId);
+                    if (current == null || !"PENDING".equals(current.processingStatus())) return false;
+                    boolean infrastructure = !(failure instanceof BusinessException business)
+                            || business.errorCode() == AUTH_STATE_UNAVAILABLE
+                            || business.errorCode() == com.whatname.iam.common.api.ErrorCode.AUDIT_UNAVAILABLE;
+                    if (infrastructure && retryableDatabaseFailure(failure) && current.attempts() < 4) return true;
+                    String code = failure instanceof BusinessException business ? business.errorCode().name() : AUTH_STATE_UNAVAILABLE.name();
+                    if (mapper.failed(itemId, code) != 1) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
+                    return false;
+                }));
+                if (!retry) return;
+            }
+        }
+    }
+    private static boolean retryableDatabaseFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof TransientDataAccessException) return true;
+            if (cause instanceof SQLException sql) {
+                String state = sql.getSQLState();
+                if (sql.getErrorCode() == 1205 || sql.getErrorCode() == 1213
+                        || "40001".equals(state) || (state != null && state.startsWith("08"))) return true;
+            }
+        }
+        return false;
     }
     private void apply(Batch batch, long itemId) {
         var item = mapper.lockItem(itemId);
         if (item == null || !"PENDING".equals(item.processingStatus())) return;
+        com.whatname.iam.service.admin.integration.CExecutionContext.batch(batch.actorUserId(), batch.id(), item.id());
         Object result;
         long source;
         if ("GRANT".equals(batch.operation())) {

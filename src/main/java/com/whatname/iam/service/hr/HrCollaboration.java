@@ -9,6 +9,17 @@ import com.whatname.iam.service.event.TrustedEventContext;
  * source-set/qualification signatures and before/after audit evidence in this transaction.
  */
 public interface HrCollaboration {
+    /** After authenticated event-row lock, before organization/person reads. Default denies older
+     * adapters that cannot participate in C's ordered locks and final-state protocol. */
+    default void prepare(TrustedEventContext actor, String eventId, String eventType, String employeeNo) {
+        throw new com.whatname.iam.common.exception.BusinessException(
+                com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE);
+    }
+    /** After A's final identity signature and HR audit; must complete before APPLIED/commit. */
+    default void complete(long userId) {
+        throw new com.whatname.iam.common.exception.BusinessException(
+                com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE);
+    }
     /** Revoke only DEPT_POSITION sources belonging to oldDepartmentId; preserve independent
      * MANUAL/OA/other-department sources, recompute effective relations and retain history. */
     void revokePosition(TrustedEventContext actor, String eventId, long userId, long oldDepartmentId);

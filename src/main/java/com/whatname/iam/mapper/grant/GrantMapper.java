@@ -7,6 +7,9 @@ import java.util.List;
 
 @Mapper
 public interface GrantMapper {
+    int insertOaSource(@Param("userId") long userId,@Param("roleId") long roleId,@Param("approvalId") String approvalId);
+    int insertOaEffectiveRole(@Param("userId") long userId,@Param("roleId") long roleId);
+    int revokeOaSource(@Param("userId") long userId,@Param("roleId") long roleId,@Param("sourceId") long sourceId);
     Long selectRevision(@Param("userId") long userId, @Param("lock") boolean lock);
     List<Source> selectSources(@Param("userId") long userId, @Param("lock") boolean lock);
     List<EffectiveRole> selectEffectiveRoles(@Param("userId") long userId, @Param("lock") boolean lock);
@@ -18,6 +21,8 @@ public interface GrantMapper {
     int insertEffectiveRole(@Param("userId") long userId, @Param("roleId") long roleId, @Param("actorId") long actorId);
     int revokeSource(@Param("userId") long userId, @Param("roleId") long roleId,
                      @Param("sourceId") long sourceId, @Param("actorId") long actorId);
+    int revokeHrSource(@Param("userId") long userId, @Param("roleId") long roleId,
+                       @Param("sourceId") long sourceId);
     int deleteEffectiveRole(@Param("userId") long userId, @Param("roleId") long roleId);
     int advanceRevision(@Param("userId") long userId, @Param("expected") long expected);
 }

@@ -93,7 +93,8 @@ class DepartmentBusinessIntegrationTest {
     @Import({DepartmentService.class,ExternalEventService.class,DepartmentController.class,
             GlobalExceptionHandler.class,SensitiveDataCodec.class,DepartmentIntegrationConfiguration.class})
     static class DefaultApplication { }
-    static class TestPort implements DepartmentCollaboration {
+    static class TestPort implements DepartmentCollaboration,com.whatname.iam.service.permission.TrustedOaCaller {
+        public TrustedEventContext authenticate(HttpServletRequest request,byte[] rawBody) { throw new UnsupportedOperationException("A event fixture has no OA HTTP authentication"); }
         final JdbcTemplate jdbc;
         volatile String fault="";
         volatile Set<Long> visible;
@@ -123,6 +124,7 @@ class DepartmentBusinessIntegrationTest {
         }
         public void verifyOrganization(List<Department> all) { reject("verify"); }
         public void verifyUsers(List<Map<String,Object>> users) { reject("verifyUsers"); }
+        public void prepareOrganizationChange(TrustedEventContext actor,String eventId) { reject("scopePrepare"); }
         public void organizationChanged(Set<Long> ids,List<Map<String,Object>> users) { reject("scopeChange"); }
         public void signAndAudit(String operation,Object actor,Map<String,Object> evidence) {
             reject("sign");
@@ -502,7 +504,7 @@ class DepartmentBusinessIntegrationTest {
             }
         };
         var uncertainEvents=new ExternalEventService(app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
-                codec,port,json,ambiguousCommit);
+                codec,port,json,ambiguousCommit,port);
         var result=uncertainEvents.execute(oa,command,() -> applyInterleavingFact(id,event));
         assertTrue(lost.get());assertTrue(businessStatuses.isEmpty());
         assertInterleavingCommitted(id,event,result);
@@ -536,7 +538,7 @@ class DepartmentBusinessIntegrationTest {
             }
         };
         var uncertainEvents=new ExternalEventService(app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
-                codec,port,json,ambiguousReceipt);
+                codec,port,json,ambiguousReceipt,port);
         AtomicInteger applied=new AtomicInteger();
         java.util.function.Supplier<Map<String,Object>> work=() -> {applied.incrementAndGet();return Map.of("done",true);};
         error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> uncertainEvents.execute(oa,command,work));

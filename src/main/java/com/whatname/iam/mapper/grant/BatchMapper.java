@@ -9,6 +9,10 @@ import java.util.List;
 public interface BatchMapper {
     Batch byKey(@Param("actor") long actor, @Param("key") String key);
     Batch batch(@Param("id") long id);
+    Batch lockBatch(@Param("id") long id);
+    List<Item> pendingItems(@Param("batch") long batch, @Param("limit") int limit);
+    List<Long> unfinished(@Param("after") long after, @Param("limit") int limit);
+    int reserve(@Param("id") long id);
     List<Item> items(@Param("batch") long batch);
     Item lockItem(@Param("id") long id);
     int insertBatch(@Param("actor") long actor, @Param("key") String key, @Param("digest") String digest,

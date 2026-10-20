@@ -22,7 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Orchestration stays outside a transaction; every apply runs inside the event's transaction.
- * Lock order: event -> full organization -> user -> C/D facts. No AuthService HTTP operation
+ * Lock order: event -> C administrators/departments/roles/lists/users/resources -> grant facts.
+ * C preparation precedes all organization/person reads. No AuthService HTTP operation
  * (REQUIRES_NEW) is called here. Account SQL joins the existing transaction.
  */
 @Service
@@ -52,7 +53,7 @@ public class HrService {
                 "USER",r.sgNo(),r.occurredAt(),r),() -> unique(() -> applyEmployee(actor,r)));
     }
     private Map<String,Object> applyEmployee(TrustedEventContext actor,Employee r) {
-        List<Department> all=lock(actor,"HR_EMPLOYEE");
+        List<Department> all=lock(actor,r.eventId(),"HR_EMPLOYEE",r.sgNo());
         Department target=assignable(all,r.deptCode());
         UserAccount u=users.lockByEmployeeNo(r.sgNo());
         String phone=SensitiveDataCodec.normalizePhone(r.phone());
@@ -94,7 +95,7 @@ public class HrService {
         source(actor,r.sourceSystem());
         return events.execute(actor,new ExternalEventService.Command(r.eventId(),"HR_TRANSFER",r.eventVersion(),
                 "USER",r.sgNo(),r.occurredAt(),r),() -> {
-            List<Department> all=lock(actor,"HR_TRANSFER");
+            List<Department> all=lock(actor,r.eventId(),"HR_TRANSFER",r.sgNo());
             Department from=byCode(all,r.fromDeptCode()); Department target=assignable(all,r.toDeptCode());
             UserAccount u=required(r.sgNo());verify(u,r.sgNo(),r.eventVersion());
             if(!u.deptId.equals(from.getId())) fail(ErrorCode.INVALID_DEPT_MAPPING);
@@ -110,7 +111,7 @@ public class HrService {
         source(actor,r.sourceSystem());
         return events.execute(actor,new ExternalEventService.Command(r.eventId(),"HR_TERMINATION",r.eventVersion(),
                 "USER",r.sgNo(),r.effectiveAt(),r),() -> {
-            lock(actor,"HR_TERMINATION");
+            lock(actor,r.eventId(),"HR_TERMINATION",r.sgNo());
             if(r.effectiveAt().toInstant().isAfter(clock.instant())) fail(ErrorCode.BUSINESS_RULE_VIOLATION);
             UserAccount u=required(r.sgNo());verify(u,r.sgNo(),r.eventVersion());
             if(u.status==3) fail(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -121,10 +122,12 @@ public class HrService {
         });
     }
 
-    private List<Department> lock(TrustedEventContext actor,String type) {
+    private List<Department> lock(TrustedEventContext actor,String eventId,String type,String employeeNo) {
         if(!TransactionSynchronizationManager.isActualTransactionActive() || !Objects.equals(
                 TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),java.sql.Connection.TRANSACTION_SERIALIZABLE))
             throw new IllegalStateException("Serializable event transaction required");
+        trusted.verifyTrustedEvent(actor,type);
+        grants.prepare(actor,eventId,type,employeeNo);
         List<Department> all=organization.lockOrganization();trusted.verifyOrganization(all);
         // Authentication was checked at ingress; recheck service authority in the write transaction.
         trusted.verifyTrustedEvent(actor,type);return all;
@@ -163,6 +166,7 @@ public class HrService {
         trusted.signAndAudit(operation,actor,Map.of("eventId",eventId,"userId",current.id.toString(),
                 "deptId",current.deptId.toString(),"status",current.status,"hrVersion",current.hrVersion,
                 "sessionVersion",current.sessionVersion,"grantRevision",current.grantRevision));
+        grants.complete(current.id);
     }
     private void source(TrustedEventContext actor,String body) {
         if(actor==null || !"HR".equals(actor.sourceSystem()) || !"HR".equals(body)) fail(ErrorCode.INVALID_SERVICE);

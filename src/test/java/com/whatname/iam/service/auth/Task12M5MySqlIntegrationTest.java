@@ -343,7 +343,9 @@ class Task12M5MySqlIntegrationTest {
             http(18090,"PATCH","/users/"+target.id+"/status",Map.of("status",2,"reason",prefix),bearer,503);
             http(18090,"GET","/departments",null,bearer,503);
             assertEquals(1,users.findById(target.id).status);
-            assertThrows(BusinessException.class,()->ordinary.getBean(com.whatname.iam.service.hr.HrCollaboration.class).revokeAll(null,"task12-no-hr",target.id));
+            assertThrows(BusinessException.class,()->new TransactionTemplate(ordinary.getBean(PlatformTransactionManager.class))
+                    .executeWithoutResult(tx -> ordinary.getBean(com.whatname.iam.service.hr.HrCollaboration.class)
+                            .revokeAll(null,"task12-no-hr",target.id)));
         }
         String event=prefix+"real-hr-unavailable";
         http("POST","/integrations/hr/merges",Map.of("sourceSystem","HR","eventId",event,"eventVersion",1,

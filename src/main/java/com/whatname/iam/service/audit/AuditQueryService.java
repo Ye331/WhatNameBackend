@@ -75,6 +75,11 @@ public class AuditQueryService {
         }
         return result;
     }
+    /** Internal verifier: caller must scope the selected row within its own read transaction. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Map<String,Object> verifyRetainedEvidence(Map<String,Object> row) {
+        return evidence(row);
+    }
     @SuppressWarnings("unchecked")
     private Map<String,Object> evidence(Map<String,Object> row) {
         try {

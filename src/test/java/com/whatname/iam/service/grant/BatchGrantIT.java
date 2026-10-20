@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
-@SpringBootTest(properties = "spring.config.import=")
+@SpringBootTest(properties = {"spring.config.import=", "iam.grant-batch.recovery.enabled=false"})
 @AutoConfigureMockMvc
 @Import(GrantIT.Integrations.class)
 @Testcontainers
@@ -236,12 +236,12 @@ class BatchGrantIT {
                 String.class, revoke)).isEqualTo("v4");
     }
 
-    @Test void appliedWriteFailureRollsBackBusinessAndLeavesPendingWithoutAutomaticRetry() throws Exception {
+    @Test void nonretryableAppliedWriteFailureRollsBackBusinessAndBecomesFailed() throws Exception {
         String batch = accepted("applied-failure", request(List.of(target(6, "ROLLBACK"))));
         jdbc.execute("ALTER TABLE sys_grant_batch_item ADD CONSTRAINT test_fail_applied CHECK (batch_id<>"
                 + batch + " OR processing_status<>'APPLIED')");
         try { runTasks(); } finally { jdbc.execute("ALTER TABLE sys_grant_batch_item DROP CHECK test_fail_applied"); }
-        assertThat(query(batch, 1, 20).get("pending").asInt()).isEqualTo(1);
+        assertThat(query(batch, 1, 20).get("failed").asInt()).isEqualTo(1);
         assertThat(count("sys_user_role_source")).isZero();
         assertThat(count("sys_user_role")).isZero();
         assertThat(revision()).isEqualTo(1);
