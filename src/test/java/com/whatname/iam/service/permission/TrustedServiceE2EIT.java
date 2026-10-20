@@ -3,6 +3,7 @@ package com.whatname.iam.service.permission;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.security.JwtTokenService;
+import com.whatname.iam.service.event.TrustedEventContext;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.plugin.*;
@@ -105,6 +106,7 @@ class TrustedServiceE2EIT {
     @Autowired DataSignatureService signatures;
     @Autowired JwtTokenService jwt;
     @Autowired PermissionService permissions;
+    @Autowired ServiceOaCaller oaCaller;
     @Autowired Fault fault;
 
     static final AtomicLong NEXT = new AtomicLong(1000);
@@ -374,10 +376,25 @@ class TrustedServiceE2EIT {
         assertThat(externalEvents()).isZero();
     }
 
+    @Test void forgedOaContextRejectedBeforeBusinessDecision() {
+        assertThatThrownBy(() -> oaCaller.verifyTrustedEvent(
+                new TrustedEventContext("OA", oaClient, "never-authenticated"), "OA_DECISION"))
+                .isInstanceOf(com.whatname.iam.common.exception.BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE);
+    }
+
+    @Test void serviceIdentityFactTamperingRejected() throws Exception {
+        db.update("UPDATE sys_service_identity SET public_key=? WHERE id=?",
+                b64(keys("Ed25519").getPublic().getEncoded()), id(70));
+        sendOa(grantBytes(), "nonce-identity-tamper", now(), null, 401);
+        assertThat(externalEvents()).isZero();
+    }
+
     @Test void rbac0PassButNoM5ScopeRejected() throws Exception {
         // Admin 11 (level-2, dept 2) holds IAM_USERS_VIEW (RBAC0 pass) but user 20 is in dept 1 (out of M5 scope).
         var response = http.perform(get(USERS_PATH + "/" + sid(20) + "/permissions")
-                        .param("appCode", "E2E" + b).header("Authorization", bearer(11)))
+                        .param("appCode", "E2E" + b).header("Authorization", bearer(id(11))))
                 .andExpect(status().is(404)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
     }
@@ -387,25 +404,25 @@ class TrustedServiceE2EIT {
         db.update("DELETE FROM sys_role_permission WHERE role_id=? AND menu_id=?", id(31), id(52));
         tx.executeWithoutResult(s -> signatures.sign(ROLE_MENUS, id(31)));
         var response = http.perform(get(USERS_PATH + "/" + sid(20) + "/permissions")
-                        .param("appCode", "E2E" + b).header("Authorization", bearer(10)))
+                        .param("appCode", "E2E" + b).header("Authorization", bearer(id(10))))
                 .andExpect(status().is(403)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("PERMISSION_DENIED");
     }
 
     @Test void permissionRevokedImmediatelyFails() throws Exception {
         grantRole30ToUser20();
-        assertThat(apiAllowed(20)).isTrue();
+        assertThat(apiAllowed(id(20))).isTrue();
         revokeRole30FromUser20();
-        assertThat(apiAllowed(20)).isFalse();
+        assertThat(apiAllowed(id(20))).isFalse();
     }
 
     @Test void menuDisabledInvalidatesPermission() throws Exception {
         grantRole30ToUser20();
-        assertThat(apiAllowed(20)).isTrue();
+        assertThat(apiAllowed(id(20))).isTrue();
         // Disabling the business menu removes the related API permission, without touching the account.
         db.update("UPDATE sys_menu SET status=0 WHERE id=?", id(56));
         tx.executeWithoutResult(s -> signatures.sign(RESOURCE_MENU, id(56)));
-        assertThat(apiAllowed(20)).isFalse();
+        assertThat(apiAllowed(id(20))).isFalse();
     }
 
     @Test void businessRollbackDoesNotRestoreNonce() throws Exception {
@@ -439,9 +456,9 @@ class TrustedServiceE2EIT {
 
     @Test void dependencySecurityStateUnavailableFailsClosed() throws Exception {
         db.update("DELETE FROM sys_data_signature WHERE data_type='SERVICE_IDENTITY' AND data_id=?", id(70));
-        var error = sendOa(grantBytes(), "nonce-failclosed", now(), null, 503);
-        assertThat(error.path("code").asText()).isEqualTo("INTEGRITY_FAILURE");
+        var error = sendOa(grantBytes(), "nonce-failclosed", now(), null, 401);
+        assertThat(error.path("code").asText()).isEqualTo("INVALID_SERVICE");
         assertThat(db.queryForObject("SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=?", Long.class, id(20))).isZero();
-        assertThat(db.queryForObject("SELECT processing_status FROM sys_external_event WHERE source_system='OA' AND event_id=?", String.class, event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(externalEvents()).isZero();
     }
 }
