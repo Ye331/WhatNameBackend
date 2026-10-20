@@ -616,8 +616,9 @@ class M1MySqlIntegrationTest {
         expect(ErrorCode.INVALID_TOKEN,()->users.detail(a,u.id.toString()));assertNotNull(users.detail(b,u.id.toString()));
         assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_session_invalidation WHERE user_id=?",Integer.class,u.id));
         db.update("UPDATE sys_user SET status=3,session_version=session_version+1 WHERE id=?",u.id);
-        http("POST","/auth/logout",null,b,200);assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM sys_session_invalidation WHERE user_id=?",Integer.class,u.id));
+        // Model a legitimate state transition: its identity signature commits before logout.
         gateway.seedSignature(mapper.findById(u.id));
+        http("POST","/auth/logout",null,b,200);assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM sys_session_invalidation WHERE user_id=?",Integer.class,u.id));
     }
 
     @Test void signatureReadFailureAndWriteAuditFaultsRejectOverHttpAndRollback() throws Exception {

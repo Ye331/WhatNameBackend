@@ -119,6 +119,7 @@ public class UserService {
                 u.createdBy=actor.id;u.tempReason=input.reason().strip();u.source=2;u.status=1;u.passwordInitialized=0;
                 u.sessionVersion=1L;u.grantRevision=1L;u.hrVersion=0L;u.pwdFailedCount=0;
                 users.insertTemporary(u);
+                AAccountCreation.inserted(u);
                 security.signIdentity(u);security.audit("US03_CREATE",actor.id,u.id,u.tempReason);
                 return new Created(u.id.toString(),u.username,2,mask(normalized),u.deptId.toString(),1);
             });
