@@ -359,7 +359,7 @@ class TrustedServiceE2EIT {
         // An app-unbound OA identity cannot act as an app-bound API caller.
         byte[] body = json.writeValueAsBytes(Map.of("httpMethod", "GET", "routeTemplate", "/records/{id}"));
         var response = http.perform(signed(oaClient, "oa-key", now(), "nonce-appid", "POST", API_PATH, body)
-                        .contentType("application/json").header("Authorization", bearer(id(20))).content(body))
+                        .contentType("application/json").header("Authorization", bearer(20)).content(body))
                 .andExpect(status().is(401)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("INVALID_SERVICE");
     }
@@ -377,7 +377,7 @@ class TrustedServiceE2EIT {
     @Test void rbac0PassButNoM5ScopeRejected() throws Exception {
         // Admin 11 (level-2, dept 2) holds IAM_USERS_VIEW (RBAC0 pass) but user 20 is in dept 1 (out of M5 scope).
         var response = http.perform(get(USERS_PATH + "/" + sid(20) + "/permissions")
-                        .param("appCode", "E2E" + b).header("Authorization", bearer(id(11))))
+                        .param("appCode", "E2E" + b).header("Authorization", bearer(11)))
                 .andExpect(status().is(404)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
     }
@@ -387,25 +387,25 @@ class TrustedServiceE2EIT {
         db.update("DELETE FROM sys_role_permission WHERE role_id=? AND menu_id=?", id(31), id(52));
         tx.executeWithoutResult(s -> signatures.sign(ROLE_MENUS, id(31)));
         var response = http.perform(get(USERS_PATH + "/" + sid(20) + "/permissions")
-                        .param("appCode", "E2E" + b).header("Authorization", bearer(id(10))))
+                        .param("appCode", "E2E" + b).header("Authorization", bearer(10)))
                 .andExpect(status().is(403)).andReturn();
         assertThat(json.readTree(response.getResponse().getContentAsString()).path("code").asText()).isEqualTo("PERMISSION_DENIED");
     }
 
     @Test void permissionRevokedImmediatelyFails() throws Exception {
         grantRole30ToUser20();
-        assertThat(apiAllowed(id(20))).isTrue();
+        assertThat(apiAllowed(20)).isTrue();
         revokeRole30FromUser20();
-        assertThat(apiAllowed(id(20))).isFalse();
+        assertThat(apiAllowed(20)).isFalse();
     }
 
     @Test void menuDisabledInvalidatesPermission() throws Exception {
         grantRole30ToUser20();
-        assertThat(apiAllowed(id(20))).isTrue();
+        assertThat(apiAllowed(20)).isTrue();
         // Disabling the business menu removes the related API permission, without touching the account.
         db.update("UPDATE sys_menu SET status=0 WHERE id=?", id(56));
         tx.executeWithoutResult(s -> signatures.sign(RESOURCE_MENU, id(56)));
-        assertThat(apiAllowed(id(20))).isFalse();
+        assertThat(apiAllowed(20)).isFalse();
     }
 
     @Test void businessRollbackDoesNotRestoreNonce() throws Exception {
