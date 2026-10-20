@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** D-owned resource integrity port for B. B calls it inside its existing write transaction. */
 @Service
-public final class ResourceDataSecurity {
+public class ResourceDataSecurity {
     private final DataSignatureService signatures;
     public ResourceDataSecurity(DataSignatureService signatures) { this.signatures=signatures; }
     @Transactional(propagation=Propagation.MANDATORY)
