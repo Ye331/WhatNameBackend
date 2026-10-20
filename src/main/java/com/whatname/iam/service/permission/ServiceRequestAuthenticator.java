@@ -9,8 +9,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
+import static com.whatname.iam.service.permission.SignedDataType.SERVICE_IDENTITY;
 
 /** End-to-end verification of a trusted-service request: header presence, clock skew,
  * identity status, key_id/app/scope binding, Ed25519 signature over the canonical message,
@@ -20,15 +25,18 @@ import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 public class ServiceRequestAuthenticator {
     private final ServiceIdentityMapper identities;
     private final NonceStore nonces;
+    private final DataSignatureService signatures;
     private final Clock clock = Clock.systemUTC();
+    private final ConcurrentMap<String, AuthenticatedRequest> authenticated = new ConcurrentHashMap<>();
 
-    public ServiceRequestAuthenticator(ServiceIdentityMapper identities, NonceStore nonces) {
-        this.identities = identities;
-        this.nonces = nonces;
+    public ServiceRequestAuthenticator(ServiceIdentityMapper identities, NonceStore nonces,
+                                      DataSignatureService signatures) {
+        this.identities = identities; this.nonces = nonces; this.signatures = signatures;
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Map<String,Object> authenticate(HttpServletRequest request, byte[] rawBody, String requiredScope) {
-        if (!Set.of("API_AUTH","OA_DECISION","HR_SYNC").contains(requiredScope))
+        if (requiredScope == null || !Set.of("API_AUTH", "OA_DECISION", "HR_SYNC").contains(requiredScope))
             throw new BusinessException(INVALID_SERVICE);
         String clientId = required(request, ServiceRequestSignature.CLIENT_ID_HEADER, 64);
         String keyId = required(request, ServiceRequestSignature.KEY_ID_HEADER, 64);
@@ -44,6 +52,7 @@ public class ServiceRequestAuthenticator {
             throw new BusinessException(INVALID_SERVICE);
 
         Map<String,Object> identity = identities.find(clientId);
+        verifyIdentityFact(identity);
         if (identity == null || !(identity.get("status") instanceof Number status) || status.intValue() != 1
                 || !requiredScope.equals(identity.get("allowed_scope")))
             throw new BusinessException(INVALID_SERVICE);
@@ -67,6 +76,10 @@ public class ServiceRequestAuthenticator {
         LocalDateTime expiresAt = LocalDateTime.ofInstant(
                 clock.instant().plusSeconds(ServiceRequestSignature.NONCE_RETENTION_SECONDS), ZoneOffset.ofHours(8));
         nonces.consume(clientId, nonce, expiresAt);
+        authenticated.put(proofKey(clientId, nonce), new AuthenticatedRequest(
+                clientId, keyId, timestamp, nonce, request.getMethod(), rawPathAndQuery,
+                ServiceRequestSignature.sha256Hex(rawBody), requiredScope,
+                clock.instant().plusSeconds(ServiceRequestSignature.NONCE_RETENTION_SECONDS).getEpochSecond()));
         return identity;
     }
 
@@ -77,10 +90,51 @@ public class ServiceRequestAuthenticator {
         return authenticate(request, cached.getContentAsByteArray(), requiredScope);
     }
 
+    /** Re-validates a context issued only after successful request authentication. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void verifyAuthenticatedContext(com.whatname.iam.service.event.TrustedEventContext context,
+                                           String requiredScope) {
+        if (context == null || blank(context.clientId()) || blank(context.requestId()))
+            throw new BusinessException(INVALID_SERVICE);
+        String key = proofKey(context.clientId(), context.requestId());
+        AuthenticatedRequest proof = authenticated.get(key);
+        if (proof == null || proof.expiresAtEpochSecond() < clock.instant().getEpochSecond()
+                || !requiredScope.equals(proof.requiredScope())) {
+            authenticated.remove(key, proof);
+            throw new BusinessException(INVALID_SERVICE);
+        }
+        Map<String,Object> identity = identities.find(context.clientId());
+        verifyIdentityFact(identity);
+        if (!proof.keyId().equals(identity.get("key_id"))
+                || !requiredScope.equals(identity.get("allowed_scope"))
+                || ("API_AUTH".equals(requiredScope) != (identity.get("app_id") != null))
+                || !(identity.get("status") instanceof Number status) || status.intValue() != 1)
+            throw new BusinessException(INVALID_SERVICE);
+    }
+
     private static String required(HttpServletRequest request, String name, int maxLength) {
         String value = request.getHeader(name);
         if (value == null || value.isBlank() || value.length() > maxLength)
             throw new BusinessException(INVALID_SERVICE);
         return value;
     }
+
+    private void verifyIdentityFact(Map<String,Object> identity) {
+        try {
+            if (identity == null || !(identity.get("id") instanceof Number id) || id.longValue() <= 0)
+                throw new BusinessException(INVALID_SERVICE);
+            signatures.verify(SERVICE_IDENTITY, id.longValue());
+        } catch (BusinessException failure) {
+            throw new BusinessException(INVALID_SERVICE, failure);
+        } catch (RuntimeException failure) {
+            throw new BusinessException(INVALID_SERVICE, failure);
+        }
+    }
+
+    private static String proofKey(String clientId, String nonce) { return clientId + "\u0000" + nonce; }
+    private static boolean blank(String value) { return value == null || value.isBlank(); }
+
+    private record AuthenticatedRequest(String clientId, String keyId, long timestamp, String nonce,
+                                        String method, String pathAndQuery, String bodyDigest,
+                                        String requiredScope, long expiresAtEpochSecond) { }
 }
