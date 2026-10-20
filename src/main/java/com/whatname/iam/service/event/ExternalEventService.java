@@ -17,10 +17,14 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.function.Supplier;
 import org.springframework.dao.DuplicateKeyException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** No proxy self-invocation: every boundary is an explicit TransactionTemplate.
  * Call outside a caller transaction: receive/failure are independent short transactions;
@@ -28,11 +32,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class ExternalEventService {
+    private static final Logger log = LoggerFactory.getLogger(ExternalEventService.class);
     public record Command(String eventId, String eventType, Long eventVersion, String targetType,
                           String targetRef, OffsetDateTime occurredAt, Object businessPayload) {
         @Override public String toString() { return "ExternalEventCommand[redacted]"; }
     }
     private record Claim(long id, Map<String,Object> replay) { }
+    private record FailureDisposition(Map<String,Object> replay, String state) { }
     private final ExternalEventMapper mapper;
     private final SensitiveDataCodec codec;
     private final DepartmentCollaboration integration;
@@ -82,13 +88,10 @@ public class ExternalEventService {
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException("Event orchestration must be called outside a caller transaction");
         validate(ctx,c);
-        if("OA".equals(ctx.sourceSystem())) {
-            if(oa==null || !"OA_DECISION".equals(c.eventType())) throw new BusinessException(ErrorCode.INVALID_SERVICE);
-            oa.verifyTrustedEvent(ctx,c.eventType());
-            if(recovery) oa.authorizeRecovery(ctx,c.eventType());
-        } else {
-            integration.verifyTrustedEvent(ctx,c.eventType());
-            if(recovery) integration.authorizeRecovery(ctx,c.eventType());
+        verifyTrustedEvent(ctx,c.eventType());
+        if(recovery) {
+            if("OA".equals(ctx.sourceSystem())) oa.authorizeRecovery(ctx,c.eventType());
+            else integration.authorizeRecovery(ctx,c.eventType());
         }
         String canonical=canonical(ctx,c);
         String digest=digest(canonical);
@@ -99,6 +102,8 @@ public class ExternalEventService {
         } catch (RuntimeException receiptUnavailable) {
             if(receiptUnavailable instanceof BusinessException) throw receiptUnavailable;
             // An unknown receipt commit never grants permission to execute or to take over.
+            log.warn("External event receipt unavailable source={} type={} failure={}",
+                    ctx.sourceSystem(),c.eventType(),receiptUnavailable.getClass().getSimpleName());
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
         }
         if (claim.replay()!=null) return claim.replay();
@@ -111,6 +116,10 @@ public class ExternalEventService {
                 if (row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))
                         || !"PROCESSING".equals(row.get("status")))
                     throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+                // Recheck the same source-specific authority in the actual write transaction.
+                // Only this private path can register A's transaction-local execution evidence.
+                verifyTrustedEvent(ctx,c.eventType());
+                TransactionSynchronizationManager.registerSynchronization(new Applying(ctx,c));
                 Map<String,Object> result=Objects.requireNonNull(work.get());
                 assertSafeResult(json.valueToTree(result));
                 String encoded=encode(result);
@@ -123,24 +132,57 @@ public class ExternalEventService {
             ErrorCode code=error instanceof BusinessException b ? b.errorCode() : ErrorCode.AUTH_STATE_UNAVAILABLE;
             boolean definitive=code.status().is4xxClientError();
             try {
-                Map<String,Object> committed=shortTx.execute(tx -> {
+                FailureDisposition disposition=shortTx.execute(tx -> {
                     // A commit acknowledgement can be lost. Inspect the real locked state before
                     // recording a failure, and never replace an already committed result.
                     Map<String,Object> row=mapper.lock(ctx.sourceSystem(),c.eventId());
-                    if(row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))) return null;
-                    if("APPLIED".equals(row.get("status"))) return decode((String)row.get("result"));
-                    if("PROCESSING".equals(row.get("status")))
-                        mapper.failed(owned.id(),definitive ? "REJECTED" : "PENDING_RECOVERY",code.name());
-                    return null;
+                    if(row==null || owned.id()!=id(row) || !digest.equals(row.get("digest")))
+                        return new FailureDisposition(null,"UNMATCHED");
+                    String state=(String)row.get("status");
+                    if("APPLIED".equals(state)) return new FailureDisposition(decode((String)row.get("result")),state);
+                    if("PROCESSING".equals(state)) {
+                        state=definitive ? "REJECTED" : "PENDING_RECOVERY";
+                        if(mapper.failed(owned.id(),state,code.name())!=1)
+                            throw new IllegalStateException("External event failure state was not saved");
+                    }
+                    return new FailureDisposition(null,state);
                 });
-                if(committed!=null) return committed;
+                if(disposition.replay()!=null) return disposition.replay();
+                if(!(error instanceof BusinessException) || "UNMATCHED".equals(disposition.state()))
+                    log.warn("External event failed rowId={} source={} type={} code={} failure={} state={}",
+                            owned.id(),ctx.sourceSystem(),c.eventType(),code.name(),
+                            error.getClass().getSimpleName(),disposition.state());
             } catch (RuntimeException failureRecordUnavailable) {
                 // Preserve the retained state. Ordinary retries and online recovery never take over.
+                log.warn("External event failure record unavailable rowId={} source={} type={} code={} failure={} recordFailure={}",
+                        owned.id(),ctx.sourceSystem(),c.eventType(),code.name(),
+                        error.getClass().getSimpleName(),failureRecordUnavailable.getClass().getSimpleName());
             }
             if (error instanceof BusinessException) throw error;
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
         }
     }
+
+    private void verifyTrustedEvent(TrustedEventContext context,String eventType) {
+        if("OA".equals(context.sourceSystem())) {
+            if(oa==null || !"OA_DECISION".equals(eventType)) throw new BusinessException(ErrorCode.INVALID_SERVICE);
+            oa.verifyTrustedEvent(context,eventType);
+        } else {
+            integration.verifyTrustedEvent(context,eventType);
+        }
+    }
+
+    /** A-only implementation detail, not a service-authentication or recovery entry point.
+     * Synchronizations suspend with REQUIRES_NEW and disappear when this transaction ends. */
+    public static Command applying(TrustedEventContext context,String eventType,String eventId) {
+        if(!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive())return null;
+        return TransactionSynchronizationManager.getSynchronizations().stream()
+                .filter(sync -> sync instanceof Applying applying && applying.context.equals(context)
+                        && applying.command.eventType().equals(eventType) && applying.command.eventId().equals(eventId))
+                .map(sync -> ((Applying)sync).command).findFirst().orElse(null);
+    }
+    private record Applying(TrustedEventContext context,Command command) implements TransactionSynchronization { }
 
     private Claim claim(TrustedEventContext ctx, Command c, String digest,String plaintext,boolean recovery) {
         return shortTx.execute(tx -> {

@@ -3,8 +3,11 @@
 # AES and phone/SMS HMAC keys: three independent random 32-byte keys, standard Base64.
 # RSA >=2048 bits: PKCS#8 private DER / X.509 public DER, standard Base64 (no PEM headers).
 # Configure issuer/audience/key-id explicitly and agree this A-internal JWT format with D.
-# Keys alone do not enable business: real M1SecurityGateway and SmsSender adapters are required.
-# No allow adapter or SMS provider is supplied in production; the test doubles live in src/test.
+# Keys alone do not enable business: the remaining C/D security integrations are required.
+# Local demonstration only: add --spring.profiles.active=sms-demo and
+# --iam.sms.demo-directory=<existing-absolute-directory-outside-Git>.
+# This isolated file channel replaces commercial delivery for the course demonstration.
+# Default SMS delivery still refuses; no allow adapter or real SMS credential is supplied.
 iam:
   security:
     data-key: ${IAM_DATA_KEY:}

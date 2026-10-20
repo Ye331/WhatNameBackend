@@ -187,7 +187,9 @@ public class AuthService {
         tx.executeWithoutResult(status->{
             // Serialize same-user logout and status/password transitions. State/sv is deliberately
             // not an eligibility gate here; a signed old token can only revoke its own jti.
-            if(users.lockById(p.userId())==null) throw new BusinessException(ErrorCode.INVALID_TOKEN);
+            UserAccount current=users.lockById(p.userId());
+            if(current==null) throw new BusinessException(ErrorCode.INVALID_TOKEN);
+            security.verifyIdentity(current);
             SessionInvalidation existing=credentials.findInvalidation(p.jti());
             if(existing!=null) {
                 if(existing.userId!=p.userId()) throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);

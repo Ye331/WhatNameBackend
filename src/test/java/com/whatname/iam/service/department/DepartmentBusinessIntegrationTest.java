@@ -12,6 +12,7 @@ import com.whatname.iam.controller.department.DepartmentController;
 import com.whatname.iam.dto.department.DepartmentRequests;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.service.event.*;
+import com.whatname.iam.mapper.event.ExternalEventMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -39,6 +40,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /** Real personal MySQL + real HTTP; C/D is an explicitly test-only integration port.
  * External events and append-only test audit evidence remain, as required by retention rules.
@@ -381,6 +384,47 @@ class DepartmentBusinessIntegrationTest {
         var processing=eventState(event);
         error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.recover(oa,command,() -> {fail("processing recovery callback");return Map.of();}));
         assertEquals(processing,eventState(event));assertNull(processing.get("result_data"));
+        assertRedactedEventFailureDiagnostics();
+    }
+
+    private void assertRedactedEventFailureDiagnostics() {
+        var logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(ExternalEventService.class);
+        var captured=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        captured.start();logger.addAppender(captured);
+        try {
+            var oa=new TrustedEventContext("OA","task06-test-oa","diagnostic-test");
+            String savedEvent=event();
+            var saved=new ExternalEventService.Command(savedEvent,"OA_DECISION",null,"USER","test-subject",null,
+                    Map.of("decision","APPROVE"));
+            error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> events.execute(oa,saved,() -> {
+                throw new IllegalStateException("private-payload-marker");
+            }));
+            assertEquals("PENDING_RECOVERY",eventState(savedEvent).get("processing_status"));
+
+            var delegate=app.getBean(ExternalEventMapper.class);
+            var failing=mock(ExternalEventMapper.class,org.mockito.AdditionalAnswers.delegatesTo(delegate));
+            doThrow(new IllegalStateException("private-record-marker")).when(failing)
+                    .failed(anyLong(),anyString(),anyString());
+            var unreliable=new ExternalEventService(failing,codec,port,json,app.getBean(PlatformTransactionManager.class),port);
+            String retainedEvent=event();
+            var retained=new ExternalEventService.Command(retainedEvent,"OA_DECISION",null,"USER","test-subject",null,
+                    Map.of("decision","APPROVE"));
+            error(ErrorCode.AUTH_STATE_UNAVAILABLE,() -> unreliable.execute(oa,retained,() -> {
+                throw new IllegalArgumentException("private-payload-marker");
+            }));
+            assertEquals("PROCESSING",eventState(retainedEvent).get("processing_status"));
+
+            String diagnostics=captured.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .filter(message->message.startsWith("External event ")).reduce("",(a,b)->a+"\n"+b);
+            assertTrue(diagnostics.contains("failure=IllegalStateException state=PENDING_RECOVERY"));
+            assertTrue(diagnostics.contains("failure=IllegalArgumentException recordFailure=IllegalStateException"));
+            assertFalse(diagnostics.contains("private-payload-marker"));
+            assertFalse(diagnostics.contains("private-record-marker"));
+            assertFalse(diagnostics.contains(savedEvent));
+            assertFalse(diagnostics.contains(retainedEvent));
+        } finally {
+            logger.detachAppender(captured);captured.stop();
+        }
     }
 
     @Test void activeOwnerRecoveryWaitsForCommitAndReplaysSavedTerminalResult() throws Exception {
