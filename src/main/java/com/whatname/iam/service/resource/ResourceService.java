@@ -68,7 +68,7 @@ public class ResourceService {
     }
 
     public PageResponse<ApplicationItem> listApplications(String bearer, PageRequest pageRequest) {
-        requireView(bearer);
+        requireCurrentView(bearer);
         int total = mapper.countApplications();
         List<ApplicationItem> items = mapper.listApplications(pageRequest.offset(), pageRequest.getPageSize())
                 .stream()
@@ -79,8 +79,7 @@ public class ResourceService {
 
     @Transactional
     public CreateApplicationResult createApplication(String bearer, CreateApplicationRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId, bearer);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         String appCode = request.getAppCode().trim().toUpperCase(Locale.ROOT);
         if (mapper.countApplicationCode(appCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
@@ -100,8 +99,7 @@ public class ResourceService {
 
     @Transactional
     public UpdateApplicationResult updateApplication(String bearer, long appId, UpdateApplicationRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId, bearer);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         ApplicationEntity existing = requireApplication(appId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, appId);
         Integer status = request.getStatus();
@@ -128,7 +126,7 @@ public class ResourceService {
     }
 
     public AppMenusResult listMenus(String bearer, long appId) {
-        requireView(bearer);
+        requireCurrentView(bearer);
         requireApplication(appId);
         List<MenuItem> menus = mapper.listMenusByAppId(appId)
                 .stream()
@@ -139,8 +137,7 @@ public class ResourceService {
 
     @Transactional
     public CreateMenuResult createMenu(String bearer, long appId, CreateMenuRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         requireApplication(appId);
         int menuType = requireMenuType(request.getMenuType());
         Long parentId = request.getParentId();
@@ -178,8 +175,7 @@ public class ResourceService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public UpdateMenuResult updateMenu(String bearer, long menuId, UpdateMenuRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         MenuEntity existing = requireMenu(menuId);
         signatures.verify(SignedDataType.RESOURCE_MENU, menuId);
         signatures.verify(SignedDataType.MENU_APIS, menuId);
@@ -227,8 +223,7 @@ public class ResourceService {
     }
 
     public PageResponse<ApiItem> listApis(String bearer, long appId, String httpMethod, PageRequest pageRequest) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireCurrentView(bearer);
         requireApplication(appId);
         String normalizedMethod = normalizeMethod(httpMethod, true);
         long total = mapper.countApisByApp(appId, normalizedMethod);
@@ -241,8 +236,7 @@ public class ResourceService {
 
     @Transactional
     public CreateApiResult createApi(String bearer, long appId, CreateApiRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         requireApplication(appId);
         String method = normalizeMethod(request.getHttpMethod(), false);
         String apiPath = RouteTemplateUtils.normalizeTemplate(request.getApiPath());
@@ -269,8 +263,7 @@ public class ResourceService {
 
     @Transactional
     public UpdateApiResult updateApi(String bearer, long apiId, UpdateApiRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         ApiEntity existing = requireApi(apiId);
         signatures.verify(SignedDataType.RESOURCE_API, apiId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
@@ -297,8 +290,7 @@ public class ResourceService {
     }
 
     public MenuApisResult listMenuApis(String bearer, long menuId) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireCurrentView(bearer);
         MenuEntity menu = requireMenu(menuId);
         if (menu.getMenuType() != 2) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -309,8 +301,7 @@ public class ResourceService {
 
     @Transactional
     public MenuApisResult replaceMenuApis(String bearer, long menuId, ReplaceMenuApisRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
         MenuEntity menu = requireMenu(menuId);
         signatures.verify(SignedDataType.RESOURCE_MENU, menuId);
         signatures.verify(SignedDataType.MENU_APIS, menuId);
@@ -369,27 +360,17 @@ public class ResourceService {
         return actorId;
     }
 
-    private void requireView(String bearer) {
+    private void requireCurrentView(String bearer) {
         long actorId = actorId(bearer);
-        requireView(actorId);
-    }
-
-    private void requireView(long actorId) {
+        adminPolicy.requireAdministratorReadOnly(actorId);
         permissions.requireFunction(actorId, "IAM_RESOURCES_VIEW");
-        adminPolicy.requireAdministrator(actorId);
     }
 
-    private void requireWrite(long actorId, String bearer) {
-        long effectiveActorId = actorId;
-        if (bearer != null && !bearer.isBlank()) {
-            effectiveActorId = actorId(bearer);
-        }
-        requireWrite(effectiveActorId);
-    }
-
-    private void requireWrite(long actorId) {
-        permissions.requireFunction(actorId, "IAM_RESOURCES_WRITE");
+    private long requireCurrentWrite(String bearer, String permission) {
+        long actorId = actorId(bearer);
         adminPolicy.requireLevelOne(actorId);
+        permissions.requireFunction(actorId, permission);
+        return actorId;
     }
 
     private boolean isProtectedApp(ApplicationEntity app) {

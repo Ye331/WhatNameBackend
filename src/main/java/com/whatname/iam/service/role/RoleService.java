@@ -49,8 +49,7 @@ public class RoleService {
     }
 
     public PageResponse<RoleItem> listRoles(String bearer, PageRequest pageRequest) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireCurrentView(bearer);
         int total = mapper.countRoles();
         List<RoleItem> items = mapper.listRoles(pageRequest.offset(), pageRequest.getPageSize())
                 .stream()
@@ -61,8 +60,7 @@ public class RoleService {
 
     @Transactional
     public CreateRoleResult createRole(String bearer, CreateRoleRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_ROLES_WRITE");
         int roleType = requireRoleType(request.getRoleType());
         if (roleType == 3) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -88,16 +86,14 @@ public class RoleService {
     }
 
     public RoleItem getRole(String bearer, long roleId) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireCurrentView(bearer);
         RoleEntity role = requireRole(roleId);
         return new RoleItem(role.getId(), role.getRoleCode(), role.getRoleName(), role.getRoleType(), role.getStatus());
     }
 
     @Transactional
     public UpdateRoleResult updateRole(String bearer, long roleId, UpdateRoleRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_ROLES_WRITE");
         RoleEntity existing = requireRole(roleId);
         signatures.verify(SignedDataType.ROLE_MENUS, roleId);
         if (existing.getRoleType() == 3) {
@@ -125,8 +121,7 @@ public class RoleService {
     }
 
     public RoleMenusResult listRoleMenus(String bearer, long roleId) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireCurrentView(bearer);
         RoleEntity role = requireRole(roleId);
         List<Long> menuIds = mapper.listMenuIdsByRoleId(roleId);
         return new RoleMenusResult(roleId, menuIds, RevisionUtils.toVersion(role.getMenuRevision()));
@@ -134,8 +129,7 @@ public class RoleService {
 
     @Transactional
     public RoleMenusResult replaceRoleMenus(String bearer, long roleId, ReplaceRoleMenusRequest request) {
-        long actorId = actorId(bearer);
-        requireWrite(actorId);
+        long actorId = requireCurrentWrite(bearer, "IAM_ROLES_WRITE");
         RoleEntity role = requireRole(roleId);
         signatures.verify(SignedDataType.ROLE_MENUS, roleId);
         if (role.getRoleType() == 3) {
@@ -192,14 +186,17 @@ public class RoleService {
         return actorId;
     }
 
-    private void requireView(long actorId) {
+    private void requireCurrentView(String bearer) {
+        long actorId = actorId(bearer);
+        adminPolicy.requireAdministratorReadOnly(actorId);
         permissions.requireFunction(actorId, "IAM_ROLES_VIEW");
-        adminPolicy.requireAdministrator(actorId);
     }
 
-    private void requireWrite(long actorId) {
-        permissions.requireFunction(actorId, "IAM_ROLES_WRITE");
+    private long requireCurrentWrite(String bearer, String permission) {
+        long actorId = actorId(bearer);
         adminPolicy.requireLevelOne(actorId);
+        permissions.requireFunction(actorId, permission);
+        return actorId;
     }
 
     private int requireRoleType(Integer roleType) {
