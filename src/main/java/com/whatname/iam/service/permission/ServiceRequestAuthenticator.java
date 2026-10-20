@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -124,11 +125,21 @@ public class ServiceRequestAuthenticator {
             if (identity == null || !(identity.get("id") instanceof Number id) || id.longValue() <= 0)
                 throw new BusinessException(INVALID_SERVICE);
             signatures.verify(SERVICE_IDENTITY, id.longValue());
+            Object factsObject = signatures.snapshot(SERVICE_IDENTITY, id.longValue()).get("facts");
+            if (!(factsObject instanceof Map<?,?> facts)) throw new BusinessException(INVALID_SERVICE);
+            for (String field : SERVICE_IDENTITY.fields.split(",")) {
+                if (!same(identity.get(field), facts.get(field))) throw new BusinessException(INVALID_SERVICE);
+            }
         } catch (BusinessException failure) {
             throw new BusinessException(INVALID_SERVICE, failure);
         } catch (RuntimeException failure) {
             throw new BusinessException(INVALID_SERVICE, failure);
         }
+    }
+
+    private static boolean same(Object left, Object right) {
+        if (left == null || right == null) return left == right;
+        return Objects.equals(left, right) || left.toString().equals(right.toString());
     }
 
     private static String proofKey(String clientId, String nonce) { return clientId + "\u0000" + nonce; }
