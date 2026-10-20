@@ -152,8 +152,8 @@ public class AdminService {
         long actorId = identity.currentUserId();
         if (actorId <= 0) fail(INVALID_TOKEN);
         var state = targetId == null ? loader.load(write, actorId) : loader.load(write, actorId, targetId);
-        functions.require(actorId, permission);
         integrity.verify(state);
+        functions.require(actorId, permission);
         rules.requireUsableUser(state, actorId);
         return new Context(actorId, state);
     }

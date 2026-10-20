@@ -1,5 +1,9 @@
 # Task12：真实 C M5 与 A 管理入口接入
 
+**2026-10-19 / C2-03 接续更正：**A 人员 HR 回调已前置调用 C `prepare`，统一事件→管理员→部门→角色→清单→用户→资源→授权事实锁序；C 专用岗位回收、离职资格清理、复职检查与 A 最终身份及事件 APPLIED 同事务。详见 [HR 接入](C_STAGE2_HR.md)。生产 HR 认证和 A 最终数据安全适配仍未交付，构造 TrustedEventContext 不能开放生产。下文“C HR 未实现、锁序待统一”是历史状态。
+
+**2026-10-19 / C2-02 接续更正：**C 现已读取合并字段并实现生命周期资格、组织范围重审；A sync/merge 在事件业务锁后、组织读取前增加内部 `prepareOrganizationChange`，原 `organizationChanged` 转交真实 C 实现。C2-01 的 C/A-JWT/D 生产适配也已存在。下方 Task20/Task12 中“C 不读合并字段、组织重审未实现、D 功能/签名/审计未接通”仅是当时状态。A 真实登录数据安全接点、HR 服务认证和 A 最终组织签名仍未交付，生产事件链路继续拒绝。以 [C2-02 接入](C_STAGE2_LIFECYCLE.md) 和 [交接](C_STAGE2_HANDOFF.md) 为当前事实。
+
 **2026-10-18 Task20现行状态，优先于下方Task12历史正文**：A对C的4个生产文件和1个测试文件已恢复main原样，C本身不再包含A增加的管理上下文方法或合并部门校验。A只调整自身适配和测试；HTTP18项、C/D团队公共接口和DB23表不扩展。
 
 当前A按对象调用C既有`requireUserScope(actor,target)`和`requireDepartmentScope(actor,dept)`；调用先于A会话用户及组织读取/锁，完整actor+target由C排序取得。列表先取得C当前管理员资格及锁，再用`requireBatchReadContext`和C自身规则投影范围。写权限来自前述C带锁校验，读上下文不能替代它。A管理入口要求自身新事务，参与外层已有事务则503拒绝，防旧RR快照；没有改成REQUIRES_NEW拆分上层业务事务。

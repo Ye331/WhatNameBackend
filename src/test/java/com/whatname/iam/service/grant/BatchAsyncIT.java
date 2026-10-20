@@ -24,10 +24,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 使用正式后台执行器，执行线程中不设置请求线程的身份上下文。 */
-@SpringBootTest(properties = "spring.config.import=")
+@SpringBootTest(properties = {"spring.config.import=", "iam.grant-batch.recovery.enabled=true"})
 @AutoConfigureMockMvc
 @Import(GrantIT.Integrations.class)
 @Testcontainers
+@org.springframework.test.annotation.DirtiesContext(classMode=org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class BatchAsyncIT {
     @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse(
             "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b").asCompatibleSubstituteFor("mysql"))

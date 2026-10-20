@@ -105,6 +105,19 @@ class AdminIT {
         assertThat(auditCount(6)).isEqualTo(2);
     }
 
+    @Test void mergedDepartmentProjectionRejectsItsAdminAndNewAppointmentsButAllowsSuperiorReview() {
+        jdbc.update("UPDATE sys_dept SET merged_into_dept_id=? WHERE id=?",id(30),id(22));
+        var tx = new TransactionTemplate(transactions);
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> policy.requireAdministrator(id(4))))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.errorCode()).isEqualTo(PERMISSION_DENIED));
+        assertThatThrownBy(() -> service.appoint(new AppointmentRequest(sid(6),4,sid(22),"merged source")))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.errorCode()).isEqualTo(PERMISSION_DENIED));
+        assertThatCode(() -> tx.executeWithoutResult(s -> policy.requireDepartmentScope(id(1),id(22)))).doesNotThrowAnyException();
+        service.revoke(sid(4),new RevokeRequest("review merged root"));
+        assertThat(jdbc.queryForObject("SELECT status FROM sys_admin WHERE user_id=?",Integer.class,id(4))).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user_role WHERE user_id=?",Integer.class,id(6))).isEqualTo(1);
+    }
+
     @Test void sharedWritePolicyRequiresAndJoinsCallersTransaction() {
         assertThatThrownBy(() -> policy.requireLevelOne(id(1))).isInstanceOf(IllegalTransactionStateException.class);
         new TransactionTemplate(transactions).executeWithoutResult(tx -> {

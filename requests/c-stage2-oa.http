@@ -1,0 +1,73 @@
+@baseUrl = https://iam.example.test/api/v1
+@clientId = replace-with-registered-oa-client
+@keyId = replace-with-current-key-id
+
+### OA01 GRANT
+# D 生产服务认证尚未交付，当前默认 INVALID_SERVICE。
+# timestamp/nonce/signature 必须由真实服务签名客户端生成，不能把示例值当可信凭据。
+# 每次 HTTP 请求使用新 nonce；签名包含实际路径、查询串与此原始 body 的摘要。
+POST {{baseUrl}}/integrations/oa/decisions
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "OA",
+  "eventId": "OA-C2-04-GRANT-001",
+  "approvalId": "APPR-C2-04-001",
+  "approvalStatus": "APPROVED",
+  "operation": "GRANT",
+  "targetUserId": "101",
+  "roleId": "5",
+  "approvedAt": "2026-10-19T10:00:00+08:00"
+}
+
+### REVOKE by source ID (use a new nonce/signature)
+POST {{baseUrl}}/integrations/oa/decisions
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "OA",
+  "eventId": "OA-C2-04-REVOKE-001",
+  "approvalId": "REVOKE-APP-C2-04-001",
+  "approvalStatus": "APPROVED",
+  "operation": "REVOKE",
+  "targetUserId": "101",
+  "roleId": "5",
+  "approvedAt": "2026-10-19T11:00:00+08:00",
+  "grantSourceId": "{{grantSourceId}}"
+}
+
+### REVOKE by original approval (grantSourceId must be absent)
+POST {{baseUrl}}/integrations/oa/decisions
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "OA",
+  "eventId": "OA-C2-04-REVOKE-002",
+  "approvalId": "REVOKE-APP-C2-04-002",
+  "approvalStatus": "APPROVED",
+  "operation": "REVOKE",
+  "targetUserId": "101",
+  "roleId": "5",
+  "approvedAt": "2026-10-19T11:00:00+08:00",
+  "originalApprovalId": "APPR-C2-04-001"
+}
+
+# 同事件同内容：新 nonce 重新签名后重发原 body，APPLIED 结果重放且不增 revision/成功审计。
+# 同事件不同内容：409 IDEMPOTENCY_CONFLICT；不同事件同审批：复用来源、不增 revision。
+# 非批准/字段不完整/错误引用组合：400；服务身份错误：401；超范围/超级角色：403。
+# PROCESSING：409；PENDING_RECOVERY 或完整性/审计依赖不可用：503；没有在线接管入口。

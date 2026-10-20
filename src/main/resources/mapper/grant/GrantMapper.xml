@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.whatname.iam.mapper.grant.GrantMapper">
+    <insert id="insertOaSource">
+        INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref,source_dept_id,status,granted_by)
+        VALUES(#{userId},#{roleId},'OA_APPROVAL',#{approvalId},NULL,1,NULL)
+    </insert>
+    <insert id="insertOaEffectiveRole">
+        INSERT INTO sys_user_role(user_id,role_id,granted_by) VALUES(#{userId},#{roleId},NULL)
+    </insert>
+    <update id="revokeOaSource">
+        UPDATE sys_user_role_source SET status=0,revoked_by=NULL,revoked_at=CURRENT_TIMESTAMP
+        WHERE id=#{sourceId} AND user_id=#{userId} AND role_id=#{roleId} AND source_type='OA_APPROVAL' AND status=1
+    </update>
     <select id="selectRevision" resultType="java.lang.Long">
         SELECT grant_revision FROM sys_user WHERE id=#{userId}
         <if test="lock">FOR UPDATE</if>
@@ -33,6 +44,10 @@
     <delete id="deleteEffectiveRole">
         DELETE FROM sys_user_role WHERE user_id=#{userId} AND role_id=#{roleId}
     </delete>
+    <update id="revokeHrSource">
+        UPDATE sys_user_role_source SET status=0,revoked_by=NULL,revoked_at=CURRENT_TIMESTAMP
+        WHERE id=#{sourceId} AND user_id=#{userId} AND role_id=#{roleId} AND status=1
+    </update>
     <update id="advanceRevision">
         UPDATE sys_user SET grant_revision=grant_revision+1
         WHERE id=#{userId} AND grant_revision=#{expected} AND grant_revision &lt; 9223372036854775807

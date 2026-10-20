@@ -72,6 +72,8 @@ class HrBusinessIntegrationTest {
         volatile long managementActor;
         volatile Set<Long> managementScope=Set.of();
         TestPort(JdbcTemplate db){this.db=db;}
+        public void prepare(TrustedEventContext actor,String event,String type,String employeeNo){ stage("prepare"); }
+        public void complete(long userId){ stage("complete"); }
         void stage(String s){assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             if(fault.equals(s))throw new BusinessException(s.equals("audit")?ErrorCode.AUDIT_UNAVAILABLE:ErrorCode.INTEGRITY_FAILURE);}
         public Manager authenticateManager(HttpServletRequest r,String p){throw new BusinessException(ErrorCode.PERMISSION_DENIED);}

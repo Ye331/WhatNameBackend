@@ -11,16 +11,19 @@ import com.whatname.iam.service.event.TrustedEventContext;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 
-/** Only management is adapted. HR service authentication and C organization-change policy
- * have no real provider; they deliberately remain unavailable, including recovery. */
+/** C management and organization review adapters. HR authentication/recovery and A's
+ * organization signing still require their own production providers. */
 public class CBackedDepartmentCollaboration implements DepartmentCollaboration {
     private final AManagementPolicy policy;
     private final JwtTokenService jwt;
     private final AuthService auth;
     private final ManagementDataSecurity data;
+    private final com.whatname.iam.service.admin.AdminOrganizationLifecycle lifecycle;
     public CBackedDepartmentCollaboration(AManagementPolicy policy,JwtTokenService jwt,
-                                         AuthService auth,ManagementDataSecurity data) {
+                                         AuthService auth,ManagementDataSecurity data,
+                                         com.whatname.iam.service.admin.AdminOrganizationLifecycle lifecycle) {
         this.policy=policy; this.jwt=jwt; this.auth=auth; this.data=data;
+        this.lifecycle=lifecycle;
     }
     public Manager authenticateManager(HttpServletRequest request,String permission) {
         var session=jwt.verifyBearer(request.getHeader("Authorization"));
@@ -57,5 +60,12 @@ public class CBackedDepartmentCollaboration implements DepartmentCollaboration {
     public TrustedEventContext authenticateHr(HttpServletRequest request,String eventType) { throw unavailable(); }
     public void verifyTrustedEvent(TrustedEventContext context,String eventType) { throw unavailable(); }
     public void authorizeRecovery(TrustedEventContext context,String eventType) { throw unavailable(); }
-    public void organizationChanged(Set<Long> departments,List<Map<String,Object>> movedUsers) { throw unavailable(); }
+    public void prepareOrganizationChange(TrustedEventContext actor,String eventId) {
+        if(lifecycle==null) throw unavailable();
+        lifecycle.prepare(actor,eventId);
+    }
+    public void organizationChanged(Set<Long> departments,List<Map<String,Object>> movedUsers) {
+        if(lifecycle==null) throw unavailable();
+        lifecycle.organizationChanged(departments,movedUsers);
+    }
 }

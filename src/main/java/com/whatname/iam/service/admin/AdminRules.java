@@ -11,6 +11,36 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 @Component
 public class AdminRules {
+    public Set<Long> organizationReview(AdminState before, AdminState after) {
+        Set<Long> review = new java.util.TreeSet<>();
+        for (var a : before.appointments().values()) {
+            if (a.status() != 1) continue;
+            var oldUser = before.users().get(a.userId());
+            var user = after.users().get(a.userId());
+            if (oldUser == null || user == null) fail(AUTH_STATE_UNAVAILABLE);
+            boolean invalid = mergedChain(after, a.deptId()) || mergedChain(after, user.deptId())
+                    || !oldUser.deptId().equals(user.deptId());
+            if (!invalid && a.adminLevel() > 1) {
+                for (long departmentId : after.departments().keySet()) {
+                    if (contains(after, a, departmentId) && (!before.departments().containsKey(departmentId)
+                            || !contains(before, a, departmentId))) { invalid = true; break; }
+                }
+            }
+            if (!invalid && a.adminLevel() > 1) for (var member : after.users().values()) {
+                var oldMember = before.users().get(member.id());
+                if (contains(after, a, member.deptId()) && (oldMember == null || !contains(before, a, oldMember.deptId()))) {
+                    invalid = true; break;
+                }
+            }
+            if (invalid) review.add(a.userId());
+        }
+        return review;
+    }
+
+    private boolean mergedChain(AdminState state, long departmentId) {
+        return departmentChain(state, departmentId, false).stream()
+                .anyMatch(id -> state.departments().get(id).mergedIntoDeptId() != null);
+    }
     public Appointment requireActive(AdminState state, long actorId) {
         requireUsableUser(state, actorId);
         var actor = state.appointments().get(actorId);
@@ -75,7 +105,7 @@ public class AdminRules {
         while (current != 0) {
             var department = state.departments().get(current);
             if (!visited.add(current) || department == null || department.parentId() < 0) fail(AUTH_STATE_UNAVAILABLE);
-            if (requireUnfrozen && department.status() != 1) fail(PERMISSION_DENIED);
+            if (requireUnfrozen && (department.status() != 1 || department.mergedIntoDeptId() != null)) fail(PERMISSION_DENIED);
             current = department.parentId();
         }
         return visited;
