@@ -30,6 +30,12 @@ public interface DepartmentCollaboration {
     void verifyOrganization(List<Department> organization);
     /** Verify moved user facts before changing dept_id; no authorization grants are changed by A. */
     void verifyUsers(List<Map<String, Object>> users);
+    /** Internal two-phase organization protocol: after authenticated event lock, before all
+     * organization/user reads. Implementations without C lifecycle support must fail closed. */
+    default void prepareOrganizationChange(TrustedEventContext actor, String eventId) {
+        throw new com.whatname.iam.common.exception.BusinessException(
+                com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE);
+    }
     /** Restrict invalid management roots and revalidate affected scopes, never expand them implicitly. */
     void organizationChanged(Set<Long> departments, List<Map<String, Object>> movedUsers);
     /** Persist signatures (including merged_into_dept_id, user dept_id, tree membership) and audit. */

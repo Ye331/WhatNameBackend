@@ -7,8 +7,16 @@
         FROM sys_admin ORDER BY user_id
         <if test="lock">FOR UPDATE</if>
     </select>
-    <select id="selectDepartments" resultType="com.whatname.iam.entity.admin.AdminData$Department">
-        SELECT id, parent_id, status FROM sys_dept ORDER BY id
+    <resultMap id="department" type="com.whatname.iam.entity.admin.AdminData$Department">
+        <constructor>
+            <idArg column="id" javaType="java.lang.Long"/>
+            <arg column="parent_id" javaType="java.lang.Long"/>
+            <arg column="status" javaType="_int"/>
+            <arg column="merged_into_dept_id" javaType="java.lang.Long"/>
+        </constructor>
+    </resultMap>
+    <select id="selectDepartments" resultMap="department">
+        SELECT id, parent_id, status, merged_into_dept_id FROM sys_dept ORDER BY id
         <if test="lock">FOR UPDATE</if>
     </select>
     <select id="selectRoles" resultType="com.whatname.iam.entity.admin.AdminData$Role">
@@ -24,6 +32,9 @@
         WHERE id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
         ORDER BY id
         <if test="lock">FOR UPDATE</if>
+    </select>
+    <select id="selectAllUsers" resultType="com.whatname.iam.entity.admin.AdminData$User">
+        SELECT id, dept_id, status FROM sys_user FORCE INDEX(PRIMARY) ORDER BY id FOR UPDATE
     </select>
     <insert id="insertAppointment">
         INSERT INTO sys_admin(user_id, admin_level, dept_id, appointed_by, status, delegable_revision)

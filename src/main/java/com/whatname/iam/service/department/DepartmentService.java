@@ -73,6 +73,7 @@ public class DepartmentService {
     }
 
     private Map<String,Object> applySync(TrustedEventContext ctx,DepartmentRequests.Sync r) {
+        integration.prepareOrganizationChange(ctx,r.eventId());
         List<Department> all=locked(); Map<Long,Department> byId=index(all);
         List<Map<String,Object>> before=snapshot(all);
         Department current=byCode(all,r.deptCode());
@@ -114,6 +115,7 @@ public class DepartmentService {
                 r.sourceDeptCode(),r.occurredAt(),r),() -> applyMerge(ctx,r));
     }
     private Map<String,Object> applyMerge(TrustedEventContext ctx,DepartmentRequests.Merge r) {
+        integration.prepareOrganizationChange(ctx,r.eventId());
         List<Department> all=locked(); Map<Long,Department> byId=index(all);
         Department source=require(byCode(all,r.sourceDeptCode())); Department target=require(byCode(all,r.targetDeptCode()));
         active(source); active(target); newer(r.eventVersion(),source);

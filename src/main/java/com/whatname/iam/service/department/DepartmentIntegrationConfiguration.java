@@ -20,9 +20,10 @@ public class DepartmentIntegrationConfiguration {
             org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.admin.AManagementPolicy> policy,
             org.springframework.beans.factory.ObjectProvider<com.whatname.iam.common.security.JwtTokenService> jwt,
             org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.auth.AuthService> auth,
-            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.common.security.ManagementDataSecurity> data) {
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.common.security.ManagementDataSecurity> data,
+            org.springframework.beans.factory.ObjectProvider<com.whatname.iam.service.admin.AdminOrganizationLifecycle> lifecycle) {
         if(policy.getIfAvailable()!=null && jwt.getIfAvailable()!=null && auth.getIfAvailable()!=null && data.getIfAvailable()!=null)
-            return new CBackedDepartmentCollaboration(policy.getObject(),jwt.getObject(),auth.getObject(),data.getObject());
+            return new CBackedDepartmentCollaboration(policy.getObject(),jwt.getObject(),auth.getObject(),data.getObject(),lifecycle.getIfAvailable());
         return new DepartmentCollaboration() {
             private BusinessException unavailable() { return new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE); }
             public Manager authenticateManager(HttpServletRequest r, String p) { throw unavailable(); }

@@ -55,6 +55,7 @@ public class AdminTestFixture implements AdminMapper {
     public List<Role> selectRoles(boolean lock) { return List.copyOf(roles.values()); }
     public List<Delegation> selectDelegations(boolean lock) { return List.copyOf(delegations); }
     public List<User> selectUsers(List<Long> ids, boolean lock) { return ids.stream().map(users::get).filter(Objects::nonNull).toList(); }
+    public List<User> selectAllUsers() { return List.copyOf(users.values()); }
     public int insertAppointment(long id, int level, long deptId, long actor) {
         if (appointments.containsKey(id)) return 0;
         appointments.put(id, new Appointment(id, level, deptId, 1, 1, actor)); return 1;

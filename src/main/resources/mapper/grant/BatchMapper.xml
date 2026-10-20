@@ -12,6 +12,22 @@
     <select id="items" resultType="com.whatname.iam.entity.grant.BatchData$Item">
         SELECT <include refid="itemColumns"/> FROM sys_grant_batch_item WHERE batch_id=#{batch} ORDER BY user_id
     </select>
+    <select id="lockBatch" resultType="com.whatname.iam.entity.grant.BatchData$Batch">
+        SELECT <include refid="batchColumns"/> FROM sys_grant_batch
+        WHERE id=#{id} AND processing_status IN ('PENDING','PROCESSING') FOR UPDATE NOWAIT
+    </select>
+    <select id="pendingItems" resultType="com.whatname.iam.entity.grant.BatchData$Item">
+        SELECT <include refid="itemColumns"/> FROM sys_grant_batch_item
+        WHERE batch_id=#{batch} AND processing_status='PENDING' ORDER BY user_id LIMIT #{limit}
+    </select>
+    <select id="unfinished" resultType="long">
+        SELECT id FROM sys_grant_batch WHERE id&gt;#{after} AND processing_status IN ('PENDING','PROCESSING')
+        ORDER BY id LIMIT #{limit}
+    </select>
+    <update id="reserve">
+        UPDATE sys_grant_batch_item SET attempts=attempts+1
+        WHERE id=#{id} AND processing_status='PENDING' AND attempts&lt;4
+    </update>
     <select id="lockItem" resultType="com.whatname.iam.entity.grant.BatchData$Item">
         SELECT <include refid="itemColumns"/> FROM sys_grant_batch_item WHERE id=#{id} FOR UPDATE
     </select>
@@ -27,10 +43,10 @@
     </insert>
     <update id="applied">
         UPDATE sys_grant_batch_item SET processing_status='APPLIED',grant_source_id=#{source},result_code='OK',
-            result_data=#{data},attempts=attempts+1 WHERE id=#{id} AND processing_status='PENDING'
+            result_data=#{data} WHERE id=#{id} AND processing_status='PENDING'
     </update>
     <update id="failed">
-        UPDATE sys_grant_batch_item SET processing_status='FAILED',result_code=#{code},attempts=attempts+1
+        UPDATE sys_grant_batch_item SET processing_status='FAILED',result_code=#{code}
         WHERE id=#{id} AND processing_status='PENDING'
     </update>
     <update id="start">

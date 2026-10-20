@@ -57,7 +57,7 @@ public class AManagementPolicy {
         return facts.departments().keySet().stream().filter(id -> rules.contains(facts,actor,id))
                 .collect(Collectors.toUnmodifiableSet());
     }
-    /** A owns merged-department lifecycle. C's unchanged policy does not read this field. */
+    /** A also checks its complete organization projection; C now checks the same lifecycle in M5. */
     private void requireUnmergedChain(Map<Long,Department> departments,long id) {
         var visited=new HashSet<Long>();
         while(id!=0) {

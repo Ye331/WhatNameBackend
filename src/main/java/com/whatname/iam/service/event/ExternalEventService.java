@@ -9,6 +9,7 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.SensitiveDataCodec;
 import com.whatname.iam.mapper.event.ExternalEventMapper;
 import com.whatname.iam.service.department.DepartmentCollaboration;
+import com.whatname.iam.service.permission.TrustedOaCaller;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
@@ -41,13 +42,22 @@ public class ExternalEventService {
     private final ExternalEventMapper mapper;
     private final SensitiveDataCodec codec;
     private final DepartmentCollaboration integration;
+    private final TrustedOaCaller oa;
     private final ObjectMapper json;
     private final TransactionTemplate shortTx;
     private final TransactionTemplate businessTx;
 
     public ExternalEventService(ExternalEventMapper mapper, SensitiveDataCodec codec,
             DepartmentCollaboration integration, ObjectMapper json, PlatformTransactionManager tm) {
+        this(mapper,codec,integration,json,tm,null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ExternalEventService(ExternalEventMapper mapper, SensitiveDataCodec codec,
+            DepartmentCollaboration integration, ObjectMapper json, PlatformTransactionManager tm,
+            @org.springframework.lang.Nullable TrustedOaCaller oa) {
         this.mapper=mapper; this.codec=codec; this.integration=integration; this.json=json;
+        this.oa=oa;
         shortTx=new TransactionTemplate(tm);
         shortTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         shortTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -78,8 +88,14 @@ public class ExternalEventService {
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException("Event orchestration must be called outside a caller transaction");
         validate(ctx,c);
-        integration.verifyTrustedEvent(ctx,c.eventType());
-        if(recovery) integration.authorizeRecovery(ctx,c.eventType());
+        if("OA".equals(ctx.sourceSystem())) {
+            if(oa==null || !"OA_DECISION".equals(c.eventType())) throw new BusinessException(ErrorCode.INVALID_SERVICE);
+            oa.verifyTrustedEvent(ctx,c.eventType());
+            if(recovery) oa.authorizeRecovery(ctx,c.eventType());
+        } else {
+            integration.verifyTrustedEvent(ctx,c.eventType());
+            if(recovery) integration.authorizeRecovery(ctx,c.eventType());
+        }
         String canonical=canonical(ctx,c);
         String digest=digest(canonical);
         Claim claim;
@@ -97,7 +113,8 @@ public class ExternalEventService {
         Claim owned=claim;
         try {
             return businessTx.execute(tx -> {
-                // Always event row first, then organization, then users, then C/D facts/audit.
+                // Event row first. Organization callbacks prepare C's admin/department/role/list/user
+                // and D resource locks before A reads or mutates organization/person facts.
                 Map<String,Object> row=mapper.lock(ctx.sourceSystem(),c.eventId());
                 if (row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))
                         || !"PROCESSING".equals(row.get("status")))

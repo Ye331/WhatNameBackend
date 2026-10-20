@@ -100,6 +100,17 @@ class AdminRulesTest {
                 new AdminState(state.appointments(), Map.of(), state.users(), state.roles(), state.delegations()), 2L));
     }
 
+    @Test void mergedSourceIsDifferentFromFrozenScopeAndBlocksNewAppointment() {
+        var departments = new java.util.HashMap<>(state.departments());
+        departments.put(20L, new Department(20L, 10L, 1, 30L));
+        var merged = new AdminState(state.appointments(), departments, state.users(), state.roles(), state.delegations());
+        rejects(ErrorCode.PERMISSION_DENIED, () -> rules.requireActive(merged, 2));
+        rejects(ErrorCode.PERMISSION_DENIED, () -> rules.requireActive(merged, 3));
+        rejects(ErrorCode.PERMISSION_DENIED, () -> rules.checkAppointment(merged, 1, 2, 20));
+        assertThat(rules.contains(merged, state.appointments().get(1L), 20)).isTrue();
+        assertThatCode(() -> rules.checkRevocation(merged, 1, 2)).doesNotThrowAnyException();
+    }
+
     static void rejects(ErrorCode code, Runnable work) {
         assertThatThrownBy(work::run).isInstanceOfSatisfying(BusinessException.class,
                 error -> assertThat(error.errorCode()).isEqualTo(code));
