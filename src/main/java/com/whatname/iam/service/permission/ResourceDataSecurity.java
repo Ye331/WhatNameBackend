@@ -19,6 +19,11 @@ public final class ResourceDataSecurity {
     public void signAfterMutation(SignedDataType type,long id) {
         requireResource(type); signatures.sign(type,id);
     }
+    /** First signature for a newly inserted resource; the insert must already be visible in this transaction. */
+    @Transactional(propagation=Propagation.MANDATORY)
+    public void createInitial(SignedDataType type,long id) {
+        requireResource(type); signatures.sign(type,id);
+    }
     @Transactional(propagation=Propagation.MANDATORY)
     public void verifyBeforeMutation(Collection<ResourceRef> resources) {
         if (resources==null) throw new BusinessException(com.whatname.iam.common.api.ErrorCode.INTEGRITY_FAILURE);
