@@ -85,6 +85,7 @@ public class ServiceRequestAuthenticator {
     }
 
     /** HR/department MVC handlers call this after argument binding; the filter preserves exact body bytes. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Map<String,Object> authenticate(HttpServletRequest request, String requiredScope) {
         if (!(request instanceof ContentCachingRequestWrapper cached))
             throw new BusinessException(INVALID_SERVICE);
