@@ -1,7 +1,6 @@
 package com.whatname.iam.service.permission;
 
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.service.ServiceIdentityMapper;
 import com.whatname.iam.service.event.TrustedEventContext;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
@@ -14,10 +13,8 @@ import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 @Service
 public class ServiceOaCaller implements TrustedOaCaller {
     private final ServiceRequestAuthenticator authenticator;
-    private final ServiceIdentityMapper identities;
-    public ServiceOaCaller(ServiceRequestAuthenticator authenticator, ServiceIdentityMapper identities) {
+    public ServiceOaCaller(ServiceRequestAuthenticator authenticator) {
         this.authenticator = authenticator;
-        this.identities = identities;
     }
 
     @Override
@@ -32,10 +29,7 @@ public class ServiceOaCaller implements TrustedOaCaller {
         if (context == null || !"OA".equals(context.sourceSystem()) || blank(context.clientId())
                 || blank(context.requestId()) || !"OA_DECISION".equals(eventType))
             throw new BusinessException(INVALID_SERVICE);
-        Map<String,Object> identity = identities.find(context.clientId());
-        if (identity == null || ((Number) identity.get("status")).intValue() != 1
-                || !"OA_DECISION".equals(identity.get("allowed_scope")) || identity.get("app_id") != null)
-            throw new BusinessException(INVALID_SERVICE);
+        authenticator.verifyAuthenticatedContext(context, "OA_DECISION");
     }
 
     private static boolean blank(String value) { return value == null || value.isBlank(); }
