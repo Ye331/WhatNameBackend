@@ -20,8 +20,8 @@ public class ServiceOaCaller implements TrustedOaCaller {
     @Override
     public TrustedEventContext authenticate(HttpServletRequest request, byte[] rawBody) {
         Map<String,Object> identity = authenticator.authenticate(request, rawBody, "OA_DECISION");
-        return new TrustedEventContext("OA", (String) identity.get("client_id"),
-                request.getHeader(ServiceRequestSignature.NONCE_HEADER));
+        return authenticator.issuedContext("OA", (String) identity.get("client_id"),
+                request.getHeader(ServiceRequestSignature.NONCE_HEADER), "OA_DECISION");
     }
 
     @Override
