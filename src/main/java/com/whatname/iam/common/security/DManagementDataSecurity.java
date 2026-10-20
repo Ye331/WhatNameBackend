@@ -53,7 +53,7 @@ public final class DManagementDataSecurity implements ManagementDataSecurity {
         if (target==null && !userTarget) target=firstCollectionId(evidence,"affectedDepartmentIds");
         String targetType=userTarget ? "USER" : "DEPARTMENT";
         String externalEventId=evidence==null ? null : stringValue(evidence.get("eventId"));
-        audit.change(operation,actorId,target,targetType,externalEventId,evidence==null?Map.of():evidence);
+        audit.change(operation,actorId,targetType,target,externalEventId,evidence==null?Map.of():evidence);
     }
     private static long id(Map<String,Object> row,String... keys) {
         for(String key:keys) if(row!=null && row.get(key)!=null) return parse(row.get(key));
