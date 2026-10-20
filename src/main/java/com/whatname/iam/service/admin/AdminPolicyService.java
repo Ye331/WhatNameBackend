@@ -26,26 +26,26 @@ public class AdminPolicyService {
         this.managementRoles = managementRoles;
     }
     public Appointment requireAdministrator(long actorId) {
-        return rules.requireActive(verified(actorId), actorId);
+        return rules.requireActive(verifiedReadOnly(actorId), actorId);
     }
     public void requireLevelOne(long actorId) {
         if (requireAdministrator(actorId).adminLevel() != 1) throw new BusinessException(PERMISSION_DENIED);
     }
     public void requireUserScope(long actorId, long userId) {
-        var state = verified(actorId, userId);
+        var state = verifiedReadOnly(actorId, userId);
         var actor = rules.requireActive(state, actorId);
         var user = state.users().get(userId);
         if (user == null || !rules.contains(state, actor, user.deptId())) throw new BusinessException(RESOURCE_NOT_FOUND);
     }
     public void requireDepartmentScope(long actorId, long departmentId) {
-        var state = verified(actorId);
+        var state = verifiedReadOnly(actorId);
         var actor = rules.requireActive(state, actorId);
         if (!state.departments().containsKey(departmentId) || !rules.contains(state, actor, departmentId)) {
             throw new BusinessException(RESOURCE_NOT_FOUND);
         }
     }
     public void requireDelegableRole(long actorId, long roleId) {
-        var state = verified(actorId);
+        var state = verifiedReadOnly(actorId);
         var role = state.roles().get(roleId);
         rules.checkRole(state, actorId, roleId, role != null && role.roleType() == 2
                 && managementRoles.canDelegate(actorId, roleId));
@@ -75,6 +75,12 @@ public class AdminPolicyService {
     }
     private AdminState verified(long... userIds) {
         var state = loader.load(true, userIds);
+        integrity.verify(state);
+        return state;
+    }
+
+    private AdminState verifiedReadOnly(long... userIds) {
+        var state = loader.load(false, userIds);
         integrity.verify(state);
         return state;
     }

@@ -68,8 +68,7 @@ public class ResourceService {
     }
 
     public PageResponse<ApplicationItem> listApplications(String bearer, PageRequest pageRequest) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireView(bearer);
         int total = mapper.countApplications();
         List<ApplicationItem> items = mapper.listApplications(pageRequest.offset(), pageRequest.getPageSize())
                 .stream()
@@ -81,7 +80,7 @@ public class ResourceService {
     @Transactional
     public CreateApplicationResult createApplication(String bearer, CreateApplicationRequest request) {
         long actorId = actorId(bearer);
-        requireWrite(actorId);
+        requireWrite(actorId, bearer);
         String appCode = request.getAppCode().trim().toUpperCase(Locale.ROOT);
         if (mapper.countApplicationCode(appCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
@@ -102,7 +101,7 @@ public class ResourceService {
     @Transactional
     public UpdateApplicationResult updateApplication(String bearer, long appId, UpdateApplicationRequest request) {
         long actorId = actorId(bearer);
-        requireWrite(actorId);
+        requireWrite(actorId, bearer);
         ApplicationEntity existing = requireApplication(appId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, appId);
         Integer status = request.getStatus();
@@ -129,8 +128,7 @@ public class ResourceService {
     }
 
     public AppMenusResult listMenus(String bearer, long appId) {
-        long actorId = actorId(bearer);
-        requireView(actorId);
+        requireView(bearer);
         requireApplication(appId);
         List<MenuItem> menus = mapper.listMenusByAppId(appId)
                 .stream()
@@ -184,6 +182,7 @@ public class ResourceService {
         requireWrite(actorId);
         MenuEntity existing = requireMenu(menuId);
         signatures.verify(SignedDataType.RESOURCE_MENU, menuId);
+        signatures.verify(SignedDataType.MENU_APIS, menuId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
         existing = requireMenu(menuId);
         if (request.getStatus() != null && request.getStatus() != 0 && request.getStatus() != 1) {
@@ -370,9 +369,22 @@ public class ResourceService {
         return actorId;
     }
 
+    private void requireView(String bearer) {
+        long actorId = actorId(bearer);
+        requireView(actorId);
+    }
+
     private void requireView(long actorId) {
         permissions.requireFunction(actorId, "IAM_RESOURCES_VIEW");
         adminPolicy.requireAdministrator(actorId);
+    }
+
+    private void requireWrite(long actorId, String bearer) {
+        long effectiveActorId = actorId;
+        if (bearer != null && !bearer.isBlank()) {
+            effectiveActorId = actorId(bearer);
+        }
+        requireWrite(effectiveActorId);
     }
 
     private void requireWrite(long actorId) {
