@@ -76,6 +76,11 @@ class AStage2HrDMySqlIntegrationTest {
         public Set<Long> scope(Manager actor,String permission,List<Department> all) { throw new BusinessException(ErrorCode.PERMISSION_DENIED); }
         public void verifyOrganization(List<Department> all) { data.verifyOrganization(all); }
         public void verifyUsers(List<Map<String,Object>> users) { data.verifyUsers(users); }
+        public void prepareOrganizationChange(TrustedEventContext actor,String eventId) {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            assertTrue(ExternalEventService.applying(actor,"HR_DEPARTMENT",eventId)!=null
+                    || ExternalEventService.applying(actor,"HR_MERGE",eventId)!=null);
+        }
         public void organizationChanged(Set<Long> departments,List<Map<String,Object>> moved) {
             // No administrator fixtures or production policy are supplied by this test.
             if(corruptMergedIdentity && !moved.isEmpty())
@@ -98,6 +103,10 @@ class AStage2HrDMySqlIntegrationTest {
     static class FixtureGrants implements HrCollaboration {
         final DataSignatureService signatures;final JdbcTemplate db;boolean omitCollectionSignature,corruptIdentity;
         FixtureGrants(DataSignatureService signatures,JdbcTemplate db) { this.signatures=signatures;this.db=db; }
+        public void prepare(TrustedEventContext actor,String eventId,String eventType,String employeeNo) {
+            assertNotNull(ExternalEventService.applying(actor,eventType,eventId));
+        }
+        public void complete(long userId) { assertTrue(TransactionSynchronizationManager.isActualTransactionActive()); }
         private void revoke(long id) {
             signatures.verify(USER_GRANTS,id);
             // This fixture has no grants/appointments: only model C owning the revision and seal.

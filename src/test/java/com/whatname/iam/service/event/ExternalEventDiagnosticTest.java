@@ -77,7 +77,8 @@ class ExternalEventDiagnosticTest {
                 });
             }
             service=new ExternalEventService(mapper,codec,mock(DepartmentCollaboration.class),
-                    new ObjectMapper(),new MemoryTransactionManager());
+                    new ObjectMapper(),new MemoryTransactionManager(),
+                    mock(com.whatname.iam.service.permission.TrustedOaCaller.class));
         }
 
         Map<String,Object> execute(String eventId,String privateMessage) {

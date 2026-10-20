@@ -186,13 +186,18 @@ class AStage2DMySqlIntegrationTest {
         if(app!=null)app.close();
     }
 
-    @Test void productionBeansAreSelectedAndRemainingCAndHrPortsRefuse() {
+    @Test void productionBeansAreSelectedAndUnprovenHrCallsRefuse() {
         assertInstanceOf(DBackedManagementDataSecurity.class,org.springframework.test.util.AopTestUtils.getUltimateTargetObject(data));
         assertInstanceOf(CBackedM1SecurityGateway.class,app.getBean(M1SecurityGateway.class));
         expect(ErrorCode.INVALID_TOKEN,()->app.getBean(AdminPorts.Identity.class).currentUserId());
         expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->app.getBean(AdminPorts.Functions.class).require(actor.id,"IAM_USERS_VIEW"));
         expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->app.getBean(DepartmentCollaboration.class).authenticateHr(new MockHttpServletRequest(),"HR_EMPLOYEE"));
-        expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->app.getBean(HrCollaboration.class).requireRehireEligible(target.id));
+        var hr=app.getBean(HrCollaboration.class);
+        assertInstanceOf(com.whatname.iam.service.grant.HrGrantCollaboration.class,
+                org.springframework.test.util.AopTestUtils.getUltimateTargetObject(hr));
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,
+                ()->hr.requireRehireEligible(target.id));
+        expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->tx.executeWithoutResult(status->hr.requireRehireEligible(target.id)));
     }
     @Test void loginPersistsExactlyOneLoginAndSealedSanitizedOperation() throws Exception {
         assertNotNull(login(target));

@@ -405,7 +405,7 @@ class DepartmentBusinessIntegrationTest {
             var failing=mock(ExternalEventMapper.class,org.mockito.AdditionalAnswers.delegatesTo(delegate));
             doThrow(new IllegalStateException("private-record-marker")).when(failing)
                     .failed(anyLong(),anyString(),anyString());
-            var unreliable=new ExternalEventService(failing,codec,port,json,app.getBean(PlatformTransactionManager.class));
+            var unreliable=new ExternalEventService(failing,codec,port,json,app.getBean(PlatformTransactionManager.class),port);
             String retainedEvent=event();
             var retained=new ExternalEventService.Command(retainedEvent,"OA_DECISION",null,"USER","test-subject",null,
                     Map.of("decision","APPROVE"));

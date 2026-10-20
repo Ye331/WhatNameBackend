@@ -88,13 +88,10 @@ public class ExternalEventService {
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException("Event orchestration must be called outside a caller transaction");
         validate(ctx,c);
-        if("OA".equals(ctx.sourceSystem())) {
-            if(oa==null || !"OA_DECISION".equals(c.eventType())) throw new BusinessException(ErrorCode.INVALID_SERVICE);
-            oa.verifyTrustedEvent(ctx,c.eventType());
-            if(recovery) oa.authorizeRecovery(ctx,c.eventType());
-        } else {
-            integration.verifyTrustedEvent(ctx,c.eventType());
-            if(recovery) integration.authorizeRecovery(ctx,c.eventType());
+        verifyTrustedEvent(ctx,c.eventType());
+        if(recovery) {
+            if("OA".equals(ctx.sourceSystem())) oa.authorizeRecovery(ctx,c.eventType());
+            else integration.authorizeRecovery(ctx,c.eventType());
         }
         String canonical=canonical(ctx,c);
         String digest=digest(canonical);
@@ -119,9 +116,9 @@ public class ExternalEventService {
                 if (row==null || owned.id()!=id(row) || !digest.equals(row.get("digest"))
                         || !"PROCESSING".equals(row.get("status")))
                     throw new BusinessException(ErrorCode.VERSION_CONFLICT);
-                // Recheck service authority in the actual write transaction, including HR01/05.
+                // Recheck the same source-specific authority in the actual write transaction.
                 // Only this private path can register A's transaction-local execution evidence.
-                integration.verifyTrustedEvent(ctx,c.eventType());
+                verifyTrustedEvent(ctx,c.eventType());
                 TransactionSynchronizationManager.registerSynchronization(new Applying(ctx,c));
                 Map<String,Object> result=Objects.requireNonNull(work.get());
                 assertSafeResult(json.valueToTree(result));
@@ -163,6 +160,15 @@ public class ExternalEventService {
             }
             if (error instanceof BusinessException) throw error;
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
+        }
+    }
+
+    private void verifyTrustedEvent(TrustedEventContext context,String eventType) {
+        if("OA".equals(context.sourceSystem())) {
+            if(oa==null || !"OA_DECISION".equals(eventType)) throw new BusinessException(ErrorCode.INVALID_SERVICE);
+            oa.verifyTrustedEvent(context,eventType);
+        } else {
+            integration.verifyTrustedEvent(context,eventType);
         }
     }
 
