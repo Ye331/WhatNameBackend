@@ -3,10 +3,12 @@ package com.whatname.iam.service.permission;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.mapper.service.ServiceIdentityMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 
@@ -26,6 +28,8 @@ public class ServiceRequestAuthenticator {
     }
 
     public Map<String,Object> authenticate(HttpServletRequest request, byte[] rawBody, String requiredScope) {
+        if (!Set.of("API_AUTH","OA_DECISION","HR_SYNC").contains(requiredScope))
+            throw new BusinessException(INVALID_SERVICE);
         String clientId = required(request, ServiceRequestSignature.CLIENT_ID_HEADER, 64);
         String keyId = required(request, ServiceRequestSignature.KEY_ID_HEADER, 64);
         String nonce = required(request, ServiceRequestSignature.NONCE_HEADER, 128);
@@ -40,7 +44,7 @@ public class ServiceRequestAuthenticator {
             throw new BusinessException(INVALID_SERVICE);
 
         Map<String,Object> identity = identities.find(clientId);
-        if (identity == null || ((Number) identity.get("status")).intValue() != 1
+        if (identity == null || !(identity.get("status") instanceof Number status) || status.intValue() != 1
                 || !requiredScope.equals(identity.get("allowed_scope")))
             throw new BusinessException(INVALID_SERVICE);
         if (!keyId.equals(identity.get("key_id")))
@@ -64,6 +68,13 @@ public class ServiceRequestAuthenticator {
                 clock.instant().plusSeconds(ServiceRequestSignature.NONCE_RETENTION_SECONDS), ZoneOffset.ofHours(8));
         nonces.consume(clientId, nonce, expiresAt);
         return identity;
+    }
+
+    /** HR/department MVC handlers call this after argument binding; the filter preserves exact body bytes. */
+    public Map<String,Object> authenticate(HttpServletRequest request, String requiredScope) {
+        if (!(request instanceof ContentCachingRequestWrapper cached))
+            throw new BusinessException(INVALID_SERVICE);
+        return authenticate(request, cached.getContentAsByteArray(), requiredScope);
     }
 
     private static String required(HttpServletRequest request, String name, int maxLength) {

@@ -7,6 +7,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.scheduling.annotation.Scheduled;
+import java.time.ZoneOffset;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 
 /** Consumes each (clientId, nonce) atomically in its own transaction so replay protection
@@ -24,5 +26,12 @@ public class NonceStore {
         } catch (DuplicateKeyException replay) {
             throw new BusinessException(INVALID_SERVICE);
         }
+    }
+
+    @Scheduled(fixedDelayString="${iam.security.service-auth.nonce-cleanup-delay-ms:300000}",
+               initialDelayString="${iam.security.service-auth.nonce-cleanup-delay-ms:300000}")
+    @Transactional
+    public void purgeExpired() {
+        mapper.deleteExpiredNonces(LocalDateTime.now(ZoneOffset.ofHours(8)));
     }
 }
