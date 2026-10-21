@@ -1,6 +1,20 @@
 package com.whatname.iam.service.event;
 
 /** Issued/validated by D after service signature, client/key/scope and nonce verification.
- * Constructing this value alone confers no trust: every event call invokes the integration port.
+ * The opaque proof is intentionally not serializable into a request and is checked by D before
+ * an event business transaction. The three-argument constructor remains for non-production test
+ * fixtures; it creates an unissued context and therefore cannot pass production verification.
  */
-public record TrustedEventContext(String sourceSystem, String clientId, String requestId) { }
+public record TrustedEventContext(String sourceSystem, String clientId, String requestId,
+                                  Object authenticationProof) {
+    public TrustedEventContext(String sourceSystem, String clientId, String requestId) {
+        this(sourceSystem, clientId, requestId, null);
+    }
+
+    public static TrustedEventContext issued(String sourceSystem, String clientId,
+                                              String requestId, Object proof) {
+        return new TrustedEventContext(sourceSystem, clientId, requestId, proof);
+    }
+
+    public boolean isIssuedBy(Object proof) { return authenticationProof != null && authenticationProof == proof; }
+}
