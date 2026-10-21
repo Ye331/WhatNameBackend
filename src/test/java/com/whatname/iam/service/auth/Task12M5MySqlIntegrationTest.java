@@ -334,7 +334,7 @@ class Task12M5MySqlIntegrationTest {
             } finally {release.countDown();}
         }
     }
-    @Test void defaultProductionDependenciesRejectAndHrRemainsUnavailable() throws Exception {
+    @Test void defaultProductionDependenciesAndUntrustedHrRequestsRefuse() throws Exception {
         var defaults=new HashMap<>(settings);defaults.put("server.port",18090);
         try(var ordinary=new SpringApplicationBuilder(M1MySqlIntegrationTest.TestBootstrap.class).properties(defaults).run(LocalTestDatabase.arguments("--server.port=18090"))) {
             assertFalse(ordinary.getBean(ManagementDataSecurity.class) instanceof TestD);
@@ -351,7 +351,7 @@ class Task12M5MySqlIntegrationTest {
         http("POST","/integrations/hr/merges",Map.of("sourceSystem","HR","eventId",event,"eventVersion",1,
                 "sourceDeptCode",db.queryForObject("SELECT dept_code FROM sys_dept WHERE id=?",String.class,branch),
                 "targetDeptCode",db.queryForObject("SELECT dept_code FROM sys_dept WHERE id=?",String.class,outside),
-                "occurredAt","2026-10-16T12:00:00+08:00"),bearer,503);
+                "occurredAt","2026-10-16T12:00:00+08:00"),bearer,app.containsBean("serviceRequestAuthenticator")?401:503);
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?",Integer.class,event));
     }
     private long department(long parent) {

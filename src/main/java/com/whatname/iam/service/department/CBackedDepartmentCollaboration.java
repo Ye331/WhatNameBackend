@@ -14,8 +14,8 @@ import com.whatname.iam.mapper.service.ServiceIdentityMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 
-/** C management and organization review adapters. HR authentication/recovery and A's
- * organization signing still require their own production providers. */
+/** A's adapter to C management/lifecycle and D authentication/signing.
+ * Online recovery remains unavailable under the existing event policy. */
 public class CBackedDepartmentCollaboration implements DepartmentCollaboration {
     private final AManagementPolicy policy;
     private final JwtTokenService jwt;
@@ -66,11 +66,14 @@ public class CBackedDepartmentCollaboration implements DepartmentCollaboration {
     public TrustedEventContext authenticateHr(HttpServletRequest request,String eventType) {
         Map<String,Object> identity=services.authenticate(request,"HR_SYNC");
         String nonce=request.getHeader(ServiceRequestSignature.NONCE_HEADER);
-        return new TrustedEventContext("HR",(String)identity.get("client_id"),nonce);
+        return services.issuedContext("HR",(String)identity.get("client_id"),nonce,"HR_SYNC");
     }
     public void verifyTrustedEvent(TrustedEventContext context,String eventType) {
         if(context==null || eventType==null || !"HR".equals(context.sourceSystem()) || context.clientId()==null
                 || context.requestId()==null || context.requestId().isBlank()) throw new BusinessException(ErrorCode.INVALID_SERVICE);
+        // D owns the request proof and the current signed identity/key qualification.
+        // A must recheck that proof after business locks without consuming the nonce again.
+        services.verifyAuthenticatedContext(context,"HR_SYNC");
         Map<String,Object> identity=identities.find(context.clientId());
         if(identity==null || !(identity.get("status") instanceof Number status) || status.intValue()!=1
                 || !"HR_SYNC".equals(identity.get("allowed_scope")) || identity.get("app_id")!=null)

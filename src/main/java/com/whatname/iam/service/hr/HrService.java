@@ -112,7 +112,9 @@ public class HrService {
         source(actor,r.sourceSystem());
         return events.execute(actor,new ExternalEventService.Command(r.eventId(),"HR_TERMINATION",r.eventVersion(),
                 "USER",r.sgNo(),r.effectiveAt(),r),() -> {
-            lock(actor,r.eventId(),"HR_TERMINATION",r.sgNo());
+            List<Department> all=lock(actor,r.eventId(),"HR_TERMINATION",r.sgNo());
+            // Unlike employee/transfer, termination has no assignment check below.
+            trusted.verifyOrganization(all);
             if(r.effectiveAt().toInstant().isAfter(clock.instant())) fail(ErrorCode.BUSINESS_RULE_VIOLATION);
             UserAccount u=required(r.sgNo());verify(u,r.sgNo(),r.eventVersion());
             if(u.status==3) fail(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -129,7 +131,10 @@ public class HrService {
             throw new IllegalStateException("Serializable event transaction required");
         trusted.verifyTrustedEvent(actor,type);
         grants.prepare(actor,eventId,type,employeeNo);
-        List<Department> all=organization.lockOrganization();trusted.verifyOrganization(all);
+        // Employee/transfer use DepartmentService's assignment check to validate and verify
+        // the complete locked tree before any account read/write. Do not verify it twice:
+        // D's existing per-department interface makes each pass proportional to tree size.
+        List<Department> all=organization.lockOrganization();
         // Authentication was checked at ingress; recheck service authority in the write transaction.
         trusted.verifyTrustedEvent(actor,type);return all;
     }
