@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:8080
+@accessToken = {{privateAccessToken}}
 
 ### 服务是否启动；不代表数据库已经可用
 GET {{baseUrl}}/api/v1/system/ping
@@ -14,9 +15,11 @@ GET {{baseUrl}}/api/v1/not-implemented
 
 ### 查询应用列表
 GET {{baseUrl}}/api/v1/applications?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
 
 ### 创建应用
 POST {{baseUrl}}/api/v1/applications
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -27,6 +30,7 @@ Content-Type: application/json
 
 ### 重复应用编码应失败
 POST {{baseUrl}}/api/v1/applications
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -37,6 +41,7 @@ Content-Type: application/json
 
 ### 修改或停用应用
 PATCH {{baseUrl}}/api/v1/applications/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -46,9 +51,11 @@ Content-Type: application/json
 
 ### 查询应用菜单
 GET {{baseUrl}}/api/v1/applications/1/menus
+Authorization: Bearer {{accessToken}}
 
 ### 创建根目录
 POST {{baseUrl}}/api/v1/applications/1/menus
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -61,6 +68,7 @@ Content-Type: application/json
 
 ### 创建权限菜单
 POST {{baseUrl}}/api/v1/applications/1/menus
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -73,6 +81,7 @@ Content-Type: application/json
 
 ### 菜单形成自循环应失败
 PATCH {{baseUrl}}/api/v1/menus/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -82,9 +91,11 @@ Content-Type: application/json
 
 ### 查询应用 API
 GET {{baseUrl}}/api/v1/applications/1/apis?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
 
 ### 登记 API
 POST {{baseUrl}}/api/v1/applications/1/apis
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -96,6 +107,7 @@ Content-Type: application/json
 
 ### 重复/歧义 API 路由应失败
 POST {{baseUrl}}/api/v1/applications/1/apis
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -107,6 +119,7 @@ Content-Type: application/json
 
 ### 停用 API
 PATCH {{baseUrl}}/api/v1/apis/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -116,9 +129,11 @@ Content-Type: application/json
 
 ### 查询菜单关联 API
 GET {{baseUrl}}/api/v1/menus/2/apis
+Authorization: Bearer {{accessToken}}
 
 ### 全量替换菜单关联 API
 PUT {{baseUrl}}/api/v1/menus/2/apis
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -128,6 +143,7 @@ Content-Type: application/json
 
 ### 版本号重复提交应失败
 PUT {{baseUrl}}/api/v1/menus/2/apis
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -137,9 +153,11 @@ Content-Type: application/json
 
 ### 查询角色列表
 GET {{baseUrl}}/api/v1/roles?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
 
 ### 创建角色
 POST {{baseUrl}}/api/v1/roles
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -151,9 +169,11 @@ Content-Type: application/json
 
 ### 查询角色详情
 GET {{baseUrl}}/api/v1/roles/1
+Authorization: Bearer {{accessToken}}
 
 ### 修改或停用角色
 PATCH {{baseUrl}}/api/v1/roles/1
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -163,9 +183,11 @@ Content-Type: application/json
 
 ### 查询角色菜单
 GET {{baseUrl}}/api/v1/roles/1/menus
+Authorization: Bearer {{accessToken}}
 
 ### 替换角色全部菜单
 PUT {{baseUrl}}/api/v1/roles/1/menus
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -175,6 +197,7 @@ Content-Type: application/json
 
 ### 角色菜单版本号重复提交应失败
 PUT {{baseUrl}}/api/v1/roles/1/menus
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {

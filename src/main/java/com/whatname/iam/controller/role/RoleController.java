@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,34 +34,40 @@ public class RoleController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<RoleItem>> listRoles(@Valid PageRequest pageRequest) {
-        return ApiResponse.ok(service.listRoles(pageRequest));
+    public ApiResponse<PageResponse<RoleItem>> listRoles(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                                         @Valid PageRequest pageRequest) {
+        return ApiResponse.ok(service.listRoles(bearer, pageRequest));
     }
 
     @PostMapping
-    public ApiResponse<CreateRoleResult> createRole(@Valid @RequestBody CreateRoleRequest request) {
-        return ApiResponse.ok(service.createRole(request));
+    public ApiResponse<CreateRoleResult> createRole(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                                    @Valid @RequestBody CreateRoleRequest request) {
+        return ApiResponse.ok(service.createRole(bearer, request));
     }
 
     @GetMapping("/{roleId}")
-    public ApiResponse<RoleItem> getRole(@PathVariable long roleId) {
-        return ApiResponse.ok(service.getRole(roleId));
+    public ApiResponse<RoleItem> getRole(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                         @PathVariable long roleId) {
+        return ApiResponse.ok(service.getRole(bearer, roleId));
     }
 
     @PatchMapping("/{roleId}")
-    public ApiResponse<UpdateRoleResult> updateRole(@PathVariable long roleId,
+    public ApiResponse<UpdateRoleResult> updateRole(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                                    @PathVariable long roleId,
                                                     @Valid @RequestBody UpdateRoleRequest request) {
-        return ApiResponse.ok(service.updateRole(roleId, request));
+        return ApiResponse.ok(service.updateRole(bearer, roleId, request));
     }
 
     @GetMapping("/{roleId}/menus")
-    public ApiResponse<RoleMenusResult> listRoleMenus(@PathVariable long roleId) {
-        return ApiResponse.ok(service.listRoleMenus(roleId));
+    public ApiResponse<RoleMenusResult> listRoleMenus(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                                      @PathVariable long roleId) {
+        return ApiResponse.ok(service.listRoleMenus(bearer, roleId));
     }
 
     @PutMapping("/{roleId}/menus")
-    public ApiResponse<RoleMenusResult> replaceRoleMenus(@PathVariable long roleId,
+    public ApiResponse<RoleMenusResult> replaceRoleMenus(@RequestHeader(value = "Authorization", required = false) String bearer,
+                                                         @PathVariable long roleId,
                                                          @Valid @RequestBody ReplaceRoleMenusRequest request) {
-        return ApiResponse.ok(service.replaceRoleMenus(roleId, request));
+        return ApiResponse.ok(service.replaceRoleMenus(bearer, roleId, request));
     }
 }
