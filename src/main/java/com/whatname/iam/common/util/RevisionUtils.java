@@ -2,14 +2,14 @@ package com.whatname.iam.common.util;
 
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
+
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class RevisionUtils {
     private static final Pattern REVISION_PATTERN = Pattern.compile("^v([1-9]\\d*)$");
 
-    private RevisionUtils() {
-    }
+    private RevisionUtils() {}
 
     public static String toVersion(int revision) {
         if (revision <= 0) {
@@ -26,6 +26,10 @@ public final class RevisionUtils {
         if (!matcher.matches()) {
             throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         }
-        return Integer.parseInt(matcher.group(1));
+        try {
+            return Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        }
     }
 }

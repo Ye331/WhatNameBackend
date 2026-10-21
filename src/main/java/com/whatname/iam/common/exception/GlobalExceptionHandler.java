@@ -2,18 +2,20 @@ package com.whatname.iam.common.exception;
 
 import com.whatname.iam.common.api.ApiResponse;
 import com.whatname.iam.common.api.ErrorCode;
+
 import jakarta.validation.ConstraintViolationException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
-import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.validation.BindException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
-import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -29,9 +31,15 @@ public class GlobalExceptionHandler {
         return response(exception.errorCode());
     }
 
-    @ExceptionHandler({BindException.class, ConstraintViolationException.class,
-            HttpMessageNotReadableException.class, MissingServletRequestParameterException.class, MissingRequestHeaderException.class,
-            MethodArgumentTypeMismatchException.class, HandlerMethodValidationException.class})
+    @ExceptionHandler({
+        BindException.class,
+        ConstraintViolationException.class,
+        HttpMessageNotReadableException.class,
+        MissingServletRequestParameterException.class,
+        MissingRequestHeaderException.class,
+        MethodArgumentTypeMismatchException.class,
+        HandlerMethodValidationException.class
+    })
     public ResponseEntity<ApiResponse<Void>> invalidArgument(Exception exception) {
         return response(ErrorCode.INVALID_ARGUMENT);
     }
@@ -65,6 +73,7 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<ApiResponse<Void>> response(ErrorCode code) {
-        return ResponseEntity.status(code.status()).body(ApiResponse.error(code.name(), code.message()));
+        return ResponseEntity.status(code.status())
+                .body(ApiResponse.error(code.name(), code.message()));
     }
 }

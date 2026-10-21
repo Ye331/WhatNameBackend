@@ -1,6 +1,7 @@
 package com.whatname.iam.common.config;
 
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -21,8 +22,16 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key",
-                        "X-Client-Id", "X-Key-Id", "X-Request-Timestamp", "X-Request-Nonce", "X-Request-Signature")
+                .allowedHeaders(
+                        "Authorization",
+                        "Content-Type",
+                        "X-Request-Id",
+                        "Idempotency-Key",
+                        "X-Client-Id",
+                        "X-Key-Id",
+                        "X-Request-Timestamp",
+                        "X-Request-Nonce",
+                        "X-Request-Signature")
                 .exposedHeaders("X-Request-Id")
                 .allowCredentials(false)
                 .maxAge(3600);
@@ -30,7 +39,8 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Bean
     public Jackson2ObjectMapperBuilderCustomizer bigintAsString() {
-        return builder -> builder.serializerByType(Long.class, ToStringSerializer.instance)
-                .serializerByType(Long.TYPE, ToStringSerializer.instance);
+        return builder ->
+                builder.serializerByType(Long.class, ToStringSerializer.instance)
+                        .serializerByType(Long.TYPE, ToStringSerializer.instance);
     }
 }

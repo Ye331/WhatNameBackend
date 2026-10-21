@@ -2,6 +2,7 @@ package com.whatname.iam.common.util;
 
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -10,8 +11,7 @@ public final class RouteTemplateUtils {
     private static final Pattern SEGMENT_PATTERN = Pattern.compile("^[A-Za-z0-9._~-]+$");
     private static final Pattern VARIABLE_PATTERN = Pattern.compile("^\\{[A-Za-z][A-Za-z0-9_]*}$");
 
-    private RouteTemplateUtils() {
-    }
+    private RouteTemplateUtils() {}
 
     public static String normalizeTemplate(String routeTemplate) {
         if (routeTemplate == null) {
@@ -33,7 +33,8 @@ public final class RouteTemplateUtils {
             if (part.isEmpty()) {
                 throw new BusinessException(ErrorCode.INVALID_ROUTE_TEMPLATE);
             }
-            if (VARIABLE_PATTERN.matcher(part).matches() || SEGMENT_PATTERN.matcher(part).matches()) {
+            if (VARIABLE_PATTERN.matcher(part).matches()
+                    || SEGMENT_PATTERN.matcher(part).matches()) {
                 normalized.add(part);
                 continue;
             }

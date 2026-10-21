@@ -1,16 +1,18 @@
 package com.whatname.iam.service.auth;
 
 import static com.whatname.iam.service.auth.PasswordHasher.VerificationResult.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.Base64;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.springframework.security.crypto.scrypt.SCryptPasswordEncoder;
+
+import java.util.Base64;
+import java.util.stream.Stream;
 
 class PasswordHasherTest {
     private static final PasswordHasher HASHER = new PasswordHasher();
@@ -84,10 +86,19 @@ class PasswordHasherTest {
     static Stream<String> brokenEncodings() {
         String[] parts = stored.split("\\$");
         String nonCanonicalSalt = parts[2].substring(0, 21) + "B==";
-        return Stream.of(null, "", "not-a-hash", PASSWORD, "{bcrypt}value", stored + "$extra",
-                stored.substring(0, stored.length() - 1), stored.replace("110801", "100801"),
-                stored.replace("110801", "7fff0801"), stored.replace("110801", "1108ff"),
-                "$110801$bad$bad", "$110801$" + nonCanonicalSalt + "$" + parts[3],
+        return Stream.of(
+                null,
+                "",
+                "not-a-hash",
+                PASSWORD,
+                "{bcrypt}value",
+                stored + "$extra",
+                stored.substring(0, stored.length() - 1),
+                stored.replace("110801", "100801"),
+                stored.replace("110801", "7fff0801"),
+                stored.replace("110801", "1108ff"),
+                "$110801$bad$bad",
+                "$110801$" + nonCanonicalSalt + "$" + parts[3],
                 stored.replaceFirst("\\$110801\\$", "\\$110801\\$!"));
     }
 

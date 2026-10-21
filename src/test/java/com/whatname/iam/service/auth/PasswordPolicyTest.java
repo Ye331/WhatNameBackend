@@ -1,17 +1,19 @@
 package com.whatname.iam.service.auth;
 
 import static com.whatname.iam.service.auth.PasswordPolicy.ValidationResult.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 
 class PasswordPolicyTest {
     private static final PasswordHasher HASHER = new PasswordHasher();
@@ -23,8 +25,13 @@ class PasswordPolicyTest {
 
     @BeforeAll
     static void createRealRecentHistoryNewestFirst() {
-        history = List.of(HASHER.hash("OldMaple1"), HASHER.hash("OldMaple2"),
-                HASHER.hash("OldMaple3"), HASHER.hash("OldMaple4"), HASHER.hash(RECENT_PASSWORD));
+        history =
+                List.of(
+                        HASHER.hash("OldMaple1"),
+                        HASHER.hash("OldMaple2"),
+                        HASHER.hash("OldMaple3"),
+                        HASHER.hash("OldMaple4"),
+                        HASHER.hash(RECENT_PASSWORD));
     }
 
     @ParameterizedTest
@@ -40,19 +47,29 @@ class PasswordPolicyTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"abcdefgh,LETTER_AND_DIGIT_REQUIRED", "12345678,LETTER_AND_DIGIT_REQUIRED",
-            "!!!!!!!!,LETTER_AND_DIGIT_REQUIRED", "abcdefg1,VALID", "abcdef1!,VALID"})
-    void requiresLettersAndDigitsButNeitherUppercaseNorSymbols(String password,
-                                                              PasswordPolicy.ValidationResult expected) {
+    @CsvSource({
+        "abcdefgh,LETTER_AND_DIGIT_REQUIRED",
+        "12345678,LETTER_AND_DIGIT_REQUIRED",
+        "!!!!!!!!,LETTER_AND_DIGIT_REQUIRED",
+        "abcdefg1,VALID",
+        "abcdef1!,VALID"
+    })
+    void requiresLettersAndDigitsButNeitherUppercaseNorSymbols(
+            String password, PasswordPolicy.ValidationResult expected) {
         assertEquals(expected, POLICY.validate(password, IDENTITY, List.of()));
     }
 
     @Test
     void countsUnicodeCodePointsAndAcceptsUnicodeLettersAndDigits() {
         String supplementaryLetter = "\uD801\uDC00";
-        assertEquals(INVALID_LENGTH, POLICY.validate(supplementaryLetter.repeat(6) + "1", IDENTITY, List.of()));
-        assertEquals(VALID, POLICY.validate(supplementaryLetter.repeat(63) + "1", IDENTITY, List.of()));
-        assertEquals(INVALID_LENGTH, POLICY.validate(supplementaryLetter.repeat(64) + "1", IDENTITY, List.of()));
+        assertEquals(
+                INVALID_LENGTH,
+                POLICY.validate(supplementaryLetter.repeat(6) + "1", IDENTITY, List.of()));
+        assertEquals(
+                VALID, POLICY.validate(supplementaryLetter.repeat(63) + "1", IDENTITY, List.of()));
+        assertEquals(
+                INVALID_LENGTH,
+                POLICY.validate(supplementaryLetter.repeat(64) + "1", IDENTITY, List.of()));
         assertEquals(VALID, POLICY.validate("密码测试abcd１２", IDENTITY, List.of()));
     }
 
@@ -61,7 +78,9 @@ class PasswordPolicyTest {
         assertEquals(USERNAME_INCLUDED, POLICY.validate("XEMPLOYEE-DEMO7", IDENTITY, List.of()));
         assertEquals(NAME_PINYIN_INCLUDED, POLICY.validate("XZHANGSAN7", IDENTITY, List.of()));
         assertEquals(PHONE_INCLUDED, POLICY.validate("Ab13800138000", IDENTITY, List.of()));
-        var padded = new PasswordPolicy.IdentityContext(" employee-demo ", " zhangsan ", " 13800138000 ");
+        var padded =
+                new PasswordPolicy.IdentityContext(
+                        " employee-demo ", " zhangsan ", " 13800138000 ");
         assertEquals(NAME_PINYIN_INCLUDED, POLICY.validate("Xzhangsan7", padded, List.of()));
         assertEquals(VALID, POLICY.validate("Maple13800", IDENTITY, List.of()));
         assertEquals(VALID, POLICY.validate("MapleRiver7", IDENTITY, List.of()));
@@ -82,12 +101,24 @@ class PasswordPolicyTest {
     @Test
     void requiresUsernameContextAndExplicitHistoryButAllowsGenuinelyAbsentOptionalFields() {
         assertEquals(IDENTITY_CONTEXT_REQUIRED, POLICY.validate("MapleRiver7", null, List.of()));
-        assertEquals(IDENTITY_CONTEXT_REQUIRED, POLICY.validate("MapleRiver7",
-                new PasswordPolicy.IdentityContext(null, null, null), List.of()));
-        assertEquals(IDENTITY_CONTEXT_REQUIRED, POLICY.validate("MapleRiver7",
-                new PasswordPolicy.IdentityContext("  ", "", ""), List.of()));
-        assertEquals(VALID, POLICY.validate("MapleRiver7",
-                new PasswordPolicy.IdentityContext("employee-demo", null, ""), List.of()));
+        assertEquals(
+                IDENTITY_CONTEXT_REQUIRED,
+                POLICY.validate(
+                        "MapleRiver7",
+                        new PasswordPolicy.IdentityContext(null, null, null),
+                        List.of()));
+        assertEquals(
+                IDENTITY_CONTEXT_REQUIRED,
+                POLICY.validate(
+                        "MapleRiver7",
+                        new PasswordPolicy.IdentityContext("  ", "", ""),
+                        List.of()));
+        assertEquals(
+                VALID,
+                POLICY.validate(
+                        "MapleRiver7",
+                        new PasswordPolicy.IdentityContext("employee-demo", null, ""),
+                        List.of()));
         assertEquals(HISTORY_REQUIRED, POLICY.validate("MapleRiver7", IDENTITY, null));
         assertEquals("IdentityContext[redacted]", IDENTITY.toString());
     }
@@ -103,8 +134,9 @@ class PasswordPolicyTest {
     void detectsReuseAcrossDifferentRandomSalts() {
         String anotherEncoding = HASHER.hash(RECENT_PASSWORD);
         assertNotEquals(history.get(4), anotherEncoding);
-        assertEquals(PASSWORD_REUSED, POLICY.validate(RECENT_PASSWORD, IDENTITY,
-                List.of(anotherEncoding)));
+        assertEquals(
+                PASSWORD_REUSED,
+                POLICY.validate(RECENT_PASSWORD, IDENTITY, List.of(anotherEncoding)));
     }
 
     @Test
@@ -122,8 +154,14 @@ class PasswordPolicyTest {
     @Test
     void damagedOrMissingHistoryEntryCannotBeTreatedAsAnOrdinaryMismatch() {
         assertEquals(INVALID_HISTORY, POLICY.validate("MapleRiver7", IDENTITY, List.of("broken")));
-        assertEquals(INVALID_HISTORY, POLICY.validate("MapleRiver7", IDENTITY, Arrays.asList((String) null)));
-        assertEquals(INVALID_HISTORY, POLICY.validate("MapleRiver7", IDENTITY,
-                List.of(history.get(0), history.get(1).replace("110801", "100801"))));
+        assertEquals(
+                INVALID_HISTORY,
+                POLICY.validate("MapleRiver7", IDENTITY, Arrays.asList((String) null)));
+        assertEquals(
+                INVALID_HISTORY,
+                POLICY.validate(
+                        "MapleRiver7",
+                        IDENTITY,
+                        List.of(history.get(0), history.get(1).replace("110801", "100801"))));
     }
 }

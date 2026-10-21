@@ -5,5 +5,4 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @MapperScan("com.whatname.iam.mapper")
-public class MyBatisConfig {
-}
+public class MyBatisConfig {}

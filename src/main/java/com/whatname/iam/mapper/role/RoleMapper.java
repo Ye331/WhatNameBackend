@@ -1,9 +1,11 @@
 package com.whatname.iam.mapper.role;
 
-import com.whatname.iam.entity.role.RoleEntity;
 import com.whatname.iam.entity.resource.MenuEntity;
-import java.util.List;
+import com.whatname.iam.entity.role.RoleEntity;
+
 import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
 
 public interface RoleMapper {
     int countRoles();
@@ -24,7 +26,8 @@ public interface RoleMapper {
 
     int insertRoleMenus(@Param("roleId") long roleId, @Param("menuIds") List<Long> menuIds);
 
-    int bumpRoleMenuRevision(@Param("roleId") long roleId, @Param("expectedRevision") int expectedRevision);
+    int bumpRoleMenuRevision(
+            @Param("roleId") long roleId, @Param("expectedRevision") int expectedRevision);
 
     List<MenuEntity> listMenusByIds(@Param("menuIds") List<Long> menuIds);
 }

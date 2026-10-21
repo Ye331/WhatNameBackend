@@ -1,7 +1,8 @@
 package com.whatname.iam.service.admin;
 
-import com.whatname.iam.mapper.admin.AdminMapper;
 import com.whatname.iam.entity.admin.AdminData.*;
+import com.whatname.iam.mapper.admin.AdminMapper;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -10,13 +11,18 @@ import java.util.stream.Collectors;
 
 final class AdminStateLoader {
     private final AdminMapper mapper;
-    AdminStateLoader(AdminMapper mapper) { this.mapper = mapper; }
+
+    AdminStateLoader(AdminMapper mapper) {
+        this.mapper = mapper;
+    }
 
     AdminState load(boolean lock, long... userIds) {
         return load(lock, false, userIds);
     }
 
-    AdminState loadOrganization() { return load(true, true); }
+    AdminState loadOrganization() {
+        return load(true, true);
+    }
 
     private AdminState load(boolean lock, boolean allUsers, long... userIds) {
         // 第一阶段将 M5 写入串行化，包括委派清单的递归变更。
@@ -26,7 +32,8 @@ final class AdminStateLoader {
         var roles = index(mapper.selectRoles(lock), Role::id);
         var delegations = mapper.selectDelegations(lock);
         var ids = Arrays.stream(userIds).distinct().sorted().boxed().toList();
-        var users = index(allUsers ? mapper.selectAllUsers() : mapper.selectUsers(ids, lock), User::id);
+        var users =
+                index(allUsers ? mapper.selectAllUsers() : mapper.selectUsers(ids, lock), User::id);
         return new AdminState(appointments, departments, users, roles, delegations);
     }
 

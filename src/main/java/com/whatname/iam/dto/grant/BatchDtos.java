@@ -7,36 +7,61 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.whatname.iam.dto.admin.AdminDtos.StrictString;
+
 import java.io.IOException;
 import java.util.List;
 
 public final class BatchDtos {
     private BatchDtos() {}
+
     public record Request(
             @JsonDeserialize(using = StrictString.class) String operation,
             @JsonDeserialize(using = StrictString.class) String roleId,
             List<Target> targets,
             @JsonDeserialize(using = StrictString.class) String reason,
             @JsonDeserialize(using = StrictBoolean.class) Boolean dryRun) {
-        @JsonAnySetter public void rejectUnknown(String name, JsonNode value) { throw new IllegalArgumentException("Unknown batch field"); }
+        @JsonAnySetter
+        public void rejectUnknown(String name, JsonNode value) {
+            throw new IllegalArgumentException("Unknown batch field");
+        }
     }
+
     public record Target(
             @JsonDeserialize(using = StrictString.class) String userId,
             @JsonDeserialize(using = StrictString.class) String sourceType,
             @JsonDeserialize(using = StrictString.class) String sourceRef,
             @JsonDeserialize(using = StrictString.class) String sourceDeptId,
             @JsonDeserialize(using = StrictString.class) String grantSourceId) {
-        @JsonAnySetter public void rejectUnknown(String name, JsonNode value) { throw new IllegalArgumentException("Unknown target field"); }
+        @JsonAnySetter
+        public void rejectUnknown(String name, JsonNode value) {
+            throw new IllegalArgumentException("Unknown target field");
+        }
     }
+
     public record Accepted(String batchId, String processingStatus, int total) {}
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Item(String userId, String status, String grantSourceId, String code) {}
-    public record Result(String batchId, String processingStatus, int succeeded, int failed, int pending,
-                         List<Item> items, int page, int pageSize, int total) {}
+
+    public record Result(
+            String batchId,
+            String processingStatus,
+            int succeeded,
+            int failed,
+            int pending,
+            List<Item> items,
+            int page,
+            int pageSize,
+            int total) {}
+
     public record Submission(boolean created, Object data) {}
+
     public static final class StrictBoolean extends JsonDeserializer<Boolean> {
-        @Override public Boolean deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            if (parser.currentToken() != JsonToken.VALUE_TRUE && parser.currentToken() != JsonToken.VALUE_FALSE)
+        @Override
+        public Boolean deserialize(JsonParser parser, DeserializationContext context)
+                throws IOException {
+            if (parser.currentToken() != JsonToken.VALUE_TRUE
+                    && parser.currentToken() != JsonToken.VALUE_FALSE)
                 return (Boolean) context.handleUnexpectedToken(Boolean.class, parser);
             return parser.getBooleanValue();
         }

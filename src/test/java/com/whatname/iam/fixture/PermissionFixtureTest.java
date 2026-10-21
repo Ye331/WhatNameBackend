@@ -10,37 +10,44 @@ class PermissionFixtureTest {
     @Test
     void standardScenarioContainsConsistentAuthorizationReferencesAndEnabledFacts() {
         PermissionFixture.Scenario fixture = PermissionFixture.standardScenario();
-        PermissionFixture.User user = fixture.users().stream()
-                .filter(candidate -> candidate.id() == PermissionFixture.USER_ID)
-                .findFirst()
-                .orElseThrow();
-        PermissionFixture.Department userDepartment = fixture.departments().stream()
-                .filter(candidate -> candidate.id() == user.departmentId())
-                .findFirst()
-                .orElseThrow();
-        PermissionFixture.Department parentDepartment = fixture.departments().stream()
-                .filter(candidate -> candidate.id() == userDepartment.parentId())
-                .findFirst()
-                .orElseThrow();
+        PermissionFixture.User user =
+                fixture.users().stream()
+                        .filter(candidate -> candidate.id() == PermissionFixture.USER_ID)
+                        .findFirst()
+                        .orElseThrow();
+        PermissionFixture.Department userDepartment =
+                fixture.departments().stream()
+                        .filter(candidate -> candidate.id() == user.departmentId())
+                        .findFirst()
+                        .orElseThrow();
+        PermissionFixture.Department parentDepartment =
+                fixture.departments().stream()
+                        .filter(candidate -> candidate.id() == userDepartment.parentId())
+                        .findFirst()
+                        .orElseThrow();
         PermissionFixture.GrantSource grantSource = fixture.grantSources().get(0);
-        PermissionFixture.Role grantRole = fixture.roles().stream()
-                .filter(candidate -> candidate.id() == grantSource.roleId())
-                .findFirst()
-                .orElseThrow();
+        PermissionFixture.Role grantRole =
+                fixture.roles().stream()
+                        .filter(candidate -> candidate.id() == grantSource.roleId())
+                        .findFirst()
+                        .orElseThrow();
         PermissionFixture.RoleMenu roleMenu = fixture.roleMenus().get(0);
-        PermissionFixture.Menu permissionMenu = fixture.menus().stream()
-                .filter(candidate -> candidate.id() == roleMenu.menuId())
-                .findFirst()
-                .orElseThrow();
-        PermissionFixture.Menu directoryMenu = fixture.menus().stream()
-                .filter(candidate -> candidate.id() == permissionMenu.parentId())
-                .findFirst()
-                .orElseThrow();
+        PermissionFixture.Menu permissionMenu =
+                fixture.menus().stream()
+                        .filter(candidate -> candidate.id() == roleMenu.menuId())
+                        .findFirst()
+                        .orElseThrow();
+        PermissionFixture.Menu directoryMenu =
+                fixture.menus().stream()
+                        .filter(candidate -> candidate.id() == permissionMenu.parentId())
+                        .findFirst()
+                        .orElseThrow();
         PermissionFixture.MenuApi menuApi = fixture.menuApis().get(0);
-        PermissionFixture.Api api = fixture.apis().stream()
-                .filter(candidate -> candidate.id() == menuApi.apiId())
-                .findFirst()
-                .orElseThrow();
+        PermissionFixture.Api api =
+                fixture.apis().stream()
+                        .filter(candidate -> candidate.id() == menuApi.apiId())
+                        .findFirst()
+                        .orElseThrow();
 
         assertTrue(fixture.application().enabled());
         assertTrue(fixture.users().stream().allMatch(PermissionFixture.User::enabled));
