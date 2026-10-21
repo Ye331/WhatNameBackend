@@ -3,6 +3,7 @@ package com.whatname.iam.service.permission;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.mapper.service.ServiceIdentityMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -81,6 +82,14 @@ public class ServiceRequestAuthenticator {
                 ServiceRequestSignature.sha256Hex(rawBody), requiredScope,
                 clock.instant().plusSeconds(ServiceRequestSignature.NONCE_RETENTION_SECONDS).getEpochSecond()));
         return identity;
+    }
+
+    /** HR/department MVC handlers call this after argument binding; the filter preserves exact body bytes. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Map<String,Object> authenticate(HttpServletRequest request, String requiredScope) {
+        if (!(request instanceof ContentCachingRequestWrapper cached))
+            throw new BusinessException(INVALID_SERVICE);
+        return authenticate(request, cached.getContentAsByteArray(), requiredScope);
     }
 
     /** Re-validates a context issued only after successful request authentication. */

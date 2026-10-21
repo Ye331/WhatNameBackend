@@ -19,4 +19,7 @@ public interface ServiceIdentityMapper {
             "VALUES (#{clientId}, #{nonce}, #{expiresAt})")
     int insertNonce(@Param("clientId") String clientId, @Param("nonce") String nonce,
                     @Param("expiresAt") LocalDateTime expiresAt);
+
+    @Delete("DELETE FROM sys_service_nonce WHERE expires_at < #{now}")
+    int deleteExpiredNonces(@Param("now") LocalDateTime now);
 }
