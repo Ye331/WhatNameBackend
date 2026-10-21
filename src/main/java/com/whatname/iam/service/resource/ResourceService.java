@@ -2,10 +2,14 @@ package com.whatname.iam.service.resource;
 
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
+import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.common.util.RevisionUtils;
 import com.whatname.iam.common.util.RouteTemplateUtils;
 import com.whatname.iam.dto.common.PageRequest;
 import com.whatname.iam.dto.common.PageResponse;
+import com.whatname.iam.entity.user.UserAccount;
+import com.whatname.iam.mapper.permission.PermissionMapper;
+import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateApiRequest;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateApplicationRequest;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateMenuRequest;
@@ -42,8 +46,11 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 @Transactional(readOnly = true)
@@ -54,16 +61,28 @@ public class ResourceService {
     private final AdminPolicyService adminPolicy;
     private final DataSignatureService signatures;
     private final AuditService audit;
+    private final JwtTokenService jwt;
+    private final UserAccountMapper userAccounts;
+    private final PermissionMapper permissionMapper;
+    private final TransactionTemplate freshCheck;
     private final String protectedAppCode;
 
     public ResourceService(ResourceMapper mapper, PermissionService permissions, AdminPolicyService adminPolicy,
-                           DataSignatureService signatures, AuditService audit,
+                           DataSignatureService signatures, AuditService audit, JwtTokenService jwt,
+                           UserAccountMapper userAccounts, PermissionMapper permissionMapper,
+                           PlatformTransactionManager tx,
                            @Value("${app.system-app-code:IAM}") String protectedAppCode) {
         this.mapper = mapper;
         this.permissions = permissions;
         this.adminPolicy = adminPolicy;
         this.signatures = signatures;
         this.audit = audit;
+        this.jwt = jwt;
+        this.userAccounts = userAccounts;
+        this.permissionMapper = permissionMapper;
+        freshCheck = new TransactionTemplate(tx);
+        freshCheck.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        freshCheck.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         this.protectedAppCode = protectedAppCode;
     }
 
@@ -353,7 +372,7 @@ public class ResourceService {
     }
 
     private long actorId(String bearer) {
-        long actorId = permissions.currentUser(bearer);
+        long actorId = jwt.verifyBearer(bearer).userId();
         if (actorId <= 0) {
             throw new BusinessException(ErrorCode.INVALID_TOKEN);
         }
@@ -369,8 +388,27 @@ public class ResourceService {
     private long requireCurrentWrite(String bearer, String permission) {
         long actorId = actorId(bearer);
         adminPolicy.requireLevelOne(actorId);
-        permissions.requireFunction(actorId, permission);
+        var principal = jwt.verifyBearer(bearer);
+        if (principal.userId() != actorId) {
+            throw new BusinessException(ErrorCode.INVALID_TOKEN);
+        }
+        recheckCurrentSessionAndFunction(principal, permission, actorId);
         return actorId;
+    }
+
+    private void recheckCurrentSessionAndFunction(JwtTokenService.SessionPrincipal principal, String permission, long actorId) {
+        freshCheck.executeWithoutResult(status -> {
+            UserAccount user = userAccounts.findById(actorId);
+            if (user == null || user.status == null || user.status != 1
+                    || user.passwordInitialized == null || user.passwordInitialized != 1
+                    || user.sessionVersion == null || user.sessionVersion != principal.sessionVersion()) {
+                throw new BusinessException(ErrorCode.INVALID_TOKEN);
+            }
+            if (permissionMapper.invalidated(principal.jti()) != 0) {
+                throw new BusinessException(ErrorCode.INVALID_TOKEN);
+            }
+            permissions.requireFunction(actorId, permission);
+        });
     }
 
     private boolean isProtectedApp(ApplicationEntity app) {
