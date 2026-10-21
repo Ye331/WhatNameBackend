@@ -1,112 +1,61 @@
 # A 第二阶段测试报告
 
-交付分支：`feat/a-stage2-integration`。
+验证日期：**2026-10-21（北京时间）**。提交基线为 main `3d868a6`，修复分支为 `fix/a-stage2-service-auth`。A 适配与联合回归在隔离环境验证。第一阶段记录见[第一阶段测试报告](A_STAGE1_TEST_REPORT.md)，当前能力与依赖见[A 第二阶段说明](A_STAGE2.md)。
 
-验证日期：2026-10-18，复核日期：2026-10-20（北京时间）。第一阶段交付记录单独见[第一阶段测试报告](A_STAGE1_TEST_REPORT.md)，不与本次数字累加。
+## 1. 基线和结论
 
-合入 #9 对应 main `8e86377` 后，先复现 OA 在事务内误走 HR 认证并返回 503，再统一入口与事务内的来源分流。标准夹具下最终通过：普通回归 186 项、A 既有回归 156 项（其中 50 项与普通回归重复）、OA 审批 64 项、HR 授权协作 41 项、隔离库 A 对 D 专项 48 项，去重共 **445 项**；所列通过组最终报告失败 / 错误为 0。26 项数据工具测试及打包通过。普通回归跳过的 125 项中，A 的 106 项已单独覆盖；D 的 16 项及 B 的 3 项本次未复跑。
+首轮：main `45798de` + B #10 `73f53d5` + D #11 `4dd0286`、#12 `23a6e5c`、#13 `ce807e4` + 本轮 A 补丁。期间团队更新并合并 #10 / #11，已核对 main 的新增文件均来自这些已下载提交，没有遗漏额外变更。
 
-认证分流与诊断的 12 项单元测试已包含在普通回归中，覆盖 OA / 五类 HR 事件在入口和写事务中的接点选择、事务内资格失效、终态恢复授权及缺少 OA 提供者时拒绝，不借用 HR 接点。OA / HR 联合测试沿用 C 的现有用例，使用隔离 Testcontainers MySQL，服务认证仍为测试提供者。
+追加轮：main `9e98fbc`（含 B `a62b824`、D #11 `4dd0286`）+ D #12 / #13 上述固定提交 + A 补丁。追加 **389 项：388 通过、1 失败、0 错误 / 跳过**，包含普通及既有 A 回归 349、A 真实联调 21、D E2E 19。B 的新增改动仅涉及资源 / 角色服务和交接文档；保留首轮未受影响的 C / D 专项记录，不把它们称为最新 B 的一次全量运行。
 
-**开发库存在未通过结果：**累计 3261 个部门的开发库上，HR 暂停 / 恢复和员工审计故障回滚两例遇到 30 秒业务事务超时；该规模下的问题仍未解决。另有一处旧 C 缺省实现断言，已按 #9 的真实 C 事务约束更新，验证无事务及无事件执行证明均拒绝。A 对 D 的 48 项随后在现有 23 表、111 个受控基础部门、无原始用户的隔离库完整通过；未放宽生产超时或删除开发库历史，隔离结果不能替代 3261 部门规模的验收。
+两轮按每个测试类最近一次完整报告去重：**49 个现有测试类中执行 48 个，702 项：691 通过、2 失败、9 错误；另有 B 的 3 项因测试编译阻断未执行。**26 项数据工具测试通过。整体联调尚未全绿，标准含测试构建尚未通过。
 
-下表保留 2026-10-18 基于 main `805db4c` 的完整基线记录，其中 D 的 16 项已在独立临时库执行通过；不将该旧基点结果称作当前分支全量复跑。
+提交前重新读取仓库确认 main 仍为 `3d868a6`，#10～#13 均已合并。逐文件核对该基线与已测组合，差异仅本轮 8 项 A 文件；拟提交分支的生产源码、资源、SQL 及构建输入与已测组合一致（A 适配器说明注释更新除外）。
 
-## 1. 已执行结果
+发布前在拟提交分支复跑认证 / 诊断 12 项、A 真实联调 21 项及 D E2E 19 项，共 **52 项：51 通过、1 失败、0 错误 / 跳过**。唯一失败仍为下述 B 查询旧会话问题；A 的缺签名负例补强为先完成真实认证、再删除身份签名，确认业务拒绝且没有事件或人员写入。该复跑不重复计入 702 项统计。标准 `test-compile` 复核仍只被 B 原有测试的旧方法调用阻断，原始 pom 的生产打包再次通过（跳过测试编译）。
 
-| 范围 | 通过 | 证明边界 |
+## 2. 测试结果
+
+| 范围 | 项数 | 最终结果 |
 |---|---:|---|
-| A Unit | 50 | 密码、历史策略、JWT、加密编码及拼音，无数据库 |
-| A AMySql | 84 | M1 37、HR 21、部门业务 23、部门 Mapper 3；真实 MySQL / HTTP，C/D 及需要时 SMS 使用测试替身 |
-| A ACM5 | 22 | 真实 A + C 既有 M5 / SQL、MySQL / HTTP；D 使用测试替身 |
-| A 对 D 适配单测 | 10 | 真实 D 序列化、Ed25519 和审计封印，存储与事务生命周期为内存夹具 |
-| A 演示短信及身份单测 | 15 | 短信通道 8、请求身份 7；真实本机文件与 JWT，未装配 C 生产接点 |
-| A 账号 MySQL / HTTP 专项 | 25 | 真实 A、D 和既有 C 范围处理；含独立文件通道设密 / 重置；C 完整性接点为测试装配 |
-| A HR MySQL 专项 | 23 | 真实 A、D、MySQL 及事务；HR 服务认证、C 回收 / 组织重审为测试替身 |
-| C 及公共普通回归 | 74 | C 管理员、单人授权、Controller、默认拒绝等 73 项及公共事务响应 1 项；未运行 C Docker 专项与批量验收 |
-| D 普通回归子集 | 9 | 签名 5、默认拒绝 2、权限夹具 2 |
-| D MySQL / HTTP 专项 | 16 | 独立临时库、真实 D / MySQL / HTTP；可信服务身份和 C 完整性接点为测试替身 |
-| 唯一 JUnit 合计 | **328（A 229 + 其他回归 99）** | 实际执行用例全部通过，失败 / 错误为 0；重复执行的 A Unit 50 不累加 |
-| A 数据工具测试 | 26 | 部门及员工事件准备工具的独立 unittest，不计入 JUnit |
-| 应用打包 | 通过 | Maven 退出码 0；打包不重复计为测试 |
+| 普通单元 / Controller / 边界 | 193 | 全部通过，含 D 新增签名 7 项 |
+| A 既有数据库回归 | 106 | 全部通过：M1 37、组织 23、部门 Mapper 3、A–C 管理范围 22、HR 21 |
+| A 账号对 D 专项 | 25 | 全部通过，含真实登录 / 设密 / 会话及模拟短信 |
+| A HR 对 D 专项 | 25 | 全部通过，HR 认证和部分 C 处理为明确的测试提供者 |
+| D 原有 MySQL / HTTP | 16 | 全部通过；服务身份及 C 完整性为该套件原有测试装配 |
+| C 九组集成 | 288 | 287 通过、1 项旧错误码断言失败；HR 41、OA 64 均通过 |
+| D 新服务认证专项 | 9 | 全部因 TestApp 缺 DataSignatureService 而启动报错，未完成业务断言 |
+| D 真实服务 E2E | 19 | 全部通过，使用真实服务签名 / nonce / JWT / C / D |
+| A 新增真实联调 | 21 | 20 通过、1 失败；B 锁等待写入已通过，只读旧会话仍失败 |
+| B 原有数据库专项 | 3 | 未执行：旧调用缺 bearer，阻断标准测试编译 |
 
-普通回归显式使用 `*Test,!AStage2DMySqlIntegrationTest,!AStage2HrDMySqlIntegrationTest` 选择器，158 项通过，另有 122 项数据库用例因专项开关关闭而跳过；这不是默认全量命令。随后已分别执行 A 既有数据库回归 106 项、A 新增数据库专项 48 项，以及 D 数据库专项 16 项，覆盖这 122 个先前跳过的用例。A Unit 50 项在普通回归与 A 回归中重复执行，合计按类名和方法名去重。以上结果不与 [C 独立验收](C_STAGE1_TEST_REPORT.md)或 [D 独立验收](D_STAGE1_TEST_REPORT.md)数字相加。
+没有把环境跳过、启动失败、打包或重复运行计为通过。原始 XML 与日志单独保留，可按提交及类核对。
 
-## 2. 关键覆盖与限制
+## 3. A 改动及已验证行为
 
-| 场景 | 测试位置与覆盖 |
-|---|---|
-| 密码 / JWT / 编码 | PasswordHasherTest、PasswordPolicyTest、JwtTokenServiceTest、SensitiveDataCodecTest、NamePinyinTest：密码历史、异常编码、过期 / 签名拒绝及输入边界 |
-| 账号与姓名搜索 | M1MySqlIntegrationTest：初始化 / 重置 / 注销、唯一约束、临时账号、状态 / 来源 / 范围交集、跨 200 人批次及准确分页、损坏候选拒绝和一致视图 |
-| 组织与事件 | DepartmentBusinessIntegrationTest、DepartmentMapperTest：六条组织路由、冻结 / 合并 / 版本、幂等及乱序、同事件并发、提交确认异常、非终态恢复拒绝、签名审计故障回滚 |
-| OA / HR 认证分流 | ExternalEventAuthenticationTest、ExternalEventDiagnosticTest：入口与事务内使用同一来源接点、资格失效后不执行业务、恢复授权不串用及脱敏诊断；OaDecisionIT 64 项与 HrGrantCollaborationIT 41 项验证现有 OA / HR 业务回归 |
-| HR 人员 | HrBusinessIntegrationTest：人员新建更新、暂停恢复、复职、调岗、离职、未来生效时间拒绝、版本 / 重复事件及故障回滚；C HR 写入仍为替身 |
-| 真实 C 管理范围 | Task12M5MySqlIntegrationTest：资格 / 等级 / 范围、冻结和合并生命周期、等待撤销 / 重任命后复核、范围外拒绝、旧外层事务拒绝及回滚 |
-| 演示短信与身份实现 | LocalDemoSmsSenderTest、ARequestIdentityTest：显式演示配置、通道可替换、目录及投递失败拒绝、用途隔离；当前请求 JWT 验签及缺失 / 伪造 / 过期拒绝，不代表 C 的生产装配完成 |
-| 真实 A 对 D 适配 | AStage2DMySqlIntegrationTest：账号及空授权集合签名、密码 / 状态 / 会话变更、注销、冻结、篡改 / 缺签名 / 旧快照拒绝和审计故障回滚；真实文件通道的 HTTP 设密 / 重置及“文件已投递但数据库回滚后验证码不可用” |
-| HR 对真实 D 的签名审计 | AStage2HrDMySqlIntegrationTest：HR01—HR05 业务事务、人员与组织签名、C 最终授权集合核验、迁移用户逐人审计、证据脱敏及故障回滚；伪造上下文、事件号不符、跨事务凭据及协作者额外篡改拒绝。HR 服务认证、C 回收 / 重审为测试替身；新部门签名验证后主动回滚，不代表新部署初始化已验收 |
-| C/D 普通回归 | 管理规则、Controller、共享校验、签名与默认拒绝；不替代各模块专项验收 |
-| D MySQL / HTTP 回归 | DMySqlIntegrationTest：菜单/API、授权来源撤销、旧会话、签名篡改与历史审计、故障回滚；测试中服务身份和 C 完整性接点为替身，不证明两项生产接点已实现 |
+- A 的 HR 适配复用 D 已提供的 `issuedContext` / `verifyAuthenticatedContext`，在现有入口签发证明，并在业务事务复核当前签名身份和密钥；保留原有操作限制，不重复消费 nonce。修复前已复现伪造上下文、身份缺签名、认证后换钥未被拒绝，以及上下文未携带签发证明的缺口，修复后对应负例通过。
+- 新增 A 真实联调覆盖 HR01—HR05、调岗只回收旧部门岗位来源、离职清理与旧会话失效、暂停 / 恢复、合并保留合法角色、冻结 / 解冻、幂等 / 乱序、篡改 / nonce、服务资格变更和审计故障回滚；使用真实 A/C/D 实现及 MySQL，夹具仅提供测试数据、密钥和故障注入。
+- A 两处旧测试按实际装配区分拒绝：未提供认证时为 `AUTH_STATE_UNAVAILABLE`，已有 D 提供者但请求无凭据时为 `INVALID_SERVICE`，保留“无事件写入”等断言。
+- 沿用上轮 HR 整树验签去重修复及两项负例，本轮隔离复验 HR 25 项通过；上轮 3261 部门结果单独保留，不冒充本轮所有规模性能验收。
 
-既有 A 数据库套件写入带随机前缀的隔离夹具，收尾暂停或离职账号、冻结测试部门、回收有效来源和资格，保留业务历史。两个新增 A 专项账号均已退役，无有效来源、关系、任命或未用验证码；原组织行及原签名字节已恢复，基础部门及表结构前后一致。D 专项在单独新建的临时库中运行，不向既有 A 开发库写入其夹具。中断后应按本轮前缀核查，不能直接清库或物理删除历史。
+本轮没有增加业务表、字段或接口。根 README、正式 pom 及 B/C/D 文件保持各自选定版本；交付补丁仅含 A 文件。
 
-这些结果验证 A 既有编排、演示文件短信和真实 D 适配。C 生产接点及 HR 回收 / 组织重审、D 服务认证 / nonce、完整“登录→授权→菜单 / API 允许→回收→拒绝”链路和规模性能仍未验收；未宣称达到 20ms / 50ms。演示采用独立模拟短信通道，不以商业短信接入作为验收前提。
+## 4. 待团队处理
 
-## 3. 复现入口
+1. **B 只读旧会话问题（实际复现）：**签发管理员 token 后更新并签署 `session_version`，用旧 token 请求 `/api/v1/applications`、`/api/v1/roles`，实际均为 **200**，预期 **401**。新 B 的共用 actorId 只验 JWT 声明，查询入口没有复核当前会话。需 B 恢复查询的当前会话校验；写入继续保留锁前 / 锁后分离。原锁等待写入反例在新 B 上已通过，不能据此把只读链路也判为通过。
+2. **B / 测试负责人：**同步 `BResourceRoleMySqlIntegrationTest` 的 bearer 参数及真实认证 / 管理依赖。未新增无认证旧重载。标准 `test-compile` 在初版和最新 B 上均只报告该文件的旧签名调用错误。
+3. **C / 测试负责人：**`CStage2IntegrationIT.organizationASyncNewChildRequiresReviewAndProductionStillRejectsUntrustedHr` 在 HR 提供者接入后实际拒绝为 `INVALID_SERVICE`，仍期待 `AUTH_STATE_UNAVAILABLE`。需同步该 1 项断言，A 不修改 C 测试或生产逻辑。
+4. **D / 测试负责人：**`ServiceRequestAuthenticationIT.TestApp` 需补齐真实 DataSignatureService、相关 Mapper / 密钥配置及 SERVICE_IDENTITY 签名夹具；当前 9 项均为上下文启动错误。真实生产装配下另一组 E2E 19 项已通过，不能将其代替这 9 项原专项的执行结果。
+5. **组长协调：**安排上述 B/C/D 问题整改及标准回归。受控初始化、实际数据导入、人工恢复流程和整体系统验收仍按团队计划推进。本轮局部验证不替代这些验收。
 
-需要 Windows PowerShell 5.1+、Git、JDK 21 和仓库 Maven Wrapper。在 `pom.xml` 所在目录执行，将 `JAVA_HOME` 指向本机 JDK 21；需要已批准镜像时给脚本追加 `-MavenSettings` 私有文件参数。
+## 5. 构建、规模和复核方式
 
-```powershell
-# 默认仅运行五个纯单元测试类，不连接数据库
-& .\scripts\test\Invoke-ASelfTest.ps1 -JavaHome $env:JAVA_HOME
+为继续执行可运行回归，使用不提交的临时诊断 POM，仅排除 B 上述旧测试源的编译。B 测试原文、正式 pom 和全部生产代码参与范围均有摘要记录；该配置不是标准构建通过证明，也不纳入团队交付文件。
 
-```
+原始 pom 的生产源码打包 `-Dmaven.test.skip=true package` 成功；该命令跳过测试编译，不计为测试通过。待团队同步旧测试后，应重新执行标准 `test-compile`、普通回归与 `-Pintegration-tests verify`。
 
-[A 自测脚本](../scripts/test/Invoke-ASelfTest.ps1)支持 `Unit`、`AMySql`、`ACM5`，组合使用 PowerShell 数组。数据库套件须显式启用，并先按[项目启动说明](../README.md)和[数据库说明](../db/README.md)准备本地隔离测试库、现有 23 表、111 条受控基础部门及部门合并迁移；脚本不执行导入或迁移。A 对 D 专项本轮的通过结果来自该受控隔离夹具，不来自累计历史部门的开发库。
+C 两个既有 2001 人用例均执行：夹具路径记录 **88,901 ms**；真实 D 签名审计路径记录 **483,054 ms**，2001 项成功、总尝试 2001，重复执行未增加次数。独立进程恢复 / 故障 / 并发用例均实际运行。该记录不代表生产 SLA 或 20ms / 50ms 指标达成。
 
-```powershell
-$env:A_TEST_DB_URL = 'jdbc:mysql://127.0.0.1:3307/iam_a_regression?characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei'
-$env:A_TEST_DB_USERNAME = 'iam_dev'
-$privatePassword = Read-Host '本地测试库密码' -AsSecureString
-$credential = [pscredential]::new('local-test', $privatePassword)
-$env:A_TEST_DB_PASSWORD = $credential.GetNetworkCredential().Password
-try {
-    & .\scripts\test\Invoke-ASelfTest.ps1 -Suite Unit,AMySql,ACM5 -JavaHome $env:JAVA_HOME
-    if ($LASTEXITCODE -ne 0) { throw 'A 回归失败，请检查本次报告' }
-    $buildLock = [IO.File]::Open((Join-Path (Split-Path (Get-Location).Path -Parent) 'tmp/maven-build.lock'),
-        [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-    try {
-        # Docker 须已启动；OA / HR 联合用例自行创建隔离 MySQL。
-        & .\mvnw.cmd -B -ntp '-DskipTests=false' '-Dmaven.test.skip=false' '-DfailIfNoTests=true' '-Dtest=ExternalEventAuthenticationTest,ExternalEventDiagnosticTest,OaDecisionIT,HrGrantCollaborationIT' test
-        if ($LASTEXITCODE -ne 0) { throw '事件认证或 OA / HR 联合回归失败' }
-        $env:A_STAGE2_DB_TEST = 'true'
-        & .\mvnw.cmd -B -ntp '-DskipTests=false' '-Dmaven.test.skip=false' '-DfailIfNoTests=true' '-Dtest=DBackedManagementDataSecurityTest,LocalDemoSmsSenderTest,ARequestIdentityTest,AStage2DMySqlIntegrationTest,AStage2HrDMySqlIntegrationTest' test
-        if ($LASTEXITCODE -ne 0) { throw 'A 适配专项失败，请检查本次报告' }
-        & .\mvnw.cmd -B -ntp '-DskipTests' package
-        if ($LASTEXITCODE -ne 0) { throw '打包失败' }
-    } finally {
-        Remove-Item Env:A_STAGE2_DB_TEST -ErrorAction SilentlyContinue
-        $buildLock.Dispose()
-    }
-} finally {
-    Remove-Item Env:A_TEST_DB_PASSWORD -ErrorAction SilentlyContinue
-    $credential = $null
-    $privatePassword = $null
-}
-```
+本轮本地库专项使用三份临时库，原样复制团队现有 23 表和既有迁移；A 库只额外复制 111 个受控基础部门。三库及授权均已清理，原开发库表结构和基础部门摘要核对一致。Testcontainers 用例各自创建隔离 MySQL。真实密钥、个人数据、验证码、日志和临时诊断配置均不纳入补丁。
 
-数据库地址须为显式环回地址，密码只经进程环境传递，不打印或写入仓库。既有回归使用 HTTP 18085—18090，端口占用时失败，不自动终止进程；新增适配专项由系统分配环回端口。
-
-脚本使用仓库同级 `tmp/maven-build.lock` 独占构建锁，所有 Maven 构建须串行共用，不运行 clean。结果保存在新建的仓库外目录，可用 `-OutputDirectory` 指定；检查脚本退出码和 `summary.json`，不能只看 BUILD SUCCESS。报告与日志不上传仓库。
-
-上例执行 A 原有 156 项、演示短信 / 身份 / D 适配 73 项、认证 / 诊断 12 项及 OA / HR 联合 105 项，共 346 个不同用例。普通回归使用前述选择器，在所有专项数据库开关关闭时于同一构建锁内运行 `.\mvnw.cmd -B -ntp -DskipTests=false -Dmaven.test.skip=false -DfailIfNoTests=true "-Dtest=*Test,!AStage2DMySqlIntegrationTest,!AStage2HrDMySqlIntegrationTest" test`；与 A 专项重复的用例按类名和方法名去重。打包不增加通过数量，当前分支数量以实际执行的 XML 为准。
-
-D 专项在按现有 `db/01_schema.sql` 和 `db/02_add_canonical_path_and_index.sql` 初始化的独立空测试库中运行。将上述 `A_TEST_DB_URL` 指向该库，保留安全注入的账号密码，临时设置 `D_DB_TEST=true` 后运行 `-Dtest=DMySqlIntegrationTest`；该类会留下测试账号和日志，不能在既有业务数据所在库直接执行。2026-10-18 基线独立执行 16 项，0 失败 / 错误 / 跳过，2026-10-20 未复跑。该验证仅复用 D 的现有测试，不涉及修改 D 代码或分支。
-
-数据工具本轮另行执行 `python -m unittest discover -s scripts/dev-data -p 'test_*.py'`，26 项通过；该数字不计入 JUnit。
-
-## 4. 数据准备与第二阶段状态
-
-[员工事件准备工具](../scripts/dev-data/prepare-employee-events.py)历史验证了 10000 条输入，状态为 `PREPARED_NOT_IMPORTED`，实际导入 **0**。工具只准备 HR02 UPSERT 输入，不发送 HTTP、不生成凭据、不授予角色；`--employment-type`、`--event-version`、`--occurred-at`、`--batch` 均须显式提供，开发参数不能代表真实 HR 分类或版本。输入文件由调用者受控提供，输出只允许仓库同级的私有工具目录；原表和明文输出不得提交。
-
-本轮已完成 OA / HR 认证分流修复及上述复核。C 的 Stage2 已随 #9 合入 main；D 真实服务认证及防重放、A/C/D 最终接点装配、受控初始化、人工异常处理及完整链路仍需团队共同验收，开发库规模下的两项 HR 超时单列保留。HR / OA 可用测试请求模拟，不需要外部人事或审批平台。
+可复核入口：既有 `scripts/test/Invoke-ASelfTest.ps1` 的 `Unit / AMySql / ACM5`；本轮适配专项类 `AStage2DMySqlIntegrationTest`、`AStage2HrDMySqlIntegrationTest`、`AStage2TrustedServiceIT`；D / C 各套件保持原文。原有数据库开关与环回数据库约束继续生效；不能删除编译阻断文件或更改他人断言来制造全绿。

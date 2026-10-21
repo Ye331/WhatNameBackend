@@ -191,7 +191,8 @@ class AStage2DMySqlIntegrationTest {
         assertInstanceOf(CBackedM1SecurityGateway.class,app.getBean(M1SecurityGateway.class));
         expect(ErrorCode.INVALID_TOKEN,()->app.getBean(AdminPorts.Identity.class).currentUserId());
         expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->app.getBean(AdminPorts.Functions.class).require(actor.id,"IAM_USERS_VIEW"));
-        expect(ErrorCode.AUTH_STATE_UNAVAILABLE,()->app.getBean(DepartmentCollaboration.class).authenticateHr(new MockHttpServletRequest(),"HR_EMPLOYEE"));
+        expect(app.containsBean("serviceRequestAuthenticator")?ErrorCode.INVALID_SERVICE:ErrorCode.AUTH_STATE_UNAVAILABLE,
+                ()->app.getBean(DepartmentCollaboration.class).authenticateHr(new MockHttpServletRequest(),"HR_EMPLOYEE"));
         var hr=app.getBean(HrCollaboration.class);
         assertInstanceOf(com.whatname.iam.service.grant.HrGrantCollaboration.class,
                 org.springframework.test.util.AopTestUtils.getUltimateTargetObject(hr));

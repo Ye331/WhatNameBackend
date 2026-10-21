@@ -60,6 +60,7 @@ class AStage2HrDMySqlIntegrationTest {
     static class FixtureDepartment implements DepartmentCollaboration {
         final ManagementDataSecurity data;final DataSignatureService signatures;final JdbcTemplate db;
         boolean rejectInside,failAfterSign,corruptMergedIdentity,corruptOtherDepartment,mismatchEvent;long transientDepartment,unaffectedDepartment;
+        int organizationVerifications;
         FixtureDepartment(ManagementDataSecurity data,DataSignatureService signatures,JdbcTemplate db) {
             this.data=data;this.signatures=signatures;this.db=db;
         }
@@ -74,7 +75,12 @@ class AStage2HrDMySqlIntegrationTest {
         }
         public void authorizeRecovery(TrustedEventContext actor,String type) { throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE); }
         public Set<Long> scope(Manager actor,String permission,List<Department> all) { throw new BusinessException(ErrorCode.PERMISSION_DENIED); }
-        public void verifyOrganization(List<Department> all) { data.verifyOrganization(all); }
+        public void verifyOrganization(List<Department> all) {
+            organizationVerifications++;
+            long started=System.nanoTime();
+            try { data.verifyOrganization(all); }
+            finally { System.out.println("A_HR_ORGANIZATION_VERIFY departments="+all.size()+" invocation="+organizationVerifications+" elapsedMs="+(System.nanoTime()-started)/1_000_000); }
+        }
         public void verifyUsers(List<Map<String,Object>> users) { data.verifyUsers(users); }
         public void prepareOrganizationChange(TrustedEventContext actor,String eventId) {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
@@ -176,7 +182,7 @@ class AStage2HrDMySqlIntegrationTest {
     }
     @BeforeEach void fixtures() {
         port.rejectInside=false;port.failAfterSign=false;port.corruptMergedIdentity=false;port.corruptOtherDepartment=false;
-        port.mismatchEvent=false;port.transientDepartment=0;port.unaffectedDepartment=target;
+        port.mismatchEvent=false;port.transientDepartment=0;port.unaffectedDepartment=target;port.organizationVerifications=0;
         grants.omitCollectionSignature=false;grants.corruptIdentity=false;failure.fail=false;failure.targetType=null;
         // Only this class's previous users are retired; source must contain this case's person alone.
         tx.executeWithoutResult(status->{for(long id:accounts) {
@@ -225,6 +231,7 @@ class AStage2HrDMySqlIntegrationTest {
     }
     @Test void profileUpdateUsesRealIdentitySignatureAndSanitizedSealedHrEvidence() throws Exception {
         String event=event();hr.employee(actor,person.employeeNo,employee(event,2,Action.UPSERT,sourceCode));verify(USER_IDENTITY,person.id);
+        assertEquals(1,port.organizationVerifications,"A profile update must not repeat full-tree verification");
         var evidence=json.readValue(db.queryForObject("SELECT evidence FROM sys_operation_log WHERE external_event_id=?",String.class,event),Map.class);
         @SuppressWarnings("unchecked") var seal=(Map<String,Object>)evidence.remove("seal");
         assertEquals(Boolean.TRUE,tx.execute(status->signatures.verifySeal(evidence,seal)));assertEquals("HR",evidence.get("sourceSystem"));
@@ -236,6 +243,7 @@ class AStage2HrDMySqlIntegrationTest {
         tx.executeWithoutResult(status->assertEquals(person.id.longValue(),app.getBean(PermissionService.class).currentUser(token)));
         hr.employee(actor,person.employeeNo,employee(event(),2,Action.SUSPEND,sourceCode));
         hr.employee(actor,person.employeeNo,employee(event(),3,Action.RESUME,sourceCode));
+        assertEquals(2,port.organizationVerifications,"Each event verifies the locked organization once");
         assertEquals(1,users.findById(person.id).status);assertEquals(2,users.findById(person.id).sessionVersion);verify(USER_IDENTITY,person.id);
         expect(ErrorCode.INVALID_TOKEN,()->tx.executeWithoutResult(status->app.getBean(PermissionService.class).currentUser(token)));
     }
@@ -247,6 +255,7 @@ class AStage2HrDMySqlIntegrationTest {
     }
     @Test void transferReloadsTheCProducedGrantRevisionBeforeSigningIdentity() {
         String event=event();hr.transfer(actor,new Transfer("HR",event,2L,person.employeeNo,sourceCode,targetCode,now()));
+        assertEquals(1,port.organizationVerifications);
         assertEquals(target,users.findById(person.id).deptId);assertEquals(2,users.findById(person.id).grantRevision);
         verify(USER_IDENTITY,person.id);verify(USER_GRANTS,person.id);assertEquals("APPLIED",eventStatus(event));
     }
@@ -258,6 +267,7 @@ class AStage2HrDMySqlIntegrationTest {
         String token="Bearer "+app.getBean(JwtTokenService.class).issue(person.id,1);
         tx.executeWithoutResult(status->assertEquals(person.id.longValue(),app.getBean(PermissionService.class).currentUser(token)));
         hr.terminate(actor,new Termination("HR",event(),2L,person.employeeNo,now()));
+        assertEquals(1,port.organizationVerifications,"Termination must retain its organization verification");
         UserAccount current=users.findById(person.id);assertEquals(3,current.status);assertEquals(2,current.sessionVersion);assertEquals(2,current.grantRevision);
         verify(USER_IDENTITY,person.id);verify(USER_GRANTS,person.id);
         expect(ErrorCode.INVALID_TOKEN,()->tx.executeWithoutResult(status->app.getBean(PermissionService.class).currentUser(token)));
@@ -315,6 +325,20 @@ class AStage2HrDMySqlIntegrationTest {
         var before=db.queryForMap("SELECT * FROM sys_user WHERE id=?",person.id);String old=signature(USER_IDENTITY,person.id),event=event();failure.fail=true;
         expect(ErrorCode.AUDIT_UNAVAILABLE,()->hr.employee(actor,person.employeeNo,employee(event,2,Action.UPSERT,sourceCode)));
         assertEquals(before,db.queryForMap("SELECT * FROM sys_user WHERE id=?",person.id));assertEquals(old,signature(USER_IDENTITY,person.id));assertEquals("PENDING_RECOVERY",eventStatus(event));
+    }
+    @Test void employeeStillRejectsTamperingInADepartmentOutsideItsAssignment() {
+        String before=signature(USER_IDENTITY,person.id),event=event();
+        db.update("UPDATE sys_dept SET status=0 WHERE id=?",target);
+        expect(ErrorCode.INTEGRITY_FAILURE,()->hr.employee(actor,person.employeeNo,employee(event,2,Action.UPSERT,sourceCode)));
+        assertEquals(1,users.findById(person.id).hrVersion);assertEquals(before,signature(USER_IDENTITY,person.id));
+        assertEquals("PENDING_RECOVERY",eventStatus(event));
+    }
+    @Test void terminationStillRejectsAMissingDepartmentSignatureBeforeChangingTheAccount() {
+        String before=signature(USER_IDENTITY,person.id),event=event();
+        db.update("DELETE FROM sys_data_signature WHERE data_type='DEPARTMENT' AND data_id=?",target);
+        expect(ErrorCode.INTEGRITY_FAILURE,()->hr.terminate(actor,new Termination("HR",event,2L,person.employeeNo,now())));
+        assertEquals(1,users.findById(person.id).status);assertEquals(1,users.findById(person.id).sessionVersion);
+        assertEquals(before,signature(USER_IDENTITY,person.id));assertEquals("PENDING_RECOVERY",eventStatus(event));
     }
     @Test void aNeverRepairsAnUnsignedCGrantRevision() {
         String before=signature(USER_IDENTITY,person.id),oldGrants=signature(USER_GRANTS,person.id);grants.omitCollectionSignature=true;
