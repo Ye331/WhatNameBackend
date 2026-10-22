@@ -1,6 +1,6 @@
 package com.whatname.iam.entity.admin;
 
-/** Minimal database projections for M5. These are not signature serialization formats. */
+/** 管理员模块使用的最小数据库投影，不是签名序列化格式。 */
 public final class AdminData {
     private AdminData() {}
 

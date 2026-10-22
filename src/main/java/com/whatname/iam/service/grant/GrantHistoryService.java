@@ -24,22 +24,19 @@ public class GrantHistoryService {
     private final GrantHistoryMapper mapper;
     private final AdminPolicyService policy;
     private final AdminRules rules;
-    private final AdminPorts.Identity identity;
-    private final AdminPorts.Functions functions;
+    private final RequestSecurity security;
     private final AuditQueryService audit;
 
     public GrantHistoryService(
             GrantHistoryMapper mapper,
             AdminPolicyService policy,
             AdminRules rules,
-            AdminPorts.Identity identity,
-            AdminPorts.Functions functions,
+            RequestSecurity security,
             AuditQueryService audit) {
         this.mapper = mapper;
         this.policy = policy;
         this.rules = rules;
-        this.identity = identity;
-        this.functions = functions;
+        this.security = security;
         this.audit = audit;
     }
 
@@ -53,10 +50,10 @@ public class GrantHistoryService {
                 || pageSize > 500
                 || (lower != null && upper != null && lower.isAfter(upper)))
             throw new BusinessException(INVALID_ARGUMENT);
-        long actor = identity.currentUserId();
+        long actor = security.currentUserId();
         var initial = policy.requireBatchReadContext(actor, List.of());
         rules.requireActive(initial, actor);
-        functions.require(actor, "IAM_GRANTS_VIEW");
+        security.require(actor, "IAM_GRANTS_VIEW");
         var result = new ArrayList<HistoryItem>();
         long offset = ((long) page - 1) * pageSize, total = 0;
         Long cursor = null;

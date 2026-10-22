@@ -7,13 +7,12 @@ Java 21 + Spring Boot + MyBatis + MySQL，Vue 前端。Controller → Service �
 | 工作 | 位置 |
 | --- | --- |
 | 空库建表 | db/schema.sql，Compose 首次启动自动执行 |
-| 本地设置、数据准备、测试 | scripts/dev.ps1 setup / data / test |
+| 本地设置、数据准备、初始化、测试 | scripts/dev.ps1 setup / data / init / recover / test |
 | 个人配置模板 | config/application-local.example.yml |
 | 手工联调 | [requests/system.http](requests/system.http) |
 | 功能、演示、逐项要求和接口增补 | [docs/GUIDE.md](docs/GUIDE.md) |
 | 测试和验证记录 | [docs/TESTING.md](docs/TESTING.md) |
 | 原始设计依据 | [docs/contracts](docs/contracts/README.md) |
-| 旧脚本、迁移、报告和计划 | [achieve](achieve/README.md) |
 
 ## 启动
 
@@ -31,10 +30,16 @@ docker compose up -d --wait
 
 前端在 frontend 目录执行 npm ci、npm run dev。唯一模板为 .env.example；平台编码必须与后端 iam.permission.management-app-code 一致。
 
-## 数据与现有数据库
+## 数据与初始化
 
-原始 Excel 统一位于工作区 data/。执行 scripts/dev.ps1 data，生成 target/prepared-data.json。默认调用 python，可用 -Python 指定路径。脚本只校验和整理来源，完整正式入库与初始管理员创建尚未完成。生成包含个人数据，仅存本地 target，不提交。旧的部门 SQL/JSON 种子已归档。
+原始 Excel 统一位于工作区 data/。空库首次启动前执行一次受控初始化：
 
-新库只执行 db/schema.sql；不要对现有数据库重复执行或删除 Docker 卷。旧库如需升级，核对实际结构后参考 [归档迁移](achieve/cleanup-20261021/db/02_add_canonical_path_and_index.sql)，不要重复执行已应用的变更。
+```powershell
+.\scripts\dev.ps1 init -SuperPhone <超级用户手机号>
+```
 
-演示主线是管理系统自身。受控初始化、超级用户恢复、真实页面全流程验收及正式性能指标仍未完成；测试夹具不能充当初始化。
+它会整理 Excel、导入部门和员工、登记 IAM 与两个演示业务系统（OA、人力资源）的菜单和 API、创建角色和超级用户，并全部签名。超级用户密码在运行时输入，代码中没有默认密码。唯一管理员误删自己权限时，用 `.\scripts\dev.ps1 recover` 恢复超级用户。细节见 [GUIDE 第五节](docs/GUIDE.md)。
+
+新库只执行 db/schema.sql；不要对现有数据库重复执行或删除 Docker 卷。
+
+正式性能指标（鉴权 ≤20ms）尚未测试，见 GUIDE 的已知限制。

@@ -9,8 +9,8 @@ import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.SensitiveDataCodec;
 import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.service.department.DepartmentCollaboration;
-import com.whatname.iam.service.permission.TrustedOaCaller;
+import com.whatname.iam.service.department.DepartmentAccessService;
+import com.whatname.iam.service.permission.ServiceOaCaller;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -88,7 +88,7 @@ class ExternalEventAuthenticationTest {
                                         () -> {
                                             fail(
                                                     "Business must not run after transaction-time"
-                                                        + " authentication fails");
+                                                            + " authentication fails");
                                             return Map.of();
                                         }));
         assertEquals(ErrorCode.INVALID_SERVICE, error.errorCode());
@@ -140,11 +140,15 @@ class ExternalEventAuthenticationTest {
     }
 
     @Test
-    void missingOaProviderNeverFallsBackToHr() {
+    void rejectedOaCallerNeverFallsBackToHr() {
         var f = new Fixture();
+        var oa = mock(ServiceOaCaller.class);
+        doThrow(new BusinessException(ErrorCode.INVALID_SERVICE))
+                .when(oa)
+                .verifyTrustedEvent(any(), any());
         var service =
                 new ExternalEventService(
-                        f.mapper, f.codec, f.hr, new ObjectMapper(), new MemoryTransactions());
+                        f.mapper, f.codec, f.hr, new ObjectMapper(), new MemoryTransactions(), oa);
         var error =
                 assertThrows(
                         BusinessException.class,
@@ -182,8 +186,8 @@ class ExternalEventAuthenticationTest {
     private static final class Fixture {
         final ExternalEventMapper mapper = mock(ExternalEventMapper.class);
         final SensitiveDataCodec codec = mock(SensitiveDataCodec.class);
-        final DepartmentCollaboration hr = mock(DepartmentCollaboration.class);
-        final TrustedOaCaller oa = mock(TrustedOaCaller.class);
+        final DepartmentAccessService hr = mock(DepartmentAccessService.class);
+        final ServiceOaCaller oa = mock(ServiceOaCaller.class);
         Map<String, Object> row;
         final ExternalEventService service;
 

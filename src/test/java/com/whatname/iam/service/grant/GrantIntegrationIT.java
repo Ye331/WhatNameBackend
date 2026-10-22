@@ -46,7 +46,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** 真实生产 C 接点、A JWT、D 和隔离 MySQL。SQL 拦截器仅注入持久化故障。 */
+/** 真实的管理员、JWT、签名审计和隔离 MySQL；SQL 拦截器只注入持久化故障。 */
 @SpringBootTest(
         classes = {com.whatname.iam.IamApplication.class, GrantIntegrationIT.Application.class},
         properties = "spring.config.import=")
@@ -139,7 +139,7 @@ class GrantIntegrationIT {
     @Autowired GrantService grants;
     @Autowired AdminService admins;
     @Autowired AdminOrganizationLifecycle organization;
-    @Autowired com.whatname.iam.service.department.DepartmentCollaboration departmentAdapter;
+    @Autowired com.whatname.iam.service.department.DepartmentAccessService departmentAdapter;
     @Autowired com.whatname.iam.mapper.department.OrganizationWriteMapper organizationMapper;
     @Autowired com.whatname.iam.mapper.event.ExternalEventMapper eventMapper;
     @Autowired AuditService auditService;
@@ -179,12 +179,12 @@ class GrantIntegrationIT {
                 org.springframework.transaction.TransactionDefinition.ISOLATION_SERIALIZABLE);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,0,?,'Fixture','/')",
+                        + " VALUES(?,0,?,'Fixture','/')",
                 id(1),
                 "D" + b);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,?,?,'Fixture','/')",
+                        + " VALUES(?,?,?,'Fixture','/')",
                 id(2),
                 id(1),
                 "L" + b);
@@ -199,21 +199,21 @@ class GrantIntegrationIT {
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                    + " VALUES(?,1,?,1),(?,2,?,1)",
+                        + " VALUES(?,1,?,1),(?,2,?,1)",
                 id(10),
                 id(1),
                 id(11),
                 id(2));
         db.update(
                 "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                    + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
+                        + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
                 id(30),
                 "R" + b,
                 id(31),
                 "M" + b);
         db.update(
                 "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                    + " VALUES(?,?,?)",
+                        + " VALUES(?,?,?)",
                 id(11),
                 id(30),
                 id(10));
@@ -233,7 +233,7 @@ class GrantIntegrationIT {
                         "BUSINESS_VIEW")) {
             db.update(
                     "INSERT INTO sys_menu(id,app_id,parent_id,menu_code,menu_name,menu_type)"
-                        + " VALUES(?,?,0,?,'Fixture',2)",
+                            + " VALUES(?,?,0,?,'Fixture',2)",
                     id(n),
                     id(40),
                     code);
@@ -324,7 +324,7 @@ class GrantIntegrationIT {
     long audits() {
         return db.queryForObject(
                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND operation_type IN"
-                    + " ('USER_ROLE_GRANT','USER_ROLE_REVOKE')",
+                        + " ('USER_ROLE_GRANT','USER_ROLE_REVOKE')",
                 Long.class,
                 id(20));
     }
@@ -384,7 +384,7 @@ class GrantIntegrationIT {
         String evidence =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                            + " operation_type='USER_ROLE_GRANT'",
+                                + " operation_type='USER_ROLE_GRANT'",
                         String.class,
                         id(20));
         var retained = json.readTree(evidence);
@@ -429,7 +429,7 @@ class GrantIntegrationIT {
             case "logout" ->
                     db.update(
                             "INSERT INTO sys_session_invalidation(user_id,jti,expires_at,reason)"
-                                + " VALUES(?,?,DATE_ADD(NOW(),INTERVAL 1 HOUR),'LOGOUT')",
+                                    + " VALUES(?,?,DATE_ADD(NOW(),INTERVAL 1 HOUR),'LOGOUT')",
                             id(10),
                             jwt.verifyBearer(bearer).jti());
             case "function" -> {
@@ -459,7 +459,7 @@ class GrantIntegrationIT {
         var before =
                 db.queryForList(
                         "SELECT data_type,signature FROM sys_data_signature WHERE data_id=? ORDER"
-                            + " BY data_type",
+                                + " BY data_type",
                         id(20));
         failure.point = point;
         assertThatThrownBy(() -> grants.grant(request()))
@@ -475,7 +475,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT data_type,signature FROM sys_data_signature WHERE data_id=?"
-                                    + " ORDER BY data_type",
+                                        + " ORDER BY data_type",
                                 id(20)))
                 .isEqualTo(before);
     }
@@ -553,7 +553,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_data_signature WHERE data_type=? AND"
-                                    + " data_id=?",
+                                        + " data_id=?",
                                 Long.class,
                                 type,
                                 target))
@@ -578,7 +578,7 @@ class GrantIntegrationIT {
                 json.readTree(
                         db.queryForObject(
                                 "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                                    + " operation_type='USER_ROLE_REVOKE'",
+                                        + " operation_type='USER_ROLE_REVOKE'",
                                 String.class,
                                 id(10)));
         assertThat(retained.at("/authorization/grants/facts/roles/0").asText()).isEqualTo(sid(31));
@@ -611,7 +611,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_data_signature WHERE data_id=? AND"
-                                    + " data_type IN ('ADMIN','ADMIN_DELEGABLE_ROLES')",
+                                        + " data_type IN ('ADMIN','ADMIN_DELEGABLE_ROLES')",
                                 Long.class,
                                 id(20)))
                 .isZero();
@@ -633,7 +633,7 @@ class GrantIntegrationIT {
         String evidence =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                            + " operation_type='USER_ROLE_GRANT'",
+                                + " operation_type='USER_ROLE_GRANT'",
                         String.class,
                         id(20));
         assertThat(evidence).contains("PERSISTED_BATCH", "batchId", "itemId");
@@ -734,7 +734,7 @@ class GrantIntegrationIT {
         String evidence =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                            + " operation_type='ADMIN_DELEGATE'",
+                                + " operation_type='ADMIN_DELEGATE'",
                         String.class,
                         id(11));
         assertThat(evidence).contains(sid(11), sid(20), "shrink");
@@ -751,7 +751,7 @@ class GrantIntegrationIT {
     void addChild() {
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,?,?,'Child','/')",
+                        + " VALUES(?,?,?,'Child','/')",
                 id(3),
                 id(2),
                 "NEW" + b);
@@ -799,7 +799,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(11)))
                 .isZero();
@@ -811,7 +811,7 @@ class GrantIntegrationIT {
         String evidence =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                            + " operation_type='ADMIN_ORG_REVIEW'",
+                                + " operation_type='ADMIN_ORG_REVIEW'",
                         String.class,
                         id(11));
         assertThat(evidence).contains("org-" + b, "C_ORGANIZATION_REVIEW_V1", "fixture-client");
@@ -876,7 +876,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(11)))
                 .isEqualTo(1);
@@ -902,7 +902,7 @@ class GrantIntegrationIT {
                 id(2));
         db.update(
                 "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                    + " VALUES(?,?,?),(?,?,?)",
+                        + " VALUES(?,?,?),(?,?,?)",
                 id(20),
                 id(30),
                 id(11),
@@ -942,7 +942,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(20)))
                 .containsExactly(id(31));
@@ -1059,20 +1059,18 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='ADMIN'"
-                                    + " AND data_id=?",
+                                        + " AND data_id=?",
                                 Long.class,
                                 id(11)))
                 .isZero();
     }
 
-    /**
-     * Fixture ONLY supplies unavailable A/D service authentication and A's final signing adapter. A
-     * event state machine, department service, production C adapter and D storage are real.
-     */
+    /** 替身只提供 HR 服务认证和最终签名；事件状态机、部门服务、管理员模块和签名存储都是真实的。 */
     com.whatname.iam.service.department.DepartmentService organizationServiceFixture(
             boolean failFinalAudit) {
         var port =
-                new com.whatname.iam.service.department.DepartmentCollaboration() {
+                new com.whatname.iam.service.department.DepartmentAccessService(
+                        null, null, null, null, null, null, null) {
                     public Manager authenticateManager(
                             jakarta.servlet.http.HttpServletRequest r, String p) {
                         throw new UnsupportedOperationException();
@@ -1114,6 +1112,14 @@ class GrantIntegrationIT {
                                                 USER_IDENTITY, ((Number) u.get("id")).longValue()));
                     }
 
+                    @Override
+                    public void prepareManagement(Manager actor) {}
+
+                    @Override
+                    public void prepareDepartmentManagement(Manager actor, long departmentId) {
+                        prepareManagement(actor);
+                    }
+
                     public void prepareOrganizationChange(
                             com.whatname.iam.service.event.TrustedEventContext a, String event) {
                         departmentAdapter.prepareOrganizationChange(a, event);
@@ -1145,7 +1151,8 @@ class GrantIntegrationIT {
                         new SensitiveDataCodec(encoded(key), encoded(hmac)),
                         port,
                         json,
-                        manager);
+                        manager,
+                        null);
         return new com.whatname.iam.service.department.DepartmentService(
                 organizationMapper, port, events);
     }
@@ -1206,7 +1213,7 @@ class GrantIntegrationIT {
             assertThat(
                             db.queryForObject(
                                     "SELECT COUNT(*) FROM sys_operation_log WHERE"
-                                        + " external_event_id=?",
+                                            + " external_event_id=?",
                                     Long.class,
                                     "org-" + b))
                     .isZero();
@@ -1242,8 +1249,8 @@ class GrantIntegrationIT {
             assertThat(
                             db.queryForObject(
                                     "SELECT COUNT(*) FROM sys_operation_log WHERE"
-                                        + " external_event_id=? AND"
-                                        + " operation_type='ADMIN_ORG_REVIEW'",
+                                            + " external_event_id=? AND"
+                                            + " operation_type='ADMIN_ORG_REVIEW'",
                                     Long.class,
                                     "org-" + b))
                     .isEqualTo(1);
@@ -1363,7 +1370,7 @@ class GrantIntegrationIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " role_id=?",
+                                        + " role_id=?",
                                 Long.class,
                                 id(11),
                                 id(30)))
@@ -1385,18 +1392,18 @@ class GrantIntegrationIT {
                                                     case "appointment" ->
                                                             db.queryForList(
                                                                     "SELECT user_id FROM sys_admin"
-                                                                        + " WHERE user_id=? FOR"
-                                                                        + " UPDATE",
+                                                                            + " WHERE user_id=? FOR"
+                                                                            + " UPDATE",
                                                                     id(10));
                                                     case "function", "resource" ->
                                                             db.queryForList(
                                                                     "SELECT id FROM sys_menu WHERE"
-                                                                        + " id=? FOR UPDATE",
+                                                                            + " id=? FOR UPDATE",
                                                                     id(50));
                                                     default ->
                                                             db.queryForList(
                                                                     "SELECT id FROM sys_user WHERE"
-                                                                        + " id=? FOR UPDATE",
+                                                                            + " id=? FOR UPDATE",
                                                                     id(10));
                                                 }
                                                 locked.countDown();
@@ -1411,15 +1418,15 @@ class GrantIntegrationIT {
                                                     case "appointment" -> {
                                                         db.update(
                                                                 "UPDATE sys_admin SET status=0"
-                                                                    + " WHERE user_id=?",
+                                                                        + " WHERE user_id=?",
                                                                 id(10));
                                                         signatures.sign(ADMIN, id(10));
                                                     }
                                                     case "function" -> {
                                                         db.update(
                                                                 "DELETE FROM sys_role_permission"
-                                                                    + " WHERE role_id=? AND"
-                                                                    + " menu_id=?",
+                                                                        + " WHERE role_id=? AND"
+                                                                        + " menu_id=?",
                                                                 id(31),
                                                                 id(50));
                                                         signatures.sign(ROLE_MENUS, id(31));
@@ -1427,15 +1434,15 @@ class GrantIntegrationIT {
                                                     case "resource" -> {
                                                         db.update(
                                                                 "UPDATE sys_menu SET status=0 WHERE"
-                                                                    + " id=?",
+                                                                        + " id=?",
                                                                 id(50));
                                                         signatures.sign(RESOURCE_MENU, id(50));
                                                     }
                                                     case "session" -> {
                                                         db.update(
                                                                 "UPDATE sys_user SET"
-                                                                    + " session_version=2 WHERE"
-                                                                    + " id=?",
+                                                                        + " session_version=2 WHERE"
+                                                                        + " id=?",
                                                                 id(10));
                                                         signatures.sign(USER_IDENTITY, id(10));
                                                     }

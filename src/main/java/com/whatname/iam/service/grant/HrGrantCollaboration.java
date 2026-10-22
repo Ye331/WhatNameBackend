@@ -11,10 +11,9 @@ import com.whatname.iam.mapper.event.ExternalEventMapper;
 import com.whatname.iam.mapper.grant.GrantMapper;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.admin.AdminOrganizationLifecycle;
-import com.whatname.iam.service.admin.integration.CChangeEvidence;
+import com.whatname.iam.service.admin.ChangeEvidence;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.event.TrustedEventContext;
-import com.whatname.iam.service.hr.HrCollaboration;
 import com.whatname.iam.service.permission.DataSignatureService;
 
 import org.springframework.stereotype.Service;
@@ -23,10 +22,10 @@ import org.springframework.transaction.support.*;
 
 import java.util.*;
 
-/** 参与 A 已认证的 HR 事件事务，不伪造人工管理员。 A/D 须在 prepare 前完成认证，并在等待业务锁后复核当前服务权限。 */
+/** HR 事件对授权的影响：调岗只回收原部门岗位来源，离职回收全部来源和管理员资格。 加入已认证 HR 事件的事务，不伪造人工管理员；prepare 前须已完成服务认证。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
-public class HrGrantCollaboration implements HrCollaboration {
+public class HrGrantCollaboration {
     private final Object key = new Object();
     private final GrantMapper grants;
     private final AdminMapper admins;
@@ -69,7 +68,7 @@ public class HrGrantCollaboration implements HrCollaboration {
                 || employeeNo.isBlank()
                 || !Set.of("HR_EMPLOYEE", "HR_TRANSFER", "HR_TERMINATION").contains(eventType))
             fail(INVALID_SERVICE);
-        // 绑定 A 已受理且正在处理的事件，防止参与错误业务；此检查不替代 D 服务认证。
+        // 绑定已受理且正在处理的事件，防止参与错误业务；此检查不替代服务认证。
         var event = events.lock(actor.sourceSystem(), eventId);
         if (event == null
                 || !"PROCESSING".equals(event.get("status"))
@@ -163,7 +162,7 @@ public class HrGrantCollaboration implements HrCollaboration {
             expectOne(grants.advanceRevision(before.userId(), before.grantRevision()));
             var after = load(before.userId());
             consistent(after);
-            // 身份包含 A 随后更新的部门、状态和会话/HR 版本，由 A 在结束阶段签最终值。
+            // 身份包含 HrService 随后更新的部门、状态和会话/HR 版本，由 HrService 在结束阶段签最终值。
             signatures.sign(USER_GRANTS, after.userId());
             audit.change(
                     all ? "HR_GRANTS_REVOKE_ALL" : "HR_POSITION_REVOKE",
@@ -183,9 +182,9 @@ public class HrGrantCollaboration implements HrCollaboration {
                             "revokedSourceIds",
                             removed.stream().map(Source::id).toList(),
                             "before",
-                            CChangeEvidence.grants(before),
+                            ChangeEvidence.grants(before),
                             "after",
-                            CChangeEvidence.grants(after)));
+                            ChangeEvidence.grants(after)));
         }
         p.cleaned = true;
         p.after = load(before.userId());

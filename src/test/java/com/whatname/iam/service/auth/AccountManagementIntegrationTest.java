@@ -11,6 +11,7 @@ import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.admin.*;
+import com.whatname.iam.support.Fakes;
 import com.whatname.iam.support.TestDatabase;
 
 import org.junit.jupiter.api.*;
@@ -32,10 +33,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Real A + C services, MySQL and HTTP. ONLY D is replaced, exclusively in src/test. Never runs an
- * existing pending batch, resets schema, deletes users, or logs JWT/PII.
- */
+/** 真实的账号与管理员服务、MySQL 和 HTTP；只有签名/审计换成测试替身。 不执行已有批量任务、不重置表结构、不删除用户，也不记录 JWT 或个人信息。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AccountManagementIntegrationTest {
@@ -48,8 +46,8 @@ class AccountManagementIntegrationTest {
     UserAccountMapper users;
     SensitiveDataCodec codec;
     JwtTokenService jwt;
-    TestD data;
-    CIntegrity integrity;
+    FakeDataSecurity data;
+    FakeAdminIntegrity integrity;
     ObjectMapper json;
     PlatformTransactionManager manager;
     long root, branch, child, outside, merged;
@@ -62,41 +60,44 @@ class AccountManagementIntegrationTest {
     static class Wiring {
         @Bean
         @Primary
-        TestD task12Data(JdbcTemplate db) {
-            return new TestD(db);
+        FakeDataSecurity fakeDataSecurity(JdbcTemplate db) {
+            return new FakeDataSecurity(db);
         }
 
         @Bean
         @Primary
-        CIntegrity task12CIntegrity() {
-            return new CIntegrity();
+        FakeAdminIntegrity fakeAdminIntegrity() {
+            return new FakeAdminIntegrity();
         }
 
         @Bean
         @Primary
-        AdminPorts.Identity task12CIdentity(TestD data) {
-            return () -> data.cActor.get();
+        RequestSecurity fakeSecurity(FakeDataSecurity proxy) {
+            FakeDataSecurity data =
+                    org.springframework.test.util.AopTestUtils.getUltimateTargetObject(proxy);
+            return Fakes.security(() -> data.currentActor.get(), data::requireFunction);
         }
 
         @Bean
         @Primary
-        AdminPorts.Functions task12CFunctions(TestD data) {
-            return data::requireFunction;
-        }
-
-        @Bean
-        @Primary
-        AdminPorts.Audit task12CAudit(TestD data) {
-            return change ->
-                    data.audit(
-                            change.operation(),
-                            change.actorId(),
-                            change.targetId(),
-                            change.reason());
+        AdminAudit fakeAudit(FakeDataSecurity proxy) {
+            FakeDataSecurity data =
+                    org.springframework.test.util.AopTestUtils.getUltimateTargetObject(proxy);
+            return Fakes.adminAudit(
+                    change ->
+                            data.audit(
+                                    change.operation(),
+                                    change.actorId(),
+                                    change.targetId(),
+                                    change.reason()));
         }
     }
 
-    static class CIntegrity implements AdminPorts.Integrity {
+    static class FakeAdminIntegrity extends AdminIntegrity {
+        FakeAdminIntegrity() {
+            super(null, null);
+        }
+
         final AtomicInteger calls = new AtomicInteger();
         volatile boolean fail;
 
@@ -113,12 +114,16 @@ class AccountManagementIntegrationTest {
     }
 
     /** Transaction-bound TEST fingerprints, not Ed25519 and not a production security provider. */
-    static class TestD implements ManagementDataSecurity {
+    /** 替身不要求事务；基类的 MANDATORY 由这里覆盖。 */
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.SUPPORTS)
+    static class FakeDataSecurity extends ManagementDataSecurity {
         final JdbcTemplate db;
-        final ThreadLocal<Long> cActor = ThreadLocal.withInitial(() -> 0L);
+        final ThreadLocal<Long> currentActor = ThreadLocal.withInitial(() -> 0L);
         volatile String fault = "";
 
-        TestD(JdbcTemplate db) {
+        FakeDataSecurity(JdbcTemplate db) {
+            super(null, null, null);
             this.db = db;
         }
 
@@ -137,7 +142,7 @@ class AccountManagementIntegrationTest {
                     .equals(
                             db.queryForObject(
                                     "SELECT signature FROM sys_data_signature WHERE"
-                                            + " data_type='TASK12_USER' AND data_id=?",
+                                            + " data_type='MGMT_USER' AND data_id=?",
                                     String.class,
                                     user.id)))
                 throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
@@ -146,7 +151,7 @@ class AccountManagementIntegrationTest {
         void seed(UserAccount user) {
             db.update(
                     "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                            + " VALUES('TASK12_USER',?,?,'TASK12_FAKE') ON DUPLICATE KEY UPDATE"
+                            + " VALUES('MGMT_USER',?,?,'MGMT_FAKE') ON DUPLICATE KEY UPDATE"
                             + " signature=VALUES(signature)",
                     user.id,
                     fingerprint(user));
@@ -161,7 +166,7 @@ class AccountManagementIntegrationTest {
             db.update(
                     "INSERT INTO"
                         + " sys_operation_log(user_id,request_id,source_system,operation_type,target_id,operation_desc,status)"
-                        + " VALUES(?,?,'TASK12_TEST',?,?,'Task12 D substitute',1)",
+                        + " VALUES(?,?,'MGMT_TEST',?,?,'Mgmt D substitute',1)",
                     actor,
                     UUID.randomUUID().toString(),
                     op,
@@ -189,7 +194,7 @@ class AccountManagementIntegrationTest {
                                     .toString());
             db.update(
                     "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                            + " VALUES('TASK12_DEPT',?,?,'TASK12_FAKE') ON DUPLICATE KEY UPDATE"
+                            + " VALUES('MGMT_DEPT',?,?,'MGMT_FAKE') ON DUPLICATE KEY UPDATE"
                             + " signature=VALUES(signature)",
                     id,
                     Base64.getEncoder().encodeToString(new byte[64]));
@@ -197,7 +202,7 @@ class AccountManagementIntegrationTest {
             audit(
                     op,
                     Long.parseLong(
-                            ((com.whatname.iam.service.department.DepartmentCollaboration.Manager)
+                            ((com.whatname.iam.service.department.DepartmentAccessService.Manager)
                                             actor)
                                     .actorId()),
                     id,
@@ -254,9 +259,9 @@ class AccountManagementIntegrationTest {
         settings.put(
                 "iam.security.jwt-public-key",
                 Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
-        settings.put("iam.security.jwt-issuer", "task12");
-        settings.put("iam.security.jwt-audience", "task12");
-        settings.put("iam.security.jwt-key-id", "task12");
+        settings.put("iam.security.jwt-issuer", "mgmt");
+        settings.put("iam.security.jwt-audience", "mgmt");
+        settings.put("iam.security.jwt-key-id", "mgmt");
         settings.put("logging.level.root", "WARN");
         settings.put("spring.main.banner-mode", "off");
         app =
@@ -269,17 +274,19 @@ class AccountManagementIntegrationTest {
         users = app.getBean(UserAccountMapper.class);
         codec = app.getBean(SensitiveDataCodec.class);
         jwt = app.getBean(JwtTokenService.class);
-        data = app.getBean(TestD.class);
-        integrity = app.getBean(CIntegrity.class);
+        data =
+                org.springframework.test.util.AopTestUtils.getUltimateTargetObject(
+                        app.getBean(FakeDataSecurity.class));
+        integrity = app.getBean(FakeAdminIntegrity.class);
         json = app.getBean(ObjectMapper.class);
         manager = app.getBean(PlatformTransactionManager.class);
         try (var connection = db.getDataSource().getConnection()) {
             assertEquals("MySQL", connection.getMetaData().getDatabaseProductName());
         }
-        assertInstanceOf(AccountSecurityService.class, app.getBean(AccountSecurity.class));
+        assertInstanceOf(AccountSecurity.class, app.getBean(AccountSecurity.class));
         assertInstanceOf(
                 com.whatname.iam.service.department.DepartmentAccessService.class,
-                app.getBean(com.whatname.iam.service.department.DepartmentCollaboration.class));
+                app.getBean(com.whatname.iam.service.department.DepartmentAccessService.class));
         original =
                 db.queryForList(
                         "SELECT * FROM sys_dept WHERE dept_code LIKE 'TEST-SEED-%' ORDER BY id");
@@ -303,7 +310,7 @@ class AccountManagementIntegrationTest {
         actor = user(branch, 3);
         appointment(actor.id, 2, branch);
         appointment(superior.id, 1, root);
-        data.cActor.set(superior.id);
+        data.currentActor.set(superior.id);
         bearer = "Bearer " + jwt.issue(actor.id, actor.sessionVersion);
     }
 
@@ -332,7 +339,7 @@ class AccountManagementIntegrationTest {
                                 Integer.class,
                                 prefix + "%"));
                 System.out.println(
-                        "TASK12 evidence prefix="
+                        "MGMT evidence prefix="
                                 + prefix
                                 + " retiredUsers="
                                 + accountIds.size()
@@ -363,9 +370,9 @@ class AccountManagementIntegrationTest {
                         .at("/data/total")
                         .asInt());
         http("GET", "/users/" + target.id, null, bearer, 200);
-        // Same encrypted name inside/outside the real C subtree; outside must not be decrypted.
+        // Same encrypted name inside/outside the managed subtree; outside must not be decrypted.
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext='task17-outside-unreadable' WHERE id=?",
+                "UPDATE sys_user SET real_name_ciphertext='scope-outside-unreadable' WHERE id=?",
                 other.id);
         try {
             var first = http("GET", "/users?keyword=Twelve&pageSize=1", null, bearer, 200);
@@ -406,7 +413,7 @@ class AccountManagementIntegrationTest {
     void missingAndRevokedAppointmentRejectNewRequests() throws Exception {
         http("GET", "/users", null, "Bearer " + jwt.issue(target.id, 1), 403);
         app.getBean(AdminService.class)
-                .revoke(actor.id.toString(), new AdminDtos.RevokeRequest("task12 revoke"));
+                .revoke(actor.id.toString(), new AdminDtos.RevokeRequest("mgmt revoke"));
         http("GET", "/users", null, bearer, 403);
     }
 
@@ -443,7 +450,7 @@ class AccountManagementIntegrationTest {
 
     @Test
     void mergedDepartmentCannotReceiveNewAUsers() throws Exception {
-        // C is restored unchanged; its appointment/grant lifecycle gap is a team follow-up.
+        // The admin module is restored unchanged.
         // This suite verifies the rule only at the A entry point owned by this change.
         http(
                 "POST",
@@ -489,7 +496,7 @@ class AccountManagementIntegrationTest {
         int integrityBefore = integrity.calls.get();
         int evidenceBefore =
                 db.queryForObject(
-                        "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='TASK12_TEST'"
+                        "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='MGMT_TEST'"
                                 + " AND user_id=?",
                         Integer.class,
                         actor.id);
@@ -520,7 +527,7 @@ class AccountManagementIntegrationTest {
                                                                     2, prefix)));
                     assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE, userFailure.errorCode());
                     var actorContext =
-                            new com.whatname.iam.service.department.DepartmentCollaboration.Manager(
+                            new com.whatname.iam.service.department.DepartmentAccessService.Manager(
                                     actor.id.toString(), jwt.verifyBearer(bearer));
                     var departmentFailure =
                             assertThrows(
@@ -542,7 +549,7 @@ class AccountManagementIntegrationTest {
         assertEquals(
                 evidenceBefore,
                 db.queryForObject(
-                        "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='TASK12_TEST'"
+                        "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='MGMT_TEST'"
                                 + " AND user_id=?",
                         Integer.class,
                         actor.id));
@@ -590,7 +597,7 @@ class AccountManagementIntegrationTest {
         assertEquals(
                 1,
                 db.queryForObject(
-                        "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK12_USER' AND"
+                        "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='MGMT_USER' AND"
                                 + " data_id=?",
                         Integer.class,
                         id));
@@ -635,7 +642,7 @@ class AccountManagementIntegrationTest {
     void signatureAuditAndDatabaseFaultsRollbackStatusVersionAndEvidence() throws Exception {
         String signature =
                 db.queryForObject(
-                        "SELECT signature FROM sys_data_signature WHERE data_type='TASK12_USER' AND"
+                        "SELECT signature FROM sys_data_signature WHERE data_type='MGMT_USER' AND"
                                 + " data_id=?",
                         String.class,
                         target.id);
@@ -652,7 +659,7 @@ class AccountManagementIntegrationTest {
             assertEquals(
                     signature,
                     db.queryForObject(
-                            "SELECT signature FROM sys_data_signature WHERE data_type='TASK12_USER'"
+                            "SELECT signature FROM sys_data_signature WHERE data_type='MGMT_USER'"
                                     + " AND data_id=?",
                             String.class,
                             target.id));
@@ -660,7 +667,7 @@ class AccountManagementIntegrationTest {
                     0,
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_operation_log WHERE"
-                                    + " source_system='TASK12_TEST' AND target_id=?",
+                                    + " source_system='MGMT_TEST' AND target_id=?",
                             Integer.class,
                             target.id));
         }
@@ -745,7 +752,7 @@ class AccountManagementIntegrationTest {
             var blocker =
                     pool.submit(
                             () -> {
-                                data.cActor.set(superior.id);
+                                data.currentActor.set(superior.id);
                                 try {
                                     return new TransactionTemplate(manager)
                                             .execute(
@@ -763,8 +770,7 @@ class AccountManagementIntegrationTest {
                                                                             actor.id.toString(),
                                                                             new AdminDtos
                                                                                     .RevokeRequest(
-                                                                                    "task12"
-                                                                                        + " concurrent"
+                                                                                    "mgmt concurrent"
                                                                                         + " revoke"));
                                                         if (change.equals("scope"))
                                                             app.getBean(AdminService.class)
@@ -776,11 +782,10 @@ class AccountManagementIntegrationTest {
                                                                                     2,
                                                                                     Long.toString(
                                                                                             outside),
-                                                                                    "task12"
-                                                                                        + " concurrent"
+                                                                                    "mgmt concurrent"
                                                                                         + " reappointment"));
                                                         // Target move is a fixture transition, not
-                                                        // a claimed real HR/C entry point.
+                                                        // a claimed real HR/admin entry point.
                                                         if (change.equals("target")) {
                                                             db.update(
                                                                     "UPDATE sys_user SET dept_id=?"
@@ -794,7 +799,7 @@ class AccountManagementIntegrationTest {
                                                         return true;
                                                     });
                                 } finally {
-                                    data.cActor.remove();
+                                    data.currentActor.remove();
                                 }
                             });
             try {
@@ -840,7 +845,7 @@ class AccountManagementIntegrationTest {
                                 AccountAuthenticationIntegrationTest.TestBootstrap.class)
                         .properties(defaults)
                         .run(TestDatabase.arguments("--server.port=18090"))) {
-            assertFalse(ordinary.getBean(ManagementDataSecurity.class) instanceof TestD);
+            assertFalse(ordinary.getBean(ManagementDataSecurity.class) instanceof FakeDataSecurity);
             assertThrows(
                     BusinessException.class,
                     () ->
@@ -857,7 +862,7 @@ class AccountManagementIntegrationTest {
                     () ->
                             ordinary.getBean(
                                             com.whatname.iam.service.department
-                                                    .DepartmentCollaboration.class)
+                                                    .DepartmentAccessService.class)
                                     .authenticateHr(null, "HR_MERGE"));
             http(
                     18090,
@@ -876,11 +881,12 @@ class AccountManagementIntegrationTest {
                                     .executeWithoutResult(
                                             tx ->
                                                     ordinary.getBean(
-                                                                    com.whatname.iam.service.hr
-                                                                            .HrCollaboration.class)
+                                                                    com.whatname.iam.service.grant
+                                                                            .HrGrantCollaboration
+                                                                            .class)
                                                             .revokeAll(
                                                                     null,
-                                                                    "task12-no-hr",
+                                                                    "mgmt-no-hr",
                                                                     target.id)));
         }
         String event = prefix + "unsigned-hr-request";
@@ -923,7 +929,7 @@ class AccountManagementIntegrationTest {
                                     new String[] {"id"});
                     s.setLong(1, parent);
                     s.setString(2, prefix + seq.incrementAndGet());
-                    s.setString(3, "Task12 test");
+                    s.setString(3, "Mgmt test");
                     return s;
                 },
                 key);
@@ -1024,7 +1030,7 @@ class AccountManagementIntegrationTest {
                         .send(request.build(), HttpResponse.BodyHandlers.ofString());
         var result = json.readTree(response.body());
         evidence.add(
-                "TASK12 "
+                "MGMT "
                         + method
                         + " "
                         + path.split("\\?")[0]

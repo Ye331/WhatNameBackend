@@ -230,7 +230,7 @@ public class UserService {
                             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
                         UserAccount u = temporaryAccount(input, normalized, deptId, actor.id);
                         users.insertTemporary(u);
-                        AAccountCreation.inserted(u);
+                        AccountCreation.inserted(u);
                         security.signIdentity(u);
                         security.audit("US03_CREATE", actor.id, u.id, u.tempReason);
                         return new Created(

@@ -182,7 +182,7 @@ class AdminServiceTest {
         rejects(PERMISSION_DENIED, () -> service.revoke("2", new RevokeRequest("不允许")));
         db.functions = (actor, permission) -> {};
         db.integrity =
-                new AdminPorts.Integrity() {
+                new AdminIntegrity(null, null) {
                     public void verify(AdminState state) {
                         throw new BusinessException(INTEGRITY_FAILURE);
                     }

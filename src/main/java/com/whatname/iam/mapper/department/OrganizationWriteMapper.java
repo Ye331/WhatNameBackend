@@ -8,10 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Organization writers take C's preparation locks, then lockOrganization in a SERIALIZABLE
- * transaction. Full PRIMARY scan locks existing rows and insertion gaps; concurrent writes cannot
- * invalidate cycle/path checks. This deliberately favors correctness over parallel organization
- * throughput.
+ * Organization writers take the admin module's preparation locks, then lockOrganization in a
+ * SERIALIZABLE transaction. Full PRIMARY scan locks existing rows and insertion gaps; concurrent
+ * writes cannot invalidate cycle/path checks. This deliberately favors correctness over parallel
+ * organization throughput.
  */
 public interface OrganizationWriteMapper {
     @Select("SELECT * FROM sys_dept FORCE INDEX(PRIMARY) ORDER BY id FOR UPDATE")
@@ -37,13 +37,13 @@ public interface OrganizationWriteMapper {
 
     @Select(
             "SELECT id FROM sys_user WHERE BINARY employee_no=BINARY #{sgNo} AND source=1 AND"
-                + " status=1")
+                    + " status=1")
     Long manager(@Param("sgNo") String sgNo);
 
     @Select(
             "SELECT id,dept_id AS deptId,employee_no AS sgNo,status,session_version AS"
-                + " sessionVersion,grant_revision AS grantRevision,hr_version AS hrVersion FROM"
-                + " sys_user WHERE dept_id=#{deptId} ORDER BY id FOR UPDATE")
+                    + " sessionVersion,grant_revision AS grantRevision,hr_version AS hrVersion FROM"
+                    + " sys_user WHERE dept_id=#{deptId} ORDER BY id FOR UPDATE")
     List<Map<String, Object>> lockUsers(@Param("deptId") Long deptId);
 
     @Update("UPDATE sys_user SET dept_id=#{target} WHERE dept_id=#{source}")
@@ -58,6 +58,6 @@ public interface OrganizationWriteMapper {
 
     @Select(
             "<script>SELECT COUNT(*) FROM sys_user WHERE dept_id IN <foreach item='id'"
-                + " collection='ids' open='(' separator=',' close=')'>#{id}</foreach></script>")
+                    + " collection='ids' open='(' separator=',' close=')'>#{id}</foreach></script>")
     long countUsers(@Param("ids") List<Long> ids);
 }

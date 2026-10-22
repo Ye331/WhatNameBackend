@@ -13,7 +13,6 @@ import com.whatname.iam.mapper.event.ExternalEventMapper;
 import com.whatname.iam.mapper.grant.GrantMapper;
 import com.whatname.iam.mapper.oa.OaScopeMapper;
 import com.whatname.iam.service.admin.*;
-import com.whatname.iam.service.admin.integration.CChangeEvidence;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.event.TrustedEventContext;
 import com.whatname.iam.service.permission.*;
@@ -23,7 +22,7 @@ import org.springframework.transaction.annotation.*;
 
 import java.util.*;
 
-/** 以受控 OA 服务身份修改授权，加入 A 既有事件事务。 */
+/** 以受控 OA 服务身份修改授权，加入既有事件事务。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class OaGrantOperations {
@@ -32,9 +31,9 @@ public class OaGrantOperations {
     private final AdminServiceLocks locks;
     private final AdminRules rules;
     private final OaScopeMapper services;
-    private final TrustedOaCaller callers;
+    private final ServiceOaCaller callers;
     private final DataSignatureService signatures;
-    private final GrantPorts.Integrity integrity;
+    private final GrantIntegrity integrity;
     private final AuditService audit;
     private final ObjectMapper json;
 
@@ -44,9 +43,9 @@ public class OaGrantOperations {
             AdminServiceLocks locks,
             AdminRules rules,
             OaScopeMapper services,
-            TrustedOaCaller callers,
+            ServiceOaCaller callers,
             DataSignatureService signatures,
-            GrantPorts.Integrity integrity,
+            GrantIntegrity integrity,
             AuditService audit,
             ObjectMapper json) {
         this.mapper = mapper;
@@ -156,9 +155,9 @@ public class OaGrantOperations {
                         "serviceScope",
                         scope,
                         "before",
-                        CChangeEvidence.grants(before),
+                        ChangeEvidence.grants(before),
                         "after",
-                        CChangeEvidence.grants(after)));
+                        ChangeEvidence.grants(after)));
         return Map.of(
                 "eventId",
                 request.eventId(),
@@ -170,7 +169,7 @@ public class OaGrantOperations {
                 false);
     }
 
-    /** A 返回已保留结果后，在原业务事务外复核当前可见范围；不重写来源、版本、签名或成功审计。 */
+    /** 返回已保留结果后，在原业务事务外复核当前可见范围；不重写来源、版本、签名或成功审计。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.SERIALIZABLE)
     public void requireReplayScope(TrustedEventContext actor, Decision request) {
         requireScope(actor, request, false);
@@ -181,8 +180,8 @@ public class OaGrantOperations {
         if (actor == null || !"OA".equals(actor.sourceSystem()) || actor.clientId() == null)
             fail(INVALID_SERVICE);
         long user = IdUtils.parse(request.targetUserId()), roleId = IdUtils.parse(request.roleId());
-        // 锁序：事件 → M5/用户 → D 资源 → 服务身份 → 授权事实。
-        // D 入口认证不得提前持有服务行锁并带入此业务阶段，以免形成反向锁序。
+        // 锁序：事件 → 管理员/用户 → 功能资源 → 服务身份 → 授权事实。
+        // 入口认证不得提前持有服务行锁并带入此业务阶段，以免形成反向锁序。
         var state = locks.lock(user);
         var identity = services.lock(actor.clientId());
         if (identity == null || !actor.clientId().equals(identity.get("client_id")))

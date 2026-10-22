@@ -227,7 +227,7 @@ class GrantServiceTest {
         rejects(PERMISSION_DENIED, () -> service.grant(grant("WORK", "v1")));
         db.admins.functions = (actor, permission) -> {};
         db.integrity =
-                new GrantPorts.Integrity() {
+                new GrantIntegrity(null) {
                     public void verify(GrantState state) {
                         throw new BusinessException(INTEGRITY_FAILURE);
                     }

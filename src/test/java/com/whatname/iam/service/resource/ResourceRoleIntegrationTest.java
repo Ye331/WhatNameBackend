@@ -39,7 +39,7 @@ import java.nio.file.Path;
 import java.security.*;
 import java.util.*;
 
-/** B 的资源和角色流程通过真实 A 登录凭据、C 管理资格和 D 签名校验执行。 */
+/** 资源和角色维护走真实的登录凭据、一级管理员资格和签名校验。 */
 @SpringBootTest(classes = IamApplication.class, properties = "spring.config.import=")
 @Testcontainers
 @AutoConfigureMockMvc(
@@ -128,16 +128,16 @@ class ResourceRoleIntegrationTest {
                                     passwords.hash(PASSWORD));
                             db.update(
                                     "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                                        + " VALUES(1,1,1,1)");
+                                            + " VALUES(1,1,1,1)");
                             db.update(
                                     "INSERT INTO sys_application(id,app_code,app_name)"
-                                        + " VALUES(1,'CONSOLE','IAM')");
+                                            + " VALUES(1,'CONSOLE','IAM')");
                             db.update(
                                     "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                                        + " VALUES(1,'RESOURCE_MANAGER','Manager',2)");
+                                            + " VALUES(1,'RESOURCE_MANAGER','Manager',2)");
                             db.update(
                                     "INSERT INTO sys_user_role(user_id,role_id,granted_by)"
-                                        + " VALUES(1,1,1)");
+                                            + " VALUES(1,1,1)");
                             db.update(
                                     "INSERT INTO"
                                         + " sys_user_role_source(user_id,role_id,source_type,source_ref,granted_by)"
@@ -161,7 +161,7 @@ class ResourceRoleIntegrationTest {
                                         code);
                                 db.update(
                                         "INSERT INTO sys_role_permission(role_id,menu_id)"
-                                            + " VALUES(1,?)",
+                                                + " VALUES(1,?)",
                                         menuId);
                                 signatures.sign(RESOURCE_MENU, menuId);
                                 signatures.sign(MENU_APIS, menuId++);
@@ -374,7 +374,7 @@ class ResourceRoleIntegrationTest {
                         status -> {
                             db.update(
                                     "UPDATE sys_user SET session_version=session_version+1 WHERE"
-                                        + " id=14");
+                                            + " id=14");
                             signatures.sign(USER_IDENTITY, 14);
                         });
         var page = new com.whatname.iam.dto.common.PageRequest();
@@ -431,7 +431,7 @@ class ResourceRoleIntegrationTest {
                             if (managementRole) {
                                 db.update(
                                         "INSERT INTO sys_user_role(user_id,role_id,granted_by)"
-                                            + " VALUES(?,1,1)",
+                                                + " VALUES(?,1,1)",
                                         id);
                                 db.update(
                                         "INSERT INTO"
@@ -442,7 +442,7 @@ class ResourceRoleIntegrationTest {
                             if (adminLevel != null) {
                                 db.update(
                                         "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                                            + " VALUES(?,?,1,1)",
+                                                + " VALUES(?,?,1,1)",
                                         id,
                                         adminLevel);
                                 signatures.sign(ADMIN, id);
@@ -572,6 +572,318 @@ class ResourceRoleIntegrationTest {
         business(ErrorCode.BUSINESS_RULE_VIOLATION, () -> role(code + "SUPER", 3));
     }
 
+    @Test
+    @DisplayName("应用改名和停用分别生效，不能停用管理平台自身")
+    void applicationUpdatesPreserveUnchangedFieldsAndProtectConsole() {
+        long app = application(code());
+        var rename = new UpdateApplicationRequest();
+        rename.setAppName("  Renamed application  ");
+        rename.setReason("rename");
+        assertEquals(1, resources.updateApplication(bearer, app, rename).status());
+        assertEquals(
+                "Renamed application",
+                db.queryForObject(
+                        "SELECT app_name FROM sys_application WHERE id=?", String.class, app));
+        var disable = new UpdateApplicationRequest();
+        disable.setStatus(0);
+        disable.setReason("disable");
+        assertEquals(0, resources.updateApplication(bearer, app, disable).status());
+        business(
+                ErrorCode.BUSINESS_RULE_VIOLATION,
+                () -> resources.updateApplication(bearer, 1, disable));
+        assertEquals(
+                1,
+                db.queryForObject("SELECT status FROM sys_application WHERE id=1", Integer.class));
+        var page =
+                resources.listApplications(bearer, new com.whatname.iam.dto.common.PageRequest());
+        assertTrue(page.total() >= 2);
+    }
+
+    @Test
+    @DisplayName("菜单可以改名、停用和移到根目录，移动后父子关系正确")
+    void menuUpdatesAndReparentingPersist() {
+        String code = code();
+        long app = application(code);
+        long directory = menu(app, 0, code + "DIR", 1);
+        long item = menu(app, directory, code + "ITEM", 2);
+        var rename = new UpdateMenuRequest();
+        rename.setMenuName("  Renamed menu  ");
+        rename.setReason("rename");
+        assertEquals(directory, resources.updateMenu(bearer, item, rename).parentId());
+        var move = new UpdateMenuRequest();
+        move.setParentId(0L);
+        move.setStatus(0);
+        move.setReason("move");
+        var result = resources.updateMenu(bearer, item, move);
+        assertEquals(0L, result.parentId());
+        assertEquals(0, result.status());
+        move.setParentId(directory);
+        move.setStatus(1);
+        assertEquals(directory, resources.updateMenu(bearer, item, move).parentId());
+        assertEquals(
+                "Renamed menu",
+                db.queryForObject("SELECT menu_name FROM sys_menu WHERE id=?", String.class, item));
+    }
+
+    @Test
+    @DisplayName("API 改名与停用保持路由不变，方法筛选支持规范化")
+    void apiUpdatesAndMethodFilteringPersist() {
+        long app = application(code());
+        long api = api(app, code(), " get ", "/records");
+        api(app, code(), "POST", "/records");
+        var rename = new UpdateApiRequest();
+        rename.setApiName("  Renamed API  ");
+        rename.setReason("rename");
+        assertEquals(1, resources.updateApi(bearer, api, rename).status());
+        var disable = new UpdateApiRequest();
+        disable.setStatus(0);
+        disable.setReason("disable");
+        assertEquals(0, resources.updateApi(bearer, api, disable).status());
+        var page = new com.whatname.iam.dto.common.PageRequest();
+        var filtered = resources.listApis(bearer, app, " get ", page);
+        assertEquals(1, filtered.total());
+        assertEquals("Renamed API", filtered.items().getFirst().apiName());
+        assertEquals("/records", filtered.items().getFirst().apiPath());
+        assertEquals(2, resources.listApis(bearer, app, null, page).total());
+        business(ErrorCode.INVALID_ARGUMENT, () -> resources.listApis(bearer, app, "TRACE", page));
+        business(ErrorCode.INVALID_ARGUMENT, () -> api(app, code(), null, "/missing-method"));
+        business(ErrorCode.INVALID_ARGUMENT, () -> api(app, code(), "TRACE", "/invalid-method"));
+    }
+
+    @Test
+    @DisplayName("角色改名和停用保留其他字段，重复编码不能创建")
+    void roleUpdatesAndDuplicateCodes() {
+        String code = code();
+        long role = role(code, 2);
+        var rename = new UpdateRoleRequest();
+        rename.setRoleName("  Renamed role  ");
+        rename.setReason("rename");
+        assertEquals(1, roles.updateRole(bearer, role, rename).status());
+        var disable = new UpdateRoleRequest();
+        disable.setStatus(0);
+        disable.setReason("disable");
+        assertEquals(0, roles.updateRole(bearer, role, disable).status());
+        var result = roles.getRole(bearer, role);
+        assertEquals("Renamed role", result.roleName());
+        assertEquals(2, result.roleType());
+        business(ErrorCode.DUPLICATE_RESOURCE, () -> role(code.toLowerCase(), 1));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {-1, 2})
+    @DisplayName("非法状态不能修改应用、菜单、API 或角色")
+    void invalidStatusesLeaveAllEntitiesUnchanged(int invalid) {
+        long app = application(code());
+        long item = menu(app, 0, code(), 2);
+        long api = api(app, code(), "GET", "/status");
+        long role = role(code(), 1);
+        var a = new UpdateApplicationRequest();
+        a.setStatus(invalid);
+        var m = new UpdateMenuRequest();
+        m.setStatus(invalid);
+        var i = new UpdateApiRequest();
+        i.setStatus(invalid);
+        var r = new UpdateRoleRequest();
+        r.setStatus(invalid);
+        business(ErrorCode.INVALID_ARGUMENT, () -> resources.updateApplication(bearer, app, a));
+        business(ErrorCode.INVALID_ARGUMENT, () -> resources.updateMenu(bearer, item, m));
+        business(ErrorCode.INVALID_ARGUMENT, () -> resources.updateApi(bearer, api, i));
+        business(ErrorCode.INVALID_ARGUMENT, () -> roles.updateRole(bearer, role, r));
+        assertEquals(
+                1,
+                db.queryForObject(
+                        "SELECT status FROM sys_application WHERE id=?", Integer.class, app));
+        assertEquals(
+                1,
+                db.queryForObject("SELECT status FROM sys_menu WHERE id=?", Integer.class, item));
+        assertEquals(
+                1, db.queryForObject("SELECT status FROM sys_api WHERE id=?", Integer.class, api));
+        assertEquals(1, roles.getRole(bearer, role).status());
+    }
+
+    @Test
+    @DisplayName("不存在的资源返回明确错误，不创建映射")
+    void missingResourcesAreRejected() {
+        long missing = Long.MAX_VALUE;
+        business(ErrorCode.RESOURCE_NOT_FOUND, () -> resources.listMenus(bearer, missing));
+        business(ErrorCode.RESOURCE_NOT_FOUND, () -> resources.listMenuApis(bearer, missing));
+        business(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                () -> resources.updateApi(bearer, missing, new UpdateApiRequest()));
+        business(ErrorCode.RESOURCE_NOT_FOUND, () -> roles.getRole(bearer, missing));
+        long app = application(code());
+        long item = menu(app, 0, code(), 2);
+        long role = role(code(), 1);
+        business(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                () -> resources.replaceMenuApis(bearer, item, apiMapping("v1", List.of(missing))));
+        business(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                () -> roles.replaceRoleMenus(bearer, role, roleMapping("v1", List.of(missing))));
+        assertEquals("v1", resources.listMenuApis(bearer, item).mappingVersion());
+        assertEquals("v1", roles.listRoleMenus(bearer, role).permissionRevision());
+        assertTrue(resources.listMenuApis(bearer, item).apiIds().isEmpty());
+        assertTrue(roles.listRoleMenus(bearer, role).menuIds().isEmpty());
+    }
+
+    @Test
+    @DisplayName("清空映射删除关联并更新版本，旧版本仍不能覆盖")
+    void clearingMappingsDeletesRowsAndAdvancesVersion() {
+        long app = application(code());
+        long item = menu(app, 0, code(), 2);
+        long api = api(app, code(), "GET", "/clear");
+        long role = role(code(), 1);
+        resources.replaceMenuApis(bearer, item, apiMapping("v1", List.of(api)));
+        roles.replaceRoleMenus(bearer, role, roleMapping("v1", List.of(item)));
+        assertEquals(
+                "v3",
+                resources
+                        .replaceMenuApis(bearer, item, apiMapping("v2", List.of()))
+                        .mappingVersion());
+        assertEquals(
+                "v3",
+                roles.replaceRoleMenus(bearer, role, roleMapping("v2", List.of()))
+                        .permissionRevision());
+        assertTrue(resources.listMenuApis(bearer, item).apiIds().isEmpty());
+        assertTrue(roles.listRoleMenus(bearer, role).menuIds().isEmpty());
+        business(
+                ErrorCode.VERSION_CONFLICT,
+                () -> roles.replaceRoleMenus(bearer, role, roleMapping("v2", List.of(item))));
+        business(
+                ErrorCode.VERSION_CONFLICT,
+                () -> resources.replaceMenuApis(bearer, item, apiMapping("v2", List.of(api))));
+    }
+
+    @Test
+    @DisplayName("菜单拒绝跨应用父节点、自引用、负数父节点和重复编码")
+    void invalidMenuParentsAndDuplicateCodesLeaveTreeUnchanged() {
+        long app = application(code());
+        long otherApp = application(code());
+        String code = code();
+        long item = menu(app, 0, code, 2);
+        long other = menu(otherApp, 0, code(), 1);
+        business(ErrorCode.DUPLICATE_RESOURCE, () -> menu(app, 0, code, 2));
+        business(ErrorCode.BUSINESS_RULE_VIOLATION, () -> menu(app, other, code(), 2));
+        business(ErrorCode.INVALID_ARGUMENT, () -> menu(app, -1, code(), 2));
+        business(ErrorCode.INVALID_ARGUMENT, () -> menu(app, 0, code(), 3));
+        var move = new UpdateMenuRequest();
+        move.setParentId(other);
+        business(ErrorCode.BUSINESS_RULE_VIOLATION, () -> resources.updateMenu(bearer, item, move));
+        move.setParentId(item);
+        business(ErrorCode.MENU_TREE_CYCLE, () -> resources.updateMenu(bearer, item, move));
+        move.setParentId(-1L);
+        business(ErrorCode.INVALID_ARGUMENT, () -> resources.updateMenu(bearer, item, move));
+        assertEquals(
+                0L,
+                db.queryForObject("SELECT parent_id FROM sys_menu WHERE id=?", Long.class, item));
+        business(ErrorCode.BUSINESS_RULE_VIOLATION, () -> resources.listMenuApis(bearer, other));
+    }
+
+    @Test
+    @DisplayName("系统角色不能修改或配置菜单，非法角色类型不能创建")
+    void protectedRoleCannotBeChanged() {
+        long role = role(code(), 1);
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        tx -> {
+                            db.update("UPDATE sys_role SET role_type=3 WHERE id=?", role);
+                            signatures.sign(ROLE_MENUS, role);
+                        });
+        var update = new UpdateRoleRequest();
+        update.setStatus(0);
+        business(ErrorCode.BUSINESS_RULE_VIOLATION, () -> roles.updateRole(bearer, role, update));
+        business(
+                ErrorCode.BUSINESS_RULE_VIOLATION,
+                () -> roles.replaceRoleMenus(bearer, role, roleMapping("v1", List.of())));
+        business(ErrorCode.INVALID_ARGUMENT, () -> role(code(), 0));
+        business(ErrorCode.INVALID_ARGUMENT, () -> role(code(), 4));
+        assertEquals(1, roles.getRole(bearer, role).status());
+        assertEquals("v1", roles.listRoleMenus(bearer, role).permissionRevision());
+    }
+
+    @Test
+    @DisplayName("审计写入失败时，资源和角色映射、版本、签名一起回滚")
+    void auditFailureRollsBackMappingsVersionsAndSignatures() {
+        long app = application(code());
+        long item = menu(app, 0, code(), 2);
+        long api = api(app, code(), "GET", "/rollback");
+        long role = role(code(), 1);
+        // 仅拒绝本场景的两种审计记录；不影响已有数据，finally 中移除约束。
+        db.execute(
+                "ALTER TABLE sys_operation_log ADD CONSTRAINT reject_test_audit CHECK ("
+                        + "NOT (operation_type='MENU_APIS_REPLACE' AND target_id="
+                        + item
+                        + ") AND "
+                        + "NOT (operation_type='ROLE_MENUS_REPLACE' AND target_id="
+                        + role
+                        + "))");
+        try {
+            business(
+                    ErrorCode.AUDIT_UNAVAILABLE,
+                    () -> resources.replaceMenuApis(bearer, item, apiMapping("v1", List.of(api))));
+            business(
+                    ErrorCode.AUDIT_UNAVAILABLE,
+                    () -> roles.replaceRoleMenus(bearer, role, roleMapping("v1", List.of(item))));
+            assertTrue(resources.listMenuApis(bearer, item).apiIds().isEmpty());
+            assertTrue(roles.listRoleMenus(bearer, role).menuIds().isEmpty());
+            assertEquals("v1", resources.listMenuApis(bearer, item).mappingVersion());
+            assertEquals("v1", roles.listRoleMenus(bearer, role).permissionRevision());
+            new TransactionTemplate(transactions)
+                    .executeWithoutResult(
+                            tx -> {
+                                signatures.verify(MENU_APIS, item);
+                                signatures.verify(RESOURCE_MENU, item);
+                                signatures.verify(RESOURCE_APPLICATION, app);
+                                signatures.verify(ROLE_MENUS, role);
+                            });
+        } finally {
+            db.execute("ALTER TABLE sys_operation_log DROP CHECK reject_test_audit");
+        }
+        // 故障解除后，原版本仍可正常重试。
+        assertEquals(
+                "v2",
+                resources
+                        .replaceMenuApis(bearer, item, apiMapping("v1", List.of(api)))
+                        .mappingVersion());
+        assertEquals(
+                "v2",
+                roles.replaceRoleMenus(bearer, role, roleMapping("v1", List.of(item)))
+                        .permissionRevision());
+    }
+
+    @Test
+    @DisplayName("HTTP 修改请求只有原因、没有实际变更时返回输入错误")
+    void emptyHttpUpdatesAreRejectedWithoutChangingData() throws Exception {
+        long app = application(code());
+        long item = menu(app, 0, code(), 2);
+        long api = api(app, code(), "GET", "/empty-patch");
+        long role = role(code(), 1);
+        for (String path :
+                List.of("applications/" + app, "menus/" + item, "apis/" + api, "roles/" + role)) {
+            http.perform(
+                            org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                                    .patch("/api/v1/" + path)
+                                    .header("Authorization", bearer)
+                                    .contentType("application/json")
+                                    .content(
+                                            json.writeValueAsString(
+                                                    Map.of("reason", "no changes"))))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+        }
+        assertEquals(
+                "Test application",
+                db.queryForObject(
+                        "SELECT app_name FROM sys_application WHERE id=?", String.class, app));
+        assertEquals(
+                "Test menu",
+                db.queryForObject("SELECT menu_name FROM sys_menu WHERE id=?", String.class, item));
+        assertEquals(
+                "Test API",
+                db.queryForObject("SELECT api_name FROM sys_api WHERE id=?", String.class, api));
+        assertEquals("Test role", roles.getRole(bearer, role).roleName());
+    }
+
     private static String code() {
         return "B" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
     }
@@ -580,7 +892,7 @@ class ResourceRoleIntegrationTest {
         CreateApplicationRequest request = new CreateApplicationRequest();
         request.setAppCode(code.toLowerCase());
         request.setAppName("Test application");
-        request.setDescription("Isolated B test");
+        request.setDescription("Isolated resource test");
         return resources.createApplication(bearer, request).appId();
     }
 
@@ -608,7 +920,7 @@ class ResourceRoleIntegrationTest {
         request.setRoleCode(code);
         request.setRoleName("Test role");
         request.setRoleType(type);
-        request.setDescription("Isolated B test");
+        request.setDescription("Isolated resource test");
         return roles.createRole(bearer, request).roleId();
     }
 

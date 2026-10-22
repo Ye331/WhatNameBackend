@@ -9,7 +9,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/** 从 D 已验签的历史快照提取来源差量，不读取当前授权事实。 */
+/** 从已验签的历史快照提取来源差量，不读取当前授权事实。 */
 final class GrantHistoryEvidence {
     private GrantHistoryEvidence() {}
 

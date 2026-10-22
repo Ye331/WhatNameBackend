@@ -19,12 +19,12 @@ import java.util.*;
 @Service
 public class DepartmentService {
     private final OrganizationWriteMapper mapper;
-    private final DepartmentCollaboration integration;
+    private final DepartmentAccessService integration;
     private final ExternalEventService events;
 
     public DepartmentService(
             OrganizationWriteMapper mapper,
-            DepartmentCollaboration integration,
+            DepartmentAccessService integration,
             ExternalEventService events) {
         this.mapper = mapper;
         this.integration = integration;
@@ -32,7 +32,7 @@ public class DepartmentService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
-    public Map<String, Object> tree(DepartmentCollaboration.Manager actor, boolean descendants) {
+    public Map<String, Object> tree(DepartmentAccessService.Manager actor, boolean descendants) {
         requireFreshManagementTransaction();
         integration.prepareManagement(actor);
         List<Department> all = readOrganization();
@@ -75,7 +75,7 @@ public class DepartmentService {
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public Map<String, Object> users(
-            DepartmentCollaboration.Manager actor,
+            DepartmentAccessService.Manager actor,
             long id,
             boolean descendants,
             int page,
@@ -233,7 +233,7 @@ public class DepartmentService {
         changed.add(source.getId());
         changed.add(target.getId());
         updateDepartments(all, changed);
-        // C must disable affected invalid management roots in this transaction, or throw and roll
+        // 必须在本事务中停用失效的管理范围根，否则抛错并回滚
         // back.
         integration.organizationChanged(changed, users);
         integration.signAndAudit(
@@ -244,7 +244,7 @@ public class DepartmentService {
 
     @Transactional(isolation = Isolation.SERIALIZABLE, rollbackFor = Exception.class, timeout = 30)
     public Map<String, Object> freeze(
-            DepartmentCollaboration.Manager actor, long id, boolean freeze, String reason) {
+            DepartmentAccessService.Manager actor, long id, boolean freeze, String reason) {
         requireFreshManagementTransaction();
         if (reason == null || reason.isBlank() || reason.length() > 512)
             fail(ErrorCode.INVALID_ARGUMENT);

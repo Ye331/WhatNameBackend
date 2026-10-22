@@ -6,10 +6,10 @@ import com.whatname.iam.service.auth.NamePinyin;
 
 import java.util.Locale;
 
-final class HrLoginName {
+public final class HrLoginName {
     private HrLoginName() {}
 
-    static String initials(String name) {
+    public static String initials(String name) {
         StringBuilder result = new StringBuilder();
         for (int cp : name.strip().codePoints().toArray()) {
             if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN)

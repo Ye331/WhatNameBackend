@@ -46,11 +46,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Real personal MySQL + real HTTP; C/D is an explicitly test-only integration port. External events
- * and append-only test audit evidence remain, as required by retention rules. No production
- * development switch enables this test port.
- */
+/** 临时 MySQL + 真实 HTTP；部门安全入口（管理员、HR/OA 认证、签名审计）换成测试替身。 外部事件和审计记录按留存规则只追加不删除。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DepartmentBusinessIntegrationTest {
@@ -68,6 +64,11 @@ class DepartmentBusinessIntegrationTest {
         @Bean
         TestPort testPort(JdbcTemplate jdbc) {
             return new TestPort(jdbc);
+        }
+
+        @Bean
+        com.whatname.iam.service.permission.ServiceOaCaller testOaCaller(TestPort port) {
+            return port.oaCaller();
         }
 
         @Bean
@@ -136,25 +137,41 @@ class DepartmentBusinessIntegrationTest {
         DepartmentController.class,
         GlobalExceptionHandler.class,
         SensitiveDataCodec.class,
-        DepartmentIntegrationConfiguration.class
+        DepartmentAccessService.class
     })
     static class DefaultApplication {}
 
-    static class TestPort
-            implements DepartmentCollaboration,
-                    com.whatname.iam.service.permission.TrustedOaCaller {
-        public TrustedEventContext authenticate(HttpServletRequest request, byte[] rawBody) {
-            throw new UnsupportedOperationException(
-                    "A event fixture has no OA HTTP authentication");
-        }
-
+    static class TestPort extends DepartmentAccessService {
         final JdbcTemplate jdbc;
         volatile String fault = "";
         volatile Set<Long> visible;
         volatile boolean denyRecovery;
 
         TestPort(JdbcTemplate jdbc) {
+            super(null, null, null, null, null, null, null);
             this.jdbc = jdbc;
+        }
+
+        /** 同一测试身份也充当 OA 服务认证，复用下面的事件校验与恢复规则。 */
+        com.whatname.iam.service.permission.ServiceOaCaller oaCaller() {
+            return new com.whatname.iam.service.permission.ServiceOaCaller(null) {
+                @Override
+                public TrustedEventContext authenticate(
+                        HttpServletRequest request, byte[] rawBody) {
+                    throw new UnsupportedOperationException(
+                            "Event fixture has no OA HTTP authentication");
+                }
+
+                @Override
+                public void verifyTrustedEvent(TrustedEventContext c, String type) {
+                    TestPort.this.verifyTrustedEvent(c, type);
+                }
+
+                @Override
+                public void authorizeRecovery(TrustedEventContext c, String type) {
+                    TestPort.this.authorizeRecovery(c, type);
+                }
+            };
         }
 
         private void reject(String stage) {
@@ -171,17 +188,17 @@ class DepartmentBusinessIntegrationTest {
             if (!"test-manager".equals(r.getHeader("X-Test-Identity")))
                 throw new BusinessException(ErrorCode.INVALID_TOKEN);
             reject("permission");
-            return new Manager("task06-test-manager");
+            return new Manager("dept-test-manager");
         }
 
         public TrustedEventContext authenticateHr(HttpServletRequest r, String type) {
             if (!"test-hr".equals(r.getHeader("X-Test-Identity")))
                 throw new BusinessException(ErrorCode.INVALID_SERVICE);
-            return new TrustedEventContext("HR", "task06-test-hr", UUID.randomUUID().toString());
+            return new TrustedEventContext("HR", "dept-test-hr", UUID.randomUUID().toString());
         }
 
         public void verifyTrustedEvent(TrustedEventContext c, String type) {
-            if (!Set.of("task06-test-hr", "task06-test-oa").contains(c.clientId()))
+            if (!Set.of("dept-test-hr", "dept-test-oa").contains(c.clientId()))
                 throw new BusinessException(ErrorCode.INVALID_SERVICE);
         }
 
@@ -221,11 +238,19 @@ class DepartmentBusinessIntegrationTest {
                     "INSERT INTO"
                         + " sys_operation_log(request_id,source_system,operation_type,operation_desc)"
                         + " VALUES(?,?,?,?)",
-                    "task06-" + UUID.randomUUID(),
+                    "dept-" + UUID.randomUUID(),
                     "HR",
                     operation,
-                    "task06 isolated C/D test port");
+                    "dept isolated C/D test port");
             reject("audit");
+        }
+
+        @Override
+        public void prepareManagement(Manager actor) {}
+
+        @Override
+        public void prepareDepartmentManagement(Manager actor, long departmentId) {
+            prepareManagement(actor);
         }
     }
 
@@ -240,7 +265,7 @@ class DepartmentBusinessIntegrationTest {
     String base;
     List<Map<String, Object>> seedBefore;
     final AtomicInteger sequence = new AtomicInteger();
-    final TrustedEventContext hr = new TrustedEventContext("HR", "task06-test-hr", "test-request");
+    final TrustedEventContext hr = new TrustedEventContext("HR", "dept-test-hr", "test-request");
     final OffsetDateTime time = OffsetDateTime.parse("2026-10-16T12:00:00+08:00");
 
     @BeforeAll
@@ -291,24 +316,24 @@ class DepartmentBusinessIntegrationTest {
                 // fixtures.
                 db.update(
                         "UPDATE sys_user_role_source SET status=0,revoked_at=CURRENT_TIMESTAMP"
-                            + " WHERE status=1 AND user_id IN (SELECT id FROM sys_user WHERE"
-                            + " username LIKE ?)",
+                                + " WHERE status=1 AND user_id IN (SELECT id FROM sys_user WHERE"
+                                + " username LIKE ?)",
                         prefix + "%");
                 db.update(
                         "DELETE FROM sys_user_role WHERE user_id IN (SELECT id FROM sys_user WHERE"
-                            + " username LIKE ?)",
+                                + " username LIKE ?)",
                         prefix + "%");
                 db.update("UPDATE sys_role SET status=0 WHERE role_code LIKE ?", prefix + "%");
                 db.update(
                         "UPDATE sys_user SET status=3,session_version=session_version+1 WHERE"
-                            + " username LIKE ? AND status<>3",
+                                + " username LIKE ? AND status<>3",
                         prefix + "%");
                 db.update("UPDATE sys_dept SET status=0 WHERE dept_code LIKE ?", prefix + "%");
                 assertEquals(
                         seedBefore,
                         db.queryForList(
                                 "SELECT * FROM sys_dept WHERE dept_code LIKE 'TEST-SEED-%' ORDER BY"
-                                    + " id"));
+                                        + " id"));
             }
         } finally {
             if (app != null) app.close();
@@ -438,7 +463,7 @@ class DepartmentBusinessIntegrationTest {
         db.update(
                 "INSERT INTO sys_role(role_code,role_name) VALUES(?,?)",
                 role,
-                "task06 isolated test role");
+                "dept isolated test role");
         long roleId =
                 db.queryForObject("SELECT id FROM sys_role WHERE role_code=?", Long.class, role);
         db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)", uid, roleId);
@@ -453,7 +478,7 @@ class DepartmentBusinessIntegrationTest {
         var grantsBefore = db.queryForList("SELECT * FROM sys_user_role WHERE user_id=?", uid);
         var sourcesBefore =
                 db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=?", uid);
-        service.freeze(new DepartmentCollaboration.Manager("test"), ci, true, "test child freeze");
+        service.freeze(new DepartmentAccessService.Manager("test"), ci, true, "test child freeze");
         var beforeUser = db.queryForMap("SELECT * FROM sys_user WHERE id=?", uid);
         var request = mergeRequest(s, t, 11, event());
         Map<String, Object> result = service.merge(hr, request);
@@ -493,7 +518,7 @@ class DepartmentBusinessIntegrationTest {
         String root = code("ROOT"), s = code("SRC"), t = code("DST");
         long ri = create(root, "", 1), si = create(s, root, 10);
         create(t, "", 40);
-        var actor = new DepartmentCollaboration.Manager("test");
+        var actor = new DepartmentAccessService.Manager("test");
         service.freeze(actor, ri, true, "freeze root");
         error(
                 ErrorCode.BUSINESS_RULE_VIOLATION,
@@ -666,7 +691,7 @@ class DepartmentBusinessIntegrationTest {
                 ErrorCode.AUDIT_UNAVAILABLE,
                 () ->
                         service.freeze(
-                                new DepartmentCollaboration.Manager("test"),
+                                new DepartmentAccessService.Manager("test"),
                                 id,
                                 true,
                                 "failed freeze"));
@@ -721,7 +746,7 @@ class DepartmentBusinessIntegrationTest {
         assertTrue(
                 db.queryForObject(
                                 "SELECT payload_ciphertext FROM sys_external_event WHERE"
-                                    + " event_id=?",
+                                        + " event_id=?",
                                 String.class,
                                 request.eventId())
                         .startsWith("gcm1:"));
@@ -729,7 +754,7 @@ class DepartmentBusinessIntegrationTest {
 
     @Test
     void oaNullVersionStableDigestFailureClassificationAndRecoveryRefusal() {
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "request-1");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "request-1");
         String event = event();
         AtomicInteger applied = new AtomicInteger();
         var c =
@@ -956,7 +981,7 @@ class DepartmentBusinessIntegrationTest {
 
     @Test
     void crashedEventCannotBeTakenOverWithoutProvableStoppedWorkers() {
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "recovery-test");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "recovery-test");
         String event = event();
         var command =
                 new ExternalEventService.Command(
@@ -1018,7 +1043,7 @@ class DepartmentBusinessIntegrationTest {
         captured.start();
         logger.addAppender(captured);
         try {
-            var oa = new TrustedEventContext("OA", "task06-test-oa", "diagnostic-test");
+            var oa = new TrustedEventContext("OA", "dept-test-oa", "diagnostic-test");
             String savedEvent = event();
             var saved =
                     new ExternalEventService.Command(
@@ -1055,7 +1080,7 @@ class DepartmentBusinessIntegrationTest {
                             port,
                             json,
                             app.getBean(PlatformTransactionManager.class),
-                            port);
+                            port.oaCaller());
             String retainedEvent = event();
             var retained =
                     new ExternalEventService.Command(
@@ -1088,7 +1113,7 @@ class DepartmentBusinessIntegrationTest {
             assertTrue(
                     diagnostics.contains(
                             "failure=IllegalArgumentException"
-                                + " recordFailure=IllegalStateException"));
+                                    + " recordFailure=IllegalStateException"));
             assertFalse(diagnostics.contains("private-payload-marker"));
             assertFalse(diagnostics.contains("private-record-marker"));
             assertFalse(diagnostics.contains(savedEvent));
@@ -1104,7 +1129,7 @@ class DepartmentBusinessIntegrationTest {
         String dept = code("ACTIVE");
         long id = create(dept, "", 10);
         String event = event();
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "task16-owner");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "event-owner");
         var command = interleavingCommand(event, dept, "first", "nonce-1");
         var release = new CountDownLatch(1);
         var ownerReady = new CompletableFuture<Map<String, Object>>();
@@ -1150,7 +1175,7 @@ class DepartmentBusinessIntegrationTest {
                 try (var statement =
                         probe.prepareStatement(
                                 "SELECT id FROM sys_external_event WHERE source_system='OA' AND"
-                                    + " event_id=? FOR UPDATE NOWAIT")) {
+                                        + " event_id=? FOR UPDATE NOWAIT")) {
                     statement.setString(1, event);
                     statement.setQueryTimeout(2);
                     SQLException locked = assertThrows(SQLException.class, statement::executeQuery);
@@ -1185,7 +1210,7 @@ class DepartmentBusinessIntegrationTest {
                 var running =
                         db.queryForList(
                                 "SELECT INFO FROM information_schema.PROCESSLIST WHERE ID=? AND"
-                                    + " COMMAND='Query'",
+                                        + " COMMAND='Query'",
                                 recoveryId);
                 if (!running.isEmpty()
                         && String.valueOf(running.getFirst().get("INFO"))
@@ -1225,7 +1250,7 @@ class DepartmentBusinessIntegrationTest {
         String dept = code("CLAIM-GAP");
         long id = create(dept, "", 10);
         String event = event();
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "claim-gap");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "claim-gap");
         var command = interleavingCommand(event, dept, "first", "nonce-1");
         var pause = new PausedBusinessLock();
         var observer = app.getBean(RecoveryLockObserver.class);
@@ -1255,7 +1280,7 @@ class DepartmentBusinessIntegrationTest {
                                     () -> {
                                         fail(
                                                 "authorization must not start a second worker"
-                                                    + " before the original business lock");
+                                                        + " before the original business lock");
                                         return Map.of();
                                     }));
             error(
@@ -1286,7 +1311,7 @@ class DepartmentBusinessIntegrationTest {
         String dept = code("COMMIT-ACK");
         long id = create(dept, "", 10);
         String event = event();
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "lost-commit-ack");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "lost-commit-ack");
         var command = interleavingCommand(event, dept, "first", "nonce-1");
         var delegate = app.getBean(PlatformTransactionManager.class);
         var businessStatuses =
@@ -1328,7 +1353,7 @@ class DepartmentBusinessIntegrationTest {
                         port,
                         json,
                         ambiguousCommit,
-                        port);
+                        port.oaCaller());
         var result = uncertainEvents.execute(oa, command, () -> applyInterleavingFact(id, event));
         assertTrue(lost.get());
         assertTrue(businessStatuses.isEmpty());
@@ -1351,7 +1376,7 @@ class DepartmentBusinessIntegrationTest {
     @Test
     void lostReceiptCommitAcknowledgementNeverStartsOrTransfersBusinessWork() {
         String event = event();
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "lost-receipt-ack");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "lost-receipt-ack");
         var command =
                 new ExternalEventService.Command(
                         event,
@@ -1399,7 +1424,7 @@ class DepartmentBusinessIntegrationTest {
                         port,
                         json,
                         ambiguousReceipt,
-                        port);
+                        port.oaCaller());
         AtomicInteger applied = new AtomicInteger();
         java.util.function.Supplier<Map<String, Object>> work =
                 () -> {
@@ -1427,7 +1452,7 @@ class DepartmentBusinessIntegrationTest {
         String dept = code("DELIVERY");
         long id = create(dept, "", 10);
         String event = event();
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "delivery-first");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "delivery-first");
         var command = interleavingCommand(event, dept, "request-1", "nonce-1");
         // This wrapper fails AFTER execute returns (and therefore after TransactionTemplate
         // commits).
@@ -1456,7 +1481,7 @@ class DepartmentBusinessIntegrationTest {
         var retry = interleavingCommand(event, dept, "request-2", "nonce-2");
         var retried =
                 events.execute(
-                        new TrustedEventContext("OA", "task06-test-oa", "delivery-retry"),
+                        new TrustedEventContext("OA", "dept-test-oa", "delivery-retry"),
                         retry,
                         () -> {
                             fail("committed retry callback");
@@ -1476,7 +1501,7 @@ class DepartmentBusinessIntegrationTest {
         assertEquals(before, row(id));
         assertInterleavingCommitted(id, event, expected);
         System.out.println(
-                "TASK16 lost-delivery: wrapper threw after commit; fresh transaction verified"
+                "EVENT lost-delivery: wrapper threw after commit; fresh transaction verified"
                     + " APPLIED/version=11/audit=1/signature=1; changed requestId+nonce retry and"
                     + " recover replay saved JSON; persistent state unchanged");
     }
@@ -1504,15 +1529,15 @@ class DepartmentBusinessIntegrationTest {
     int auditCount(String event) {
         return db.queryForObject(
                 "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='OA' AND"
-                    + " external_event_id=? AND operation_type='TASK16_EVENT_APPLY'",
+                        + " external_event_id=? AND operation_type='EVENT_EVENT_APPLY'",
                 Integer.class,
                 event);
     }
 
     int signatureCount(long id) {
         return db.queryForObject(
-                "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK16_DEPT' AND"
-                    + " data_id=?",
+                "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='EVENT_DEPT' AND"
+                        + " data_id=?",
                 Integer.class,
                 id);
     }
@@ -1531,12 +1556,12 @@ class DepartmentBusinessIntegrationTest {
                         "UPDATE sys_dept SET hr_version=hr_version+1,dept_name=? WHERE id=?",
                         event,
                         id));
-        // Explicit test evidence only: this fixed 88-character marker is NOT a D signature.
+        // Explicit test evidence only: this fixed 88-character marker is NOT a real signature.
         assertEquals(
                 1,
                 db.update(
                         "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                            + " VALUES('TASK16_DEPT',?,?,'task16-test')",
+                                + " VALUES('EVENT_DEPT',?,?,'event-test')",
                         id,
                         "T".repeat(88)));
         assertEquals(
@@ -1544,7 +1569,7 @@ class DepartmentBusinessIntegrationTest {
                 db.update(
                         "INSERT INTO"
                             + " sys_operation_log(request_id,source_system,external_event_id,operation_type,target_type,target_id,evidence,operation_desc)"
-                            + " VALUES(?,'OA',?,'TASK16_EVENT_APPLY','DEPT',?,JSON_OBJECT('beforeVersion',10,'afterVersion',11),'task16"
+                            + " VALUES(?,'OA',?,'EVENT_EVENT_APPLY','DEPT',?,JSON_OBJECT('beforeVersion',10,'afterVersion',11),'event"
                             + " test evidence; not D audit')",
                         event,
                         event,
@@ -1577,14 +1602,14 @@ class DepartmentBusinessIntegrationTest {
                                     "T".repeat(88),
                                     db.queryForObject(
                                             "SELECT signature FROM sys_data_signature WHERE"
-                                                + " data_type='TASK16_DEPT' AND data_id=?",
+                                                    + " data_type='EVENT_DEPT' AND data_id=?",
                                             String.class,
                                             id));
                             var audit =
                                     db.queryForMap(
                                             "SELECT target_id,evidence FROM sys_operation_log WHERE"
                                                 + " source_system='OA' AND external_event_id=? AND"
-                                                + " operation_type='TASK16_EVENT_APPLY'",
+                                                + " operation_type='EVENT_EVENT_APPLY'",
                                             event);
                             assertEquals(id, ((Number) audit.get("target_id")).longValue());
                             assertEquals(
@@ -1614,7 +1639,7 @@ class DepartmentBusinessIntegrationTest {
     void frozenAncestorAndHiddenMergeDestinationArePresentedWithinScope() {
         String root = code("ROOT"), child = code("CHILD"), target = code("HIDDEN");
         long ri = create(root, "", 10), ci = create(child, root, 1), ti = create(target, "", 40);
-        var actor = new DepartmentCollaboration.Manager("test");
+        var actor = new DepartmentAccessService.Manager("test");
         service.freeze(actor, ri, true, "ancestor presentation");
         service.freeze(actor, ci, false, "child cannot undo ancestor");
         port.visible = Set.of(ci);
@@ -1636,7 +1661,7 @@ class DepartmentBusinessIntegrationTest {
 
     @Test
     void eventCallbackWritesAndAppliedRollBackOnUnsafeResult() {
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "transaction-test");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "transaction-test");
         String event = event(), probe = code("TX-PROBE");
         var command =
                 new ExternalEventService.Command(
@@ -1676,7 +1701,7 @@ class DepartmentBusinessIntegrationTest {
         var result =
                 db.queryForMap(
                         "SELECT processing_status,result_data FROM sys_external_event WHERE"
-                            + " event_id=?",
+                                + " event_id=?",
                         event);
         assertEquals("REJECTED", result.get("processing_status"));
         assertNull(result.get("result_data"));
@@ -1684,7 +1709,7 @@ class DepartmentBusinessIntegrationTest {
 
     @Test
     void eventOrchestrationRejectsAmbientTransactionAndRecoveryPayloadTampering() {
-        var oa = new TrustedEventContext("OA", "task06-test-oa", "boundary-test");
+        var oa = new TrustedEventContext("OA", "dept-test-oa", "boundary-test");
         String event = event();
         var command =
                 new ExternalEventService.Command(

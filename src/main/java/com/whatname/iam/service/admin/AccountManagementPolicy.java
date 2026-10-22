@@ -9,7 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
 
-/** A adapter over real C M5. No client scopes, no read snapshot used as write authority. */
+/** 账号模块使用的管理范围检查。不接受客户端提交的范围，也不用只读快照作为写入依据。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class AccountManagementPolicy {
@@ -20,8 +20,8 @@ public class AccountManagementPolicy {
     }
 
     /**
-     * First call in a fresh A transaction. C takes its own ordered M5/user locks. A operations have
-     * zero or one existing target; never acquire actor first for a target write.
+     * First call in a fresh account transaction. Takes the ordered admin/user locks. Account
+     * operations have zero or one existing target; never acquire actor first for a target write.
      */
     public void prepare(long actorId, long... targets) {
         if (targets.length == 0) policy.requireAdministrator(actorId);
@@ -34,7 +34,7 @@ public class AccountManagementPolicy {
         try {
             policy.requireDepartmentScope(actorId, departmentId);
         } catch (BusinessException failure) {
-            // A's existing department-target HTTP contract uses OUT_OF_SCOPE (403).
+            // 账号接口对部门目标越权按既有契约返回 OUT_OF_SCOPE (403)。
             if (failure.errorCode() == ErrorCode.RESOURCE_NOT_FOUND)
                 throw new BusinessException(ErrorCode.OUT_OF_SCOPE);
             throw failure;

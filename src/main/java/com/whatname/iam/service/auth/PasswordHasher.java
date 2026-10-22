@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 import java.util.Base64;
 import java.util.regex.Pattern;
 
-/** A内部密码编码组件；不访问数据库，不记录密码或编码。 */
+/** 密码哈希组件；不访问数据库，不记录密码或编码。 */
 @Service
 public final class PasswordHasher {
     public static final int MAX_PASSWORD_CODE_POINTS = 64;

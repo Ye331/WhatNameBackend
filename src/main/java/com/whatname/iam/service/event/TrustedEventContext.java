@@ -1,10 +1,11 @@
 package com.whatname.iam.service.event;
 
 /**
- * Issued/validated by D after service signature, client/key/scope and nonce verification. The
- * opaque proof is intentionally not serializable into a request and is checked by D before an event
- * business transaction. The three-argument constructor remains for non-production test fixtures; it
- * creates an unissued context and therefore cannot pass production verification.
+ * Issued/validated by ServiceRequestAuthenticator after service signature, client/key/scope and
+ * nonce verification. The opaque proof is intentionally not serializable into a request and is
+ * checked again before an event business transaction. The three-argument constructor remains for
+ * non-production test fixtures; it creates an unissued context and therefore cannot pass production
+ * verification.
  */
 public record TrustedEventContext(
         String sourceSystem, String clientId, String requestId, Object authenticationProof) {

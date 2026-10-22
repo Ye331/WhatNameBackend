@@ -1,5 +1,6 @@
 package com.whatname.iam.service.permission;
 
+import static com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 
 import com.whatname.iam.common.exception.BusinessException;
@@ -12,19 +13,17 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 
 /**
- * Production TrustedOaCaller: an OA_DECISION identity whose request verifies end to end.
- * authenticate() returns the issued context (requestId = the consumed nonce) and
- * verifyTrustedEvent() re-checks the identity's current qualification on every event call.
+ * OA 服务身份认证：authenticate 校验请求签名并返回上下文（requestId 为已消费的 nonce）， verifyTrustedEvent
+ * 在每次事件处理时复核该服务身份的当前资格。
  */
 @Service
-public class ServiceOaCaller implements TrustedOaCaller {
+public class ServiceOaCaller {
     private final ServiceRequestAuthenticator authenticator;
 
     public ServiceOaCaller(ServiceRequestAuthenticator authenticator) {
         this.authenticator = authenticator;
     }
 
-    @Override
     public TrustedEventContext authenticate(HttpServletRequest request, byte[] rawBody) {
         Map<String, Object> identity = authenticator.authenticate(request, rawBody, "OA_DECISION");
         return authenticator.issuedContext(
@@ -34,7 +33,6 @@ public class ServiceOaCaller implements TrustedOaCaller {
                 "OA_DECISION");
     }
 
-    @Override
     public void verifyTrustedEvent(TrustedEventContext context, String eventType) {
         if (context == null
                 || !"OA".equals(context.sourceSystem())
@@ -42,6 +40,11 @@ public class ServiceOaCaller implements TrustedOaCaller {
                 || blank(context.requestId())
                 || !"OA_DECISION".equals(eventType)) throw new BusinessException(INVALID_SERVICE);
         authenticator.verifyAuthenticatedContext(context, "OA_DECISION");
+    }
+
+    /** OA 事件不提供恢复接管；授权成功也不能证明旧执行者已停止。 */
+    public void authorizeRecovery(TrustedEventContext context, String eventType) {
+        throw new BusinessException(AUTH_STATE_UNAVAILABLE);
     }
 
     private static boolean blank(String value) {

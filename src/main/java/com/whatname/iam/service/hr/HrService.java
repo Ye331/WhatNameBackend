@@ -13,6 +13,7 @@ import com.whatname.iam.service.auth.NamePinyin;
 import com.whatname.iam.service.auth.PasswordHasher;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
+import com.whatname.iam.service.grant.HrGrantCollaboration;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DuplicateKeyException;
@@ -25,7 +26,7 @@ import java.util.function.Supplier;
 
 /**
  * Orchestration stays outside a transaction; every apply runs inside the event's transaction. Lock
- * order: event -> C administrators/departments/roles/lists/users/resources -> grant facts. C
+ * order: event -> administrators/departments/roles/lists/users/resources -> grant facts. Admin
  * preparation precedes all organization/person reads. No AuthService HTTP operation (REQUIRES_NEW)
  * is called here. Account SQL joins the existing transaction.
  */
@@ -34,10 +35,10 @@ public class HrService {
     private final ExternalEventService events;
     private final OrganizationWriteMapper organization;
     private final DepartmentService departments;
-    private final DepartmentCollaboration trusted;
+    private final DepartmentAccessService trusted;
     private final UserAccountMapper users;
     private final AccountSecurity identity;
-    private final HrCollaboration grants;
+    private final HrGrantCollaboration grants;
     private final SensitiveDataCodec codec;
     private final PasswordHasher passwords;
     private final Clock clock;
@@ -46,10 +47,10 @@ public class HrService {
             ExternalEventService events,
             OrganizationWriteMapper organization,
             DepartmentService departments,
-            DepartmentCollaboration trusted,
+            DepartmentAccessService trusted,
             UserAccountMapper users,
             AccountSecurity identity,
-            HrCollaboration grants,
+            HrGrantCollaboration grants,
             SensitiveDataCodec codec,
             PasswordHasher passwords,
             @Qualifier("hrClock") Clock clock) {
@@ -86,7 +87,7 @@ public class HrService {
         Department target = assignable(all, r.deptCode());
         UserAccount u = users.lockByEmployeeNo(r.sgNo());
         String phone = SensitiveDataCodec.normalizePhone(r.phone());
-        // Validate the whole name before lifecycle, C grants or profile writes (including updates).
+        // Validate the whole name before lifecycle, grant or profile writes (including updates).
         NamePinyin.variants(r.realName().strip());
         if (u == null) {
             // REHIRE/SUSPEND/RESUME name an existing lifecycle transition, never create a person.
@@ -114,7 +115,7 @@ public class HrService {
                                     + UUID.randomUUID().toString().replace("-", ""));
             profile(u, r, phone);
             users.insertHr(u);
-            com.whatname.iam.common.security.AAccountCreation.inserted(u);
+            com.whatname.iam.common.security.AccountCreation.inserted(u);
         } else {
             verify(u, r.sgNo(), r.eventVersion());
             if (u.status == 3) {
@@ -270,10 +271,12 @@ public class HrService {
         long old = u.deptId;
         grants.revokePosition(actor, eventId, u.id, old);
         u.deptId = target.getId();
-        // C sees the new persisted department while keeping the original source ID explicit.
+        // The grant module sees the new persisted department while keeping the original source ID
+        // explicit.
         update(u);
         grants.departmentChanged(u.id, old, u.deptId);
-        // No sv bump: JWT carries identity/sv, never roles; M6 must read current grants every
+        // No sv bump: JWT carries identity/sv, never roles; permission checks read current grants
+        // every
         // request.
     }
 
@@ -283,10 +286,10 @@ public class HrService {
 
     private void finish(
             String operation, TrustedEventContext actor, String eventId, UserAccount u) {
-        // New inserts have not called C; preserve the generated-key entity for empty-grants
-        // initialization. Existing accounts reload C's grant_revision before D signs.
+        // New inserts have no grants yet; preserve the generated-key entity for empty-grants
+        // initialization. Existing accounts reload grant_revision before signing.
         UserAccount current =
-                com.whatname.iam.common.security.AAccountCreation.contains(u)
+                com.whatname.iam.common.security.AccountCreation.contains(u)
                         ? u
                         : users.lockById(u.id);
         identity.signIdentity(current);

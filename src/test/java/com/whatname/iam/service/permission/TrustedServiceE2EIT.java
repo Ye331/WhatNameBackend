@@ -41,12 +41,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * PR08 end-to-end acceptance: the REAL production service-request authentication (ServiceOaCaller /
- * ServiceApiCaller / ServiceRequestAuthenticator) through the full HTTP chain into A (JWT/session),
- * C (M5 scope) and D (RBAC0, data signatures, audit), against a real MySQL. No
- * request-authentication stub — every trusted-service call verifies an Ed25519 signature over the
- * canonical message and consumes a nonce. The only MyBatis interceptor injects persistence failures
- * to prove rollback/anti-replay behaviour.
+ * End-to-end acceptance: the REAL production service-request authentication (ServiceOaCaller /
+ * ServiceApiCaller / ServiceRequestAuthenticator) through the full HTTP chain into login
+ * (JWT/session), admin scope and permission checks (RBAC0, data signatures, audit), against a real
+ * MySQL. No request-authentication stub — every trusted-service call verifies an Ed25519 signature
+ * over the canonical message and consumes a nonce. The only MyBatis interceptor injects persistence
+ * failures to prove rollback/anti-replay behaviour.
  */
 @SpringBootTest(
         classes = {com.whatname.iam.IamApplication.class, TrustedServiceE2EIT.TestConfig.class},
@@ -77,7 +77,7 @@ class TrustedServiceE2EIT {
                             MountableFile.forHostPath(Path.of("db/schema.sql").toAbsolutePath()),
                             "/docker-entrypoint-initdb.d/01_schema.sql");
 
-    // RSA for the JWT bearer, Ed25519 for data-fact signing (both A/D test keys),
+    // RSA for the JWT bearer, Ed25519 for data-fact signing (both test keys),
     // a separate Ed25519 pair for the trusted-service request signature under test.
     static final KeyPair RSA = keys("RSA"), ED = keys("Ed25519"), SVC = keys("Ed25519");
 
@@ -187,7 +187,7 @@ class TrustedServiceE2EIT {
         // Organization: root(1) with a leaf(2) and a sibling root(3).
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,0,?,'Fixture',?),(?,?,?,'Fixture',?),(?,0,?,'Fixture',?)",
+                        + " VALUES(?,0,?,'Fixture',?),(?,?,?,'Fixture',?),(?,0,?,'Fixture',?)",
                 id(1),
                 "D" + id(1),
                 "/" + id(1) + "/",
@@ -210,14 +210,14 @@ class TrustedServiceE2EIT {
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                    + " VALUES(?,1,?,1),(?,2,?,1)",
+                        + " VALUES(?,1,?,1),(?,2,?,1)",
                 id(10),
                 id(1),
                 id(11),
                 id(2));
         db.update(
                 "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                    + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
+                        + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
                 id(30),
                 "R" + b,
                 id(31),
@@ -238,7 +238,7 @@ class TrustedServiceE2EIT {
                         "BUSINESS_VIEW")) {
             db.update(
                     "INSERT INTO sys_menu(id,app_id,parent_id,menu_code,menu_name,menu_type)"
-                        + " VALUES(?,?,0,?,'Fixture',2)",
+                            + " VALUES(?,?,0,?,'Fixture',2)",
                     id(n),
                     id(40),
                     code);
@@ -315,7 +315,7 @@ class TrustedServiceE2EIT {
                     signatures.sign(SERVICE_IDENTITY, id(70));
                     signatures.sign(SERVICE_IDENTITY, id(71));
                 });
-        // Resolve D's RBAC0 management application to this fixture's app, per the C/D integration
+        // Resolve the RBAC0 management application to this fixture's app, per the integration
         // tests.
         ReflectionTestUtils.setField(
                 (Object) AopTestUtils.getUltimateTargetObject(permissions),
@@ -467,8 +467,8 @@ class TrustedServiceE2EIT {
                 id(10));
         db.update(
                 "INSERT INTO"
-                    + " sys_user_role_source(user_id,role_id,source_type,source_ref,granted_by)"
-                    + " VALUES(?,?,'MANUAL','rbac-fixture',?)",
+                        + " sys_user_role_source(user_id,role_id,source_type,source_ref,granted_by)"
+                        + " VALUES(?,?,'MANUAL','rbac-fixture',?)",
                 id(20),
                 id(30),
                 id(10));
@@ -481,7 +481,7 @@ class TrustedServiceE2EIT {
     private void revokeRole30FromUser20() {
         db.update(
                 "UPDATE sys_user_role_source SET status=0, revoked_at=NOW() WHERE user_id=? AND"
-                    + " role_id=? AND status=1",
+                        + " role_id=? AND status=1",
                 id(20),
                 id(30));
         db.update("DELETE FROM sys_user_role WHERE user_id=? AND role_id=?", id(20), id(30));
@@ -507,7 +507,7 @@ class TrustedServiceE2EIT {
         assertThat(
                         db.queryForMap(
                                 "SELECT source_type,source_ref FROM sys_user_role_source WHERE"
-                                    + " user_id=?",
+                                        + " user_id=?",
                                 id(20)))
                 .containsEntry("source_type", "OA_APPROVAL")
                 .containsEntry("source_ref", approval());
@@ -755,7 +755,7 @@ class TrustedServiceE2EIT {
     @Test
     void rbac0PassButNoM5ScopeRejected() throws Exception {
         // Admin 11 (level-2, dept 2) holds IAM_USERS_VIEW (RBAC0 pass) but user 20 is in dept 1
-        // (out of M5 scope).
+        // (out of admin scope).
         var response =
                 http.perform(
                                 get(USERS_PATH + "/" + sid(20) + "/permissions")
@@ -769,7 +769,7 @@ class TrustedServiceE2EIT {
 
     @Test
     void m5PassButNoRbac0Rejected() throws Exception {
-        // Admin 10 (level-1, covers all depts = M5 pass) loses IAM_USERS_VIEW (RBAC0 fail).
+        // Admin 10 (level-1, covers all depts = scope pass) loses IAM_USERS_VIEW (RBAC0 fail).
         db.update("DELETE FROM sys_role_permission WHERE role_id=? AND menu_id=?", id(31), id(52));
         tx.executeWithoutResult(s -> signatures.sign(ROLE_MENUS, id(31)));
         var response =
@@ -813,7 +813,7 @@ class TrustedServiceE2EIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_service_nonce WHERE client_id=? AND"
-                                    + " nonce=?",
+                                        + " nonce=?",
                                 Long.class,
                                 oaClient,
                                 "nonce-rollback"))
@@ -836,7 +836,7 @@ class TrustedServiceE2EIT {
         var row =
                 db.queryForMap(
                         "SELECT id,request_id,external_event_id,evidence FROM sys_operation_log"
-                            + " WHERE operation_type='OA_DECISION' AND target_id=?",
+                                + " WHERE operation_type='OA_DECISION' AND target_id=?",
                         id(20));
         assertThat(row.get("external_event_id")).isEqualTo(event());
         assertThat((String) row.get("request_id")).matches("[A-Za-z0-9._-]{1,64}");

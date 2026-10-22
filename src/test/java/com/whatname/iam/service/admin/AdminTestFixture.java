@@ -2,6 +2,7 @@ package com.whatname.iam.service.admin;
 
 import com.whatname.iam.entity.admin.AdminData.*;
 import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.support.Fakes;
 
 import java.util.*;
 
@@ -12,11 +13,11 @@ public class AdminTestFixture implements AdminMapper {
     public final Map<Long, User> users = new TreeMap<>();
     public final Map<Long, Role> roles = new TreeMap<>();
     public final List<Delegation> delegations = new ArrayList<>();
-    public final List<AdminPorts.Change> events = new ArrayList<>();
+    public final List<AdminAudit.Change> events = new ArrayList<>();
     public long actorId = 1;
-    public AdminPorts.Functions functions = (actor, permission) -> {};
-    public AdminPorts.Integrity integrity =
-            new AdminPorts.Integrity() {
+    public Fakes.Require functions = (actor, permission) -> {};
+    public AdminIntegrity integrity =
+            new AdminIntegrity(null, null) {
                 public void verify(AdminState state) {}
 
                 public void sign(AdminState state, Set<Long> changed) {}
@@ -56,9 +57,9 @@ public class AdminTestFixture implements AdminMapper {
         return new AdminService(
                 this,
                 new AdminRules(),
-                () -> actorId,
-                (id, permission) -> functions.require(id, permission),
-                new AdminPorts.Integrity() {
+                Fakes.security(
+                        () -> actorId, (id, permission) -> functions.require(id, permission)),
+                new AdminIntegrity(null, null) {
                     public void verify(AdminState state) {
                         integrity.verify(state);
                     }
@@ -67,7 +68,7 @@ public class AdminTestFixture implements AdminMapper {
                         integrity.sign(state, changed);
                     }
                 },
-                events::add);
+                Fakes.adminAudit(events::add));
     }
 
     public List<Appointment> selectAppointments(boolean lock) {

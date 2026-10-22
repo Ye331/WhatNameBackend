@@ -19,7 +19,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/** A internal format. Keys are deliberately absent by default; no plaintext fallback. */
+/** 姓名、手机号的加密与 HMAC 索引。默认不带密钥，缺少密钥时拒绝而不是退回明文。 */
 @Component
 public final class SensitiveDataCodec {
     private static final String PREFIX = "gcm1:";

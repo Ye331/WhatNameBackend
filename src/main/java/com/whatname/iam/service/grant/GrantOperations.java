@@ -21,19 +21,19 @@ import java.util.*;
 public class GrantOperations {
     private final GrantMapper mapper;
     private final AdminPolicyService policy;
-    private final AdminPorts.Functions functions;
-    private final GrantPorts.Integrity integrity;
-    private final GrantPorts.Audit audit;
+    private final RequestSecurity security;
+    private final GrantIntegrity integrity;
+    private final GrantAudit audit;
 
     public GrantOperations(
             GrantMapper mapper,
             AdminPolicyService policy,
-            AdminPorts.Functions functions,
-            GrantPorts.Integrity integrity,
-            GrantPorts.Audit audit) {
+            RequestSecurity security,
+            GrantIntegrity integrity,
+            GrantAudit audit) {
         this.mapper = mapper;
         this.policy = policy;
-        this.functions = functions;
+        this.security = security;
         this.integrity = integrity;
         this.audit = audit;
     }
@@ -161,10 +161,10 @@ public class GrantOperations {
     private Context begin(
             long actor, long user, Long role, boolean granting, boolean lock, String permission) {
         if (actor <= 0) fail(INVALID_TOKEN);
-        // M5 加锁顺序：管理员 → 部门 → 角色 → 委派清单 → 按 ID 排序的操作者与目标用户。
+        // 管理锁顺序：管理员 → 部门 → 角色 → 委派清单 → 按 ID 排序的操作者与目标用户。
         var authority = policy.requireGrantContext(actor, user, role, granting, lock);
-        // 等待 M5 锁后，M6 必须读取当前事实；任何变更（包括自回收）都在检查通过后执行。
-        functions.require(actor, permission);
+        // 等待管理锁后，功能权限必须读取当前事实；任何变更（包括自回收）都在检查通过后执行。
+        security.require(actor, permission);
         var before = load(user, lock);
         integrity.verify(before);
         consistent(before);
@@ -189,7 +189,7 @@ public class GrantOperations {
         consistent(after);
         integrity.sign(after);
         audit.record(
-                new GrantPorts.Change(
+                new GrantAudit.Change(
                         operation,
                         context.actorId(),
                         before.userId(),

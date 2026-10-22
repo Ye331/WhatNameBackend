@@ -18,13 +18,13 @@ import java.util.Map;
 public class PermissionController {
     private final PermissionService permissions;
     private final UserPermissionService users;
-    private final TrustedApiCaller callers;
+    private final ServiceApiCaller callers;
     private final ObjectMapper json;
 
     public PermissionController(
             PermissionService permissions,
             UserPermissionService users,
-            TrustedApiCaller callers,
+            ServiceApiCaller callers,
             ObjectMapper json) {
         this.permissions = permissions;
         this.users = users;

@@ -15,16 +15,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
-/** 供 A/B/C 写入服务复用的 M5 校验；调用方须提供已验证的操作者，并执行 M6 功能权限检查。 */
+/** 各写入服务复用的管理范围校验；调用方须提供已验证的操作者，并另行检查功能权限。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class AdminPolicyService {
     private final AdminStateLoader loader;
     private final AdminRules rules;
-    private final AdminPorts.Integrity integrity;
+    private final AdminIntegrity integrity;
 
-    public AdminPolicyService(
-            AdminMapper mapper, AdminRules rules, AdminPorts.Integrity integrity) {
+    public AdminPolicyService(AdminMapper mapper, AdminRules rules, AdminIntegrity integrity) {
         this.loader = new AdminStateLoader(mapper);
         this.rules = rules;
         this.integrity = integrity;

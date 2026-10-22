@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.INVALID_ARGUMENT;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.grant.GrantDtos.*;
-import com.whatname.iam.service.admin.AdminPorts;
+import com.whatname.iam.service.admin.RequestSecurity;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -15,32 +15,32 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class GrantService {
     private final GrantOperations operations;
-    private final AdminPorts.Identity identity;
+    private final RequestSecurity security;
 
-    public GrantService(GrantOperations operations, AdminPorts.Identity identity) {
+    public GrantService(GrantOperations operations, RequestSecurity security) {
         this.operations = operations;
-        this.identity = identity;
+        this.security = security;
     }
 
     public Roles roles(String userId) {
-        return operations.roles(identity.currentUserId(), userId);
+        return operations.roles(security.currentUserId(), userId);
     }
 
     public Sources sources(String userId, String roleId) {
-        return operations.sources(identity.currentUserId(), userId, roleId);
+        return operations.sources(security.currentUserId(), userId, roleId);
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public Granted grant(GrantRequest request) {
         if (request == null) throw new BusinessException(INVALID_ARGUMENT);
         GrantOperations.revision(request.expectedVersion());
-        return operations.grant(identity.currentUserId(), request);
+        return operations.grant(security.currentUserId(), request);
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public Revoked revoke(RevokeRequest request) {
         if (request == null) throw new BusinessException(INVALID_ARGUMENT);
         GrantOperations.revision(request.expectedVersion());
-        return operations.revoke(identity.currentUserId(), request);
+        return operations.revoke(security.currentUserId(), request);
     }
 }

@@ -13,7 +13,7 @@ import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.SensitiveDataCodec;
 import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.service.department.DepartmentCollaboration;
+import com.whatname.iam.service.department.DepartmentAccessService;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -120,10 +120,10 @@ class ExternalEventDiagnosticTest {
                     new ExternalEventService(
                             mapper,
                             codec,
-                            mock(DepartmentCollaboration.class),
+                            mock(DepartmentAccessService.class),
                             new ObjectMapper(),
                             new MemoryTransactionManager(),
-                            mock(com.whatname.iam.service.permission.TrustedOaCaller.class));
+                            mock(com.whatname.iam.service.permission.ServiceOaCaller.class));
         }
 
         Map<String, Object> execute(String eventId, String privateMessage) {

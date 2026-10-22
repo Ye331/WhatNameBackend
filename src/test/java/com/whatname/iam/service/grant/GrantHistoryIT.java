@@ -44,7 +44,7 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** 真实 C/A JWT/D 与隔离 MySQL；查询拦截器控制候选分页后的并发范围变化。 */
+/** 真实的管理员、JWT、签名审计与隔离 MySQL；查询拦截器控制候选分页后的并发范围变化。 */
 @SpringBootTest(
         classes = {com.whatname.iam.IamApplication.class, GrantHistoryIT.Application.class},
         properties = "spring.config.import=")
@@ -166,12 +166,12 @@ class GrantHistoryIT {
         tx = new TransactionTemplate(manager);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,0,?,'Fixture','/')",
+                        + " VALUES(?,0,?,'Fixture','/')",
                 id(1),
                 "D" + b);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,?,?,'Fixture','/')",
+                        + " VALUES(?,?,?,'Fixture','/')",
                 id(2),
                 id(1),
                 "L" + b);
@@ -186,21 +186,21 @@ class GrantHistoryIT {
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                    + " VALUES(?,1,?,1),(?,2,?,1)",
+                        + " VALUES(?,1,?,1),(?,2,?,1)",
                 id(10),
                 id(1),
                 id(11),
                 id(2));
         db.update(
                 "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                    + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
+                        + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
                 id(30),
                 "R" + b,
                 id(31),
                 "M" + b);
         db.update(
                 "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                    + " VALUES(?,?,?)",
+                        + " VALUES(?,?,?)",
                 id(11),
                 id(30),
                 id(10));
@@ -220,7 +220,7 @@ class GrantHistoryIT {
                         "BUSINESS_VIEW")) {
             db.update(
                     "INSERT INTO sys_menu(id,app_id,parent_id,menu_code,menu_name,menu_type)"
-                        + " VALUES(?,?,0,?,'Fixture',2)",
+                            + " VALUES(?,?,0,?,'Fixture',2)",
                     id(n),
                     id(40),
                     code);
@@ -404,8 +404,8 @@ class GrantHistoryIT {
     void currentSourceWithoutRetainedAuditNeverBecomesAnInventedHistoryEvent() throws Exception {
         db.update(
                 "INSERT INTO"
-                    + " sys_user_role_source(user_id,role_id,source_type,source_ref,granted_by)"
-                    + " VALUES(?,?,'MANUAL','LEGACY',?)",
+                        + " sys_user_role_source(user_id,role_id,source_type,source_ref,granted_by)"
+                        + " VALUES(?,?,'MANUAL','LEGACY',?)",
                 id(20),
                 id(30),
                 id(10));
@@ -681,7 +681,7 @@ class GrantHistoryIT {
             case "logout" ->
                     db.update(
                             "INSERT INTO sys_session_invalidation(user_id,jti,expires_at,reason)"
-                                + " VALUES(?,?,DATE_ADD(NOW(),INTERVAL 1 HOUR),'LOGOUT')",
+                                    + " VALUES(?,?,DATE_ADD(NOW(),INTERVAL 1 HOUR),'LOGOUT')",
                             id(10),
                             jwt.verifyBearer(bearer).jti());
             case "appointment" ->
@@ -985,7 +985,7 @@ class GrantHistoryIT {
                         e -> assertThat(e.errorCode()).isEqualTo(PERMISSION_DENIED));
         db.update(
                 "INSERT INTO sys_menu(id,app_id,parent_id,menu_code,menu_name,menu_type)"
-                    + " VALUES(?,?,0,'IAM_AUDIT_VIEW','Fixture',2)",
+                        + " VALUES(?,?,0,'IAM_AUDIT_VIEW','Fixture',2)",
                 id(57),
                 id(40));
         db.update("INSERT INTO sys_role_permission(role_id,menu_id) VALUES(?,?)", id(31), id(57));

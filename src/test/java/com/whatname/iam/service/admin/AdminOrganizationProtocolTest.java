@@ -19,8 +19,8 @@ class AdminOrganizationProtocolTest {
     @Test
     void finalFactsMustStillMatchTheReviewedSnapshotEvenIfCallerSignsLaterChanges() {
         var db = new AdminTestFixture();
-        // No facts change at review, so no D audit write is needed. Final integrity is deliberately
-        // accepting: a later valid signature must not substitute for C's actual scope review.
+        // No facts change at review, so no audit write is needed. Final integrity is deliberately
+        // accepting: a later valid signature must not substitute for the actual scope review.
         var beans = new StaticListableBeanFactory(Map.of("audit", mock(AuditService.class)));
         var service =
                 new AdminOrganizationLifecycle(

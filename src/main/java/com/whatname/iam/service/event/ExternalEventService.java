@@ -8,8 +8,8 @@ import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.SensitiveDataCodec;
 import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.service.department.DepartmentCollaboration;
-import com.whatname.iam.service.permission.TrustedOaCaller;
+import com.whatname.iam.service.department.DepartmentAccessService;
+import com.whatname.iam.service.permission.ServiceOaCaller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,8 +57,8 @@ public class ExternalEventService {
 
     private final ExternalEventMapper mapper;
     private final SensitiveDataCodec codec;
-    private final DepartmentCollaboration integration;
-    private final TrustedOaCaller oa;
+    private final DepartmentAccessService integration;
+    private final ServiceOaCaller oa;
     private final ObjectMapper json;
     private final TransactionTemplate shortTx;
     private final TransactionTemplate businessTx;
@@ -66,20 +66,10 @@ public class ExternalEventService {
     public ExternalEventService(
             ExternalEventMapper mapper,
             SensitiveDataCodec codec,
-            DepartmentCollaboration integration,
-            ObjectMapper json,
-            PlatformTransactionManager tm) {
-        this(mapper, codec, integration, json, tm, null);
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public ExternalEventService(
-            ExternalEventMapper mapper,
-            SensitiveDataCodec codec,
-            DepartmentCollaboration integration,
+            DepartmentAccessService integration,
             ObjectMapper json,
             PlatformTransactionManager tm,
-            @org.springframework.lang.Nullable TrustedOaCaller oa) {
+            ServiceOaCaller oa) {
         this.mapper = mapper;
         this.codec = codec;
         this.integration = integration;
@@ -154,9 +144,9 @@ public class ExternalEventService {
         try {
             return businessTx.execute(
                     tx -> {
-                        // Event row first. Organization callbacks prepare C's
+                        // Event row first. Organization callbacks prepare the admin
                         // admin/department/role/list/user
-                        // and D resource locks before A reads or mutates organization/person facts.
+                        // and resource locks before organization/person facts are read or changed.
                         Map<String, Object> row = mapper.lock(ctx.sourceSystem(), c.eventId());
                         if (row == null
                                 || owned.id() != id(row)
@@ -165,7 +155,7 @@ public class ExternalEventService {
                             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
                         // Recheck the same source-specific authority in the actual write
                         // transaction.
-                        // Only this private path can register A's transaction-local execution
+                        // Only this private path can register the transaction-local execution
                         // evidence.
                         verifyTrustedEvent(ctx, c.eventType());
                         TransactionSynchronizationManager.registerSynchronization(
@@ -216,7 +206,7 @@ public class ExternalEventService {
                         || "UNMATCHED".equals(disposition.state()))
                     log.warn(
                             "External event failed rowId={} source={} type={} code={} failure={}"
-                                + " state={}",
+                                    + " state={}",
                             owned.id(),
                             ctx.sourceSystem(),
                             c.eventType(),
@@ -228,7 +218,7 @@ public class ExternalEventService {
                 // over.
                 log.warn(
                         "External event failure record unavailable rowId={} source={} type={}"
-                            + " code={} failure={} recordFailure={}",
+                                + " code={} failure={} recordFailure={}",
                         owned.id(),
                         ctx.sourceSystem(),
                         c.eventType(),
@@ -243,7 +233,7 @@ public class ExternalEventService {
 
     private void verifyTrustedEvent(TrustedEventContext context, String eventType) {
         if ("OA".equals(context.sourceSystem())) {
-            if (oa == null || !"OA_DECISION".equals(eventType))
+            if (!"OA_DECISION".equals(eventType))
                 throw new BusinessException(ErrorCode.INVALID_SERVICE);
             oa.verifyTrustedEvent(context, eventType);
         } else {
@@ -252,7 +242,7 @@ public class ExternalEventService {
     }
 
     /**
-     * A-only implementation detail, not a service-authentication or recovery entry point.
+     * Internal implementation detail, not a service-authentication or recovery entry point.
      * Synchronizations suspend with REQUIRES_NEW and disappear when this transaction ends.
      */
     public static Command applying(TrustedEventContext context, String eventType, String eventId) {

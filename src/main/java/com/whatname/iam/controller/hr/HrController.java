@@ -2,7 +2,7 @@ package com.whatname.iam.controller.hr;
 
 import com.whatname.iam.common.api.ApiResponse;
 import com.whatname.iam.dto.hr.HrRequests;
-import com.whatname.iam.service.department.DepartmentCollaboration;
+import com.whatname.iam.service.department.DepartmentAccessService;
 import com.whatname.iam.service.hr.HrService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,9 +16,9 @@ import java.util.Map;
 @RequestMapping("/api/v1/integrations/hr")
 public class HrController {
     private final HrService service;
-    private final DepartmentCollaboration security;
+    private final DepartmentAccessService security;
 
-    public HrController(HrService service, DepartmentCollaboration security) {
+    public HrController(HrService service, DepartmentAccessService security) {
         this.service = service;
         this.security = security;
     }

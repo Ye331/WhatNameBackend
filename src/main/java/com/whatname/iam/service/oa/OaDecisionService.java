@@ -44,7 +44,7 @@ public class OaDecisionService {
                             return grants.apply(actor, request);
                         });
         if (!executed.get()) {
-            // A 重放原结果而不重复执行；仍检查服务当前范围，防止用旧范围越权读取。
+            // 重放原结果而不重复执行；仍检查服务当前范围，防止用旧范围越权读取。
             grants.requireReplayScope(actor, request);
             var replay = new LinkedHashMap<>(result);
             replay.put("idempotentReplay", true);

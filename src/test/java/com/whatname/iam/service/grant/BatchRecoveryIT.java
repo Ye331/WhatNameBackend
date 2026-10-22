@@ -45,7 +45,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** 真实生产 C 接点、A JWT、D 和隔离 MySQL。SQL 拦截器仅注入持久化故障。 */
+/** 真实的管理员、JWT、签名审计和隔离 MySQL；SQL 拦截器只注入持久化故障。 */
 @SpringBootTest(
         classes = {com.whatname.iam.IamApplication.class, BatchRecoveryIT.Application.class},
         properties = {"spring.config.import=", "iam.grant-batch.recovery.enabled=false"})
@@ -206,7 +206,7 @@ class BatchRecoveryIT {
     @Autowired GrantService grants;
     @Autowired AdminService admins;
     @Autowired AdminOrganizationLifecycle organization;
-    @Autowired com.whatname.iam.service.department.DepartmentCollaboration departmentAdapter;
+    @Autowired com.whatname.iam.service.department.DepartmentAccessService departmentAdapter;
     @Autowired com.whatname.iam.mapper.department.OrganizationWriteMapper organizationMapper;
     @Autowired com.whatname.iam.mapper.event.ExternalEventMapper eventMapper;
     @Autowired AuditService auditService;
@@ -277,12 +277,12 @@ class BatchRecoveryIT {
                 org.springframework.transaction.TransactionDefinition.ISOLATION_SERIALIZABLE);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,0,?,'Fixture','/')",
+                        + " VALUES(?,0,?,'Fixture','/')",
                 id(1),
                 "D" + b);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,?,?,'Fixture','/')",
+                        + " VALUES(?,?,?,'Fixture','/')",
                 id(2),
                 id(1),
                 "L" + b);
@@ -297,21 +297,21 @@ class BatchRecoveryIT {
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                    + " VALUES(?,1,?,1),(?,2,?,1)",
+                        + " VALUES(?,1,?,1),(?,2,?,1)",
                 id(10),
                 id(1),
                 id(11),
                 id(2));
         db.update(
                 "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                    + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
+                        + " VALUES(?,?,'Business',1),(?,?,'Manager',2)",
                 id(30),
                 "R" + b,
                 id(31),
                 "M" + b);
         db.update(
                 "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                    + " VALUES(?,?,?)",
+                        + " VALUES(?,?,?)",
                 id(11),
                 id(30),
                 id(10));
@@ -331,7 +331,7 @@ class BatchRecoveryIT {
                         "BUSINESS_VIEW")) {
             db.update(
                     "INSERT INTO sys_menu(id,app_id,parent_id,menu_code,menu_name,menu_type)"
-                        + " VALUES(?,?,0,?,'Fixture',2)",
+                            + " VALUES(?,?,0,?,'Fixture',2)",
                     id(n),
                     id(40),
                     code);
@@ -422,7 +422,7 @@ class BatchRecoveryIT {
     long audits() {
         return db.queryForObject(
                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND operation_type IN"
-                    + " ('USER_ROLE_GRANT','USER_ROLE_REVOKE')",
+                        + " ('USER_ROLE_GRANT','USER_ROLE_REVOKE')",
                 Long.class,
                 id(20));
     }
@@ -461,7 +461,7 @@ class BatchRecoveryIT {
     int attempts(long batch) {
         return db.queryForObject(
                 "SELECT attempts FROM sys_grant_batch_item WHERE batch_id=? ORDER BY user_id DESC"
-                    + " LIMIT 1",
+                        + " LIMIT 1",
                 Integer.class,
                 batch);
     }
@@ -545,7 +545,7 @@ class BatchRecoveryIT {
                                                     s -> {
                                                         db.queryForObject(
                                                                 "SELECT id FROM sys_user WHERE id=?"
-                                                                    + " FOR UPDATE",
+                                                                        + " FOR UPDATE",
                                                                 Long.class,
                                                                 id(20));
                                                         locked.countDown();
@@ -790,7 +790,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND"
-                                    + " operation_type='USER_ROLE_GRANT'",
+                                        + " operation_type='USER_ROLE_GRANT'",
                                 Integer.class,
                                 id(21)))
                 .isZero();
@@ -834,7 +834,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_grant_batch WHERE actor_user_id=? AND"
-                                    + " processing_status='COMPLETED'",
+                                        + " processing_status='COMPLETED'",
                                 Integer.class,
                                 id(10)))
                 .isEqualTo(101);
@@ -876,7 +876,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT attempts FROM sys_grant_batch_item WHERE batch_id=? AND"
-                                    + " user_id=?",
+                                        + " user_id=?",
                                 Integer.class,
                                 batch,
                                 id(11)))
@@ -884,7 +884,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " role_id=?",
+                                        + " role_id=?",
                                 Integer.class,
                                 id(11),
                                 id(30)))
@@ -984,7 +984,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_user WHERE id BETWEEN ? AND ? AND"
-                                    + " grant_revision=2",
+                                        + " grant_revision=2",
                                 Integer.class,
                                 id(100),
                                 id(2100)))
@@ -992,7 +992,7 @@ class BatchRecoveryIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id BETWEEN ?"
-                                    + " AND ? AND operation_type='USER_ROLE_GRANT'",
+                                        + " AND ? AND operation_type='USER_ROLE_GRANT'",
                                 Integer.class,
                                 id(100),
                                 id(2100)))

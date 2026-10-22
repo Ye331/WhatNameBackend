@@ -21,23 +21,20 @@ public class AdminService {
     private final AdminMapper mapper;
     private final AdminStateLoader loader;
     private final AdminRules rules;
-    private final AdminPorts.Identity identity;
-    private final AdminPorts.Functions functions;
-    private final AdminPorts.Integrity integrity;
-    private final AdminPorts.Audit audit;
+    private final RequestSecurity security;
+    private final AdminIntegrity integrity;
+    private final AdminAudit audit;
 
     public AdminService(
             AdminMapper mapper,
             AdminRules rules,
-            AdminPorts.Identity identity,
-            AdminPorts.Functions functions,
-            AdminPorts.Integrity integrity,
-            AdminPorts.Audit audit) {
+            RequestSecurity security,
+            AdminIntegrity integrity,
+            AdminAudit audit) {
         this.mapper = mapper;
         this.loader = new AdminStateLoader(mapper);
         this.rules = rules;
-        this.identity = identity;
-        this.functions = functions;
+        this.security = security;
         this.integrity = integrity;
         this.audit = audit;
     }
@@ -182,14 +179,14 @@ public class AdminService {
     }
 
     private Context begin(String permission, boolean write, Long targetId) {
-        long actorId = identity.currentUserId();
+        long actorId = security.currentUserId();
         if (actorId <= 0) fail(INVALID_TOKEN);
         var state =
                 targetId == null
                         ? loader.load(write, actorId)
                         : loader.load(write, actorId, targetId);
         integrity.verify(state);
-        functions.require(actorId, permission);
+        security.require(actorId, permission);
         rules.requireUsableUser(state, actorId);
         return new Context(actorId, state);
     }
@@ -199,7 +196,7 @@ public class AdminService {
         var after = loader.load(true, context.actorId(), targetId);
         integrity.sign(after, Set.copyOf(changed));
         audit.record(
-                new AdminPorts.Change(
+                new AdminAudit.Change(
                         operation,
                         context.actorId(),
                         targetId,

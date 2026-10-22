@@ -12,9 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.*;
 
-/**
- * Projection invariants after D seal verification; end-to-end verification is in GrantHistoryIT.
- */
+/** 审计封印验证后的投影规则；端到端验证见 GrantHistoryIT。 */
 class GrantHistoryEvidenceTest {
     Map<String, Object> source() {
         var source = new LinkedHashMap<String, Object>();

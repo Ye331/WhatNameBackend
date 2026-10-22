@@ -1,34 +1,46 @@
 package com.whatname.iam.common.security;
 
 import com.whatname.iam.entity.user.UserAccount;
+import com.whatname.iam.service.admin.AccountManagementPolicy;
+
+import org.springframework.stereotype.Service;
 
 import java.util.Set;
 
-/**
- * A-side boundary; the default management adapter now uses real C M5. D remains mandatory.
- * Implementations MUST join the caller's MySQL transaction, verify current facts, lock
- * authorization/scope for writes, and persist required signature/audit before returning. No
- * production allow implementation.
- */
-public interface AccountSecurity {
-    /**
-     * First call in a fresh A transaction, before A user/organization reads or locks. Include the
-     * operation's existing target user so C obtains actor/target in ID order.
-     */
-    default void prepareManagement(long actorId, long... targetUserIds) {}
+/** 账号模块的安全入口：先按统一锁序准备管理范围，再验签、检查功能权限、签名和审计。 全部加入调用方事务；审计只记录操作和原因，不记录密码、验证码或完整 JWT。 */
+@Service
+public class AccountSecurity {
+    private final AccountManagementPolicy policy;
+    private final ManagementDataSecurity data;
 
-    /** Existing C department-scope check is the first lock acquisition for new-user writes. */
-    default void prepareDepartmentManagement(long actorId, long departmentId) {
-        prepareManagement(actorId);
+    public AccountSecurity(AccountManagementPolicy policy, ManagementDataSecurity data) {
+        this.policy = policy;
+        this.data = data;
     }
 
-    void verifyIdentity(UserAccount user);
+    public void prepareManagement(long actorId, long... targets) {
+        policy.prepare(actorId, targets);
+    }
 
-    /** M5 current scope and M6 function check after prepareManagement; IDs are trusted DB facts. */
-    Set<Long> authorizeManagement(UserAccount actor, String permission);
+    public void prepareDepartmentManagement(long actorId, long departmentId) {
+        policy.prepareDepartment(actorId, departmentId);
+    }
 
-    void signIdentity(UserAccount user);
+    public void verifyIdentity(UserAccount user) {
+        data.verifyIdentity(user);
+    }
 
-    /** Sanitized operation and reason; never passwords, codes or full JWT. */
-    void audit(String operation, Long actorId, Long targetId, String reason);
+    public Set<Long> authorizeManagement(UserAccount actor, String permission) {
+        var scope = policy.scope(actor.id);
+        data.requireFunction(actor.id, permission);
+        return scope;
+    }
+
+    public void signIdentity(UserAccount user) {
+        data.signIdentity(user);
+    }
+
+    public void audit(String operation, Long actor, Long target, String reason) {
+        data.audit(operation, actor, target, reason);
+    }
 }

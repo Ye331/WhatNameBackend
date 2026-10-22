@@ -34,7 +34,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Real personal MySQL + real HTTP. C/D and SMS are explicitly TEST ONLY substitutes. */
+/** 临时 MySQL + 真实 HTTP。管理范围、签名审计和短信通道是仅用于测试的替身。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AccountAuthenticationIntegrationTest {
@@ -81,12 +81,12 @@ class AccountAuthenticationIntegrationTest {
         settings.put(
                 "iam.security.jwt-public-key",
                 Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
-        settings.put("iam.security.jwt-issuer", "task05-issuer");
-        settings.put("iam.security.jwt-audience", "task05-api");
-        settings.put("iam.security.jwt-key-id", "task05-random");
+        settings.put("iam.security.jwt-issuer", "acct-issuer");
+        settings.put("iam.security.jwt-audience", "acct-api");
+        settings.put("iam.security.jwt-key-id", "acct-random");
         context =
                 new SpringApplicationBuilder(TestBootstrap.class, TestWiring.class)
-                        .profiles("task05-test")
+                        .profiles("acct-test")
                         .properties(settings)
                         .run(
                                 TestDatabase.arguments(
@@ -151,7 +151,7 @@ class AccountAuthenticationIntegrationTest {
                                 || (name.startsWith("temp")
                                         && db.queryForObject(
                                                         "SELECT temp_reason FROM sys_user WHERE"
-                                                            + " id=?",
+                                                                + " id=?",
                                                         String.class,
                                                         id)
                                                 .startsWith(PREFIX)));
@@ -163,7 +163,7 @@ class AccountAuthenticationIntegrationTest {
             for (String phoneHash : fixturePhones)
                 db.update(
                         "UPDATE sys_sms_code SET consumed_at=COALESCE(consumed_at,NOW()) WHERE"
-                            + " phone_hash=?",
+                                + " phone_hash=?",
                         phoneHash);
             for (Long id : fixtureDepts)
                 db.update(
@@ -174,17 +174,17 @@ class AccountAuthenticationIntegrationTest {
                     originalDepartments,
                     db.queryForList(
                             "SELECT * FROM sys_dept WHERE dept_code LIKE 'TEST-SEED-%' ORDER BY"
-                                + " id"));
+                                    + " id"));
             assertEquals(
                     fixtureIds.size(),
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_user WHERE status=2 AND (username LIKE ? OR"
-                                + " temp_reason LIKE ?)",
+                                    + " temp_reason LIKE ?)",
                             Integer.class,
                             PREFIX + "%",
                             PREFIX + "%"));
             System.out.println(
-                    "TASK05_FIXTURES prefix="
+                    "ACCT_FIXTURES prefix="
                             + PREFIX
                             + " retiredUsers="
                             + fixtureIds.size()
@@ -193,7 +193,7 @@ class AccountAuthenticationIntegrationTest {
                             + " originalDepartmentsUnchanged=3");
         }
         if (context != null) context.close();
-        System.out.println("TASK05_HTTP_EVIDENCE " + String.join(" | ", HTTP_EVIDENCE));
+        System.out.println("ACCT_HTTP_EVIDENCE " + String.join(" | ", HTTP_EVIDENCE));
     }
 
     @Test
@@ -400,7 +400,7 @@ class AccountAuthenticationIntegrationTest {
                     i,
                     db.queryForObject(
                             "SELECT attempts FROM sys_sms_code WHERE phone_hash=? AND"
-                                + " purpose='SET_PASSWORD' ORDER BY id DESC LIMIT 1",
+                                    + " purpose='SET_PASSWORD' ORDER BY id DESC LIMIT 1",
                             Integer.class,
                             u.phoneHash));
         }
@@ -411,7 +411,7 @@ class AccountAuthenticationIntegrationTest {
         String expired = send(u, Purpose.SET_PASSWORD);
         db.update(
                 "UPDATE sys_sms_code SET expires_at=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE"
-                    + " phone_hash=?",
+                        + " phone_hash=?",
                 u.phoneHash);
         expect(
                 ErrorCode.INVALID_CREDENTIALS,
@@ -430,13 +430,13 @@ class AccountAuthenticationIntegrationTest {
                 1,
                 db.queryForObject(
                         "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at IS"
-                            + " NULL",
+                                + " NULL",
                         Integer.class,
                         u.phoneHash));
         String hash =
                 db.queryForObject(
                         "SELECT code_hash FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC"
-                            + " LIMIT 1",
+                                + " LIMIT 1",
                         String.class,
                         u.phoneHash);
         assertEquals(64, hash.length());
@@ -537,7 +537,7 @@ class AccountAuthenticationIntegrationTest {
             int before =
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_operation_log WHERE"
-                                + " source_system='TASK05_TEST' AND user_id=?",
+                                    + " source_system='ACCT_TEST' AND user_id=?",
                             Integer.class,
                             admin.id);
             http(
@@ -564,15 +564,15 @@ class AccountAuthenticationIntegrationTest {
                     before,
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_operation_log WHERE"
-                                + " source_system='TASK05_TEST' AND user_id=?",
+                                    + " source_system='ACCT_TEST' AND user_id=?",
                             Integer.class,
                             admin.id));
             assertEquals(
                     0,
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_data_signature s LEFT JOIN sys_user u ON"
-                                + " u.id=s.data_id WHERE s.data_type='TASK05_USER' AND u.id IS"
-                                + " NULL",
+                                    + " u.id=s.data_id WHERE s.data_type='ACCT_USER' AND u.id IS"
+                                    + " NULL",
                             Integer.class));
         }
         gateway.failSign = false;
@@ -595,7 +595,7 @@ class AccountAuthenticationIntegrationTest {
         for (int i = 0; i < 5; i++)
             db.update(
                     "INSERT INTO sys_password_history(user_id,password_hash,created_at)"
-                        + " VALUES(?,?,DATE_SUB(NOW(),INTERVAL ? DAY))",
+                            + " VALUES(?,?,DATE_SUB(NOW(),INTERVAL ? DAY))",
                     u.id,
                     originalHash,
                     i + 1);
@@ -615,7 +615,7 @@ class AccountAuthenticationIntegrationTest {
                 mapper.findById(u.id).passwordHash,
                 db.queryForObject(
                         "SELECT password_hash FROM sys_password_history WHERE user_id=? ORDER BY"
-                            + " created_at DESC,id DESC LIMIT 1",
+                                + " created_at DESC,id DESC LIMIT 1",
                         String.class,
                         u.id));
     }
@@ -707,12 +707,12 @@ class AccountAuthenticationIntegrationTest {
             fixturePhones.add(hash);
             var audits =
                     db.queryForList(
-                            "SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST' AND"
-                                + " user_id=? ORDER BY id",
+                            "SELECT * FROM sys_operation_log WHERE source_system='ACCT_TEST' AND"
+                                    + " user_id=? ORDER BY id",
                             admin.id);
             int signatures =
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='TASK05_USER'",
+                            "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='ACCT_USER'",
                             Integer.class);
             try {
                 assertEquals(
@@ -742,14 +742,14 @@ class AccountAuthenticationIntegrationTest {
                 assertEquals(
                         audits,
                         db.queryForList(
-                                "SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST'"
-                                    + " AND user_id=? ORDER BY id",
+                                "SELECT * FROM sys_operation_log WHERE source_system='ACCT_TEST'"
+                                        + " AND user_id=? ORDER BY id",
                                 admin.id));
                 assertEquals(
                         signatures,
                         db.queryForObject(
                                 "SELECT COUNT(*) FROM sys_data_signature WHERE"
-                                    + " data_type='TASK05_USER'",
+                                        + " data_type='ACCT_USER'",
                                 Integer.class));
             } finally {
                 // Register even an unexpected old-implementation success for normal fixture
@@ -838,7 +838,7 @@ class AccountAuthenticationIntegrationTest {
                     0,
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at"
-                                + " IS NULL",
+                                    + " IS NULL",
                             Integer.class,
                             reset.phoneHash));
         }
@@ -850,14 +850,14 @@ class AccountAuthenticationIntegrationTest {
         // Legal nonempty ASCII fixture; current password and newest history stay valid and equal.
         db.update(
                 "INSERT INTO sys_password_history(user_id,password_hash,created_at)"
-                    + " VALUES(?,?,DATE_SUB(NOW(),INTERVAL 1 DAY))",
+                        + " VALUES(?,?,DATE_SUB(NOW(),INTERVAL 1 DAY))",
                 u.id,
-                "task15-invalid-encoding");
+                "enc-invalid-encoding");
         assertEquals(
                 u.passwordHash,
                 db.queryForObject(
                         "SELECT password_hash FROM sys_password_history WHERE user_id=? ORDER BY"
-                            + " created_at DESC,id DESC LIMIT 1",
+                                + " created_at DESC,id DESC LIMIT 1",
                         String.class,
                         u.id));
         String proof = send(u, Purpose.RESET_PASSWORD);
@@ -961,7 +961,7 @@ class AccountAuthenticationIntegrationTest {
         int count =
                 db.queryForObject(
                         "SELECT COUNT(*) FROM sys_user WHERE dept_id IN (?,?,?) AND"
-                            + " LOCATE(?,username)>0",
+                                + " LOCATE(?,username)>0",
                         Integer.class,
                         allowedDept,
                         mergedDept,
@@ -1181,8 +1181,7 @@ class AccountAuthenticationIntegrationTest {
         long dept = nameDepartment("bad18");
         UserAccount good = named("张三", dept, 1, 2), bad = named("李四", dept, 1, 2);
         String path = "/users?deptId=" + dept + "&pageSize=1&keyword=" + good.username;
-        db.update(
-                "UPDATE sys_user SET real_name_ciphertext='invalid-gcm-task18' WHERE id=?", bad.id);
+        db.update("UPDATE sys_user SET real_name_ciphertext='invalid-gcm-name' WHERE id=?", bad.id);
         try {
             http("GET", path, null, adminToken, 503); // Bad identity may not be silently skipped.
             gateway.seedSignature(mapper.findById(bad.id));
@@ -1457,7 +1456,7 @@ class AccountAuthenticationIntegrationTest {
                                     "INSERT INTO sys_role(role_code,role_name) VALUES(?,?)",
                                     new String[] {"id"});
                     s.setString(1, PREFIX + "grant");
-                    s.setString(2, "TASK05 grant fixture");
+                    s.setString(2, "ACCT grant fixture");
                     return s;
                 },
                 roleKey);
@@ -1465,7 +1464,7 @@ class AccountAuthenticationIntegrationTest {
         db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)", u.id, roleId);
         db.update(
                 "INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref)"
-                    + " VALUES(?,?,'MANUAL',?)",
+                        + " VALUES(?,?,'MANUAL',?)",
                 u.id,
                 roleId,
                 PREFIX + "grant");
@@ -1519,7 +1518,7 @@ class AccountAuthenticationIntegrationTest {
             db.update("UPDATE sys_role SET status=0 WHERE id=?", roleId);
             db.update(
                     "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE user_id=? AND"
-                        + " role_id=?",
+                            + " role_id=?",
                     u.id,
                     roleId);
             db.update("DELETE FROM sys_user_role WHERE user_id=? AND role_id=?", u.id, roleId);
@@ -1602,7 +1601,7 @@ class AccountAuthenticationIntegrationTest {
         defaults.put("server.port", "18086");
         try (ConfigurableApplicationContext ordinary =
                 new SpringApplicationBuilder(TestBootstrap.class)
-                        .profiles("task05-default-proof")
+                        .profiles("acct-default-proof")
                         .properties(defaults)
                         .run(
                                 TestDatabase.arguments(
@@ -1636,20 +1635,20 @@ class AccountAuthenticationIntegrationTest {
                         "SELECT * FROM sys_sms_code WHERE phone_hash=? ORDER BY id", u.phoneHash));
         facts.addAll(
                 db.queryForList(
-                        "SELECT * FROM sys_data_signature WHERE data_type='TASK05_USER' AND"
-                            + " data_id=?",
+                        "SELECT * FROM sys_data_signature WHERE data_type='ACCT_USER' AND"
+                                + " data_id=?",
                         u.id));
         facts.addAll(
                 db.queryForList(
-                        "SELECT * FROM sys_operation_log WHERE source_system='TASK05_TEST' AND"
-                            + " target_id=? ORDER BY id",
+                        "SELECT * FROM sys_operation_log WHERE source_system='ACCT_TEST' AND"
+                                + " target_id=? ORDER BY id",
                         u.id));
         return facts;
     }
 
     private AuthService.LoginResult login(UserAccount u, String password) {
         return auth.login(
-                new Login(LoginType.USERNAME, u.username, password), "127.0.0.1", "TASK05_TEST");
+                new Login(LoginType.USERNAME, u.username, password), "127.0.0.1", "ACCT_TEST");
     }
 
     private String send(UserAccount u, Purpose purpose) {
@@ -1714,23 +1713,23 @@ class AccountAuthenticationIntegrationTest {
     private void ageSms(UserAccount u, Purpose purpose) {
         db.update(
                 "UPDATE sys_sms_code SET created_at=DATE_SUB(NOW(),INTERVAL 61 SECOND) WHERE"
-                    + " phone_hash=? AND purpose=?",
+                        + " phone_hash=? AND purpose=?",
                 u.phoneHash,
                 purpose.name());
     }
 
     private String fakeSignature(long id) {
         return db.queryForObject(
-                "SELECT signature FROM sys_data_signature WHERE data_type='TASK05_USER' AND"
-                    + " data_id=?",
+                "SELECT signature FROM sys_data_signature WHERE data_type='ACCT_USER' AND"
+                        + " data_id=?",
                 String.class,
                 id);
     }
 
     private int auditCount(long id) {
         return db.queryForObject(
-                "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='TASK05_TEST' AND"
-                    + " target_id=?",
+                "SELECT COUNT(*) FROM sys_operation_log WHERE source_system='ACCT_TEST' AND"
+                        + " target_id=?",
                 Integer.class,
                 id);
     }
@@ -1748,7 +1747,7 @@ class AccountAuthenticationIntegrationTest {
         assertNull(
                 db.queryForObject(
                         "SELECT consumed_at FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC"
-                            + " LIMIT 1",
+                                + " LIMIT 1",
                         java.sql.Timestamp.class,
                         u.phoneHash));
         assertEquals(signature, fakeSignature(u.id));
@@ -1812,7 +1811,7 @@ class AccountAuthenticationIntegrationTest {
                                         + " VALUES(?,?,?,?,?,?)",
                                     new String[] {"id"});
                     Object[] args = {
-                        parent, PREFIX + suffix, "TASK05 " + suffix, parentPath, status, null
+                        parent, PREFIX + suffix, "ACCT " + suffix, parentPath, status, null
                     };
                     for (int i = 0; i < args.length; i++) s.setObject(i + 1, args[i]);
                     return s;
@@ -1890,17 +1889,17 @@ class AccountAuthenticationIntegrationTest {
     public static class TestBootstrap {}
 
     @TestConfiguration(proxyBeanMethods = false)
-    @Profile("task05-test")
+    @Profile("acct-test")
     public static class TestWiring {
         @Bean
         @Primary
-        TestGateway task05Gateway(JdbcTemplate db) {
+        TestGateway acctGateway(JdbcTemplate db) {
             return new TestGateway(db);
         }
 
         @Bean
         @Primary
-        TestSms task05Sms() {
+        TestSms acctSms() {
             return new TestSms();
         }
     }
@@ -1925,8 +1924,8 @@ class AccountAuthenticationIntegrationTest {
         }
     }
 
-    /** Fake fingerprint + actual transaction-bound SQL evidence; NOT D Ed25519 or C M5. */
-    public static class TestGateway implements AccountSecurity {
+    /** 假指纹 + 事务内的真实 SQL 证据；不是真正的 Ed25519 签名或管理范围检查。 */
+    public static class TestGateway extends AccountSecurity {
         final JdbcTemplate db;
         final Map<Long, Set<Long>> managers = new ConcurrentHashMap<>();
         volatile boolean failVerify, failSign, failAudit, denyFunction, failDatabase;
@@ -1934,6 +1933,7 @@ class AccountAuthenticationIntegrationTest {
         volatile CountDownLatch read, release;
 
         TestGateway(JdbcTemplate db) {
+            super(null, null);
             this.db = db;
         }
 
@@ -1941,8 +1941,8 @@ class AccountAuthenticationIntegrationTest {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             String stored =
                     db.queryForObject(
-                            "SELECT signature FROM sys_data_signature WHERE data_type='TASK05_USER'"
-                                + " AND data_id=?",
+                            "SELECT signature FROM sys_data_signature WHERE data_type='ACCT_USER'"
+                                    + " AND data_id=?",
                             String.class,
                             u.id);
             if (failVerify || !fingerprint(u).equals(stored))
@@ -1976,8 +1976,8 @@ class AccountAuthenticationIntegrationTest {
         void seedSignature(UserAccount u) {
             db.update(
                     "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                        + " VALUES('TASK05_USER',?,?,'TASK05_FAKE') ON DUPLICATE KEY UPDATE"
-                        + " signature=VALUES(signature)",
+                            + " VALUES('ACCT_USER',?,?,'ACCT_FAKE') ON DUPLICATE KEY UPDATE"
+                            + " signature=VALUES(signature)",
                     u.id,
                     fingerprint(u));
         }
@@ -1987,7 +1987,7 @@ class AccountAuthenticationIntegrationTest {
             db.update(
                     "INSERT INTO"
                         + " sys_operation_log(user_id,request_id,source_system,operation_type,target_type,target_id,status,operation_desc)"
-                        + " VALUES(?,?,'TASK05_TEST',?,'USER',?,1,'C/D substitute; real integration"
+                        + " VALUES(?,?,'ACCT_TEST',?,'USER',?,1,'C/D substitute; real integration"
                         + " pending')",
                     actor,
                     PREFIX + UUID.randomUUID().toString().substring(0, 8),
@@ -2033,6 +2033,14 @@ class AccountAuthenticationIntegrationTest {
             } catch (Exception e) {
                 throw new AssertionError(e);
             }
+        }
+
+        @Override
+        public void prepareManagement(long actorId, long... targetUserIds) {}
+
+        @Override
+        public void prepareDepartmentManagement(long actorId, long departmentId) {
+            prepareManagement(actorId);
         }
     }
 }

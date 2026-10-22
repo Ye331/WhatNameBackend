@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
 /**
- * Internal reads only. These methods do not enforce M5 scope or DP01 authorization. A management
+ * Internal reads only. These methods do not enforce admin scope or DP01 authorization. A management
  * Service must check permissions and filter the returned organization data.
  */
 public interface DepartmentMapper {

@@ -47,10 +47,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Real A orchestration, C writes, D signatures/audit, isolated MySQL. Only unavailable service
- * authentication and A's final security adapter are test fixtures.
- */
+/** 真实的 HR 编排、授权写入、签名审计和隔离 MySQL；只有 HR 服务认证和账号安全入口是测试替身。 */
 @SpringBootTest(
         classes = {
             com.whatname.iam.IamApplication.class,
@@ -123,10 +120,10 @@ class HrGrantCollaborationIT {
     }
 
     @Autowired JdbcTemplate db;
-    @Autowired HrCollaboration c;
+    @Autowired HrGrantCollaboration c;
     @Autowired AdminOrganizationLifecycle lifecycle;
     @Autowired AdminPolicyService policy;
-    @Autowired DepartmentCollaboration productionTrust;
+    @Autowired DepartmentAccessService productionTrust;
     @Autowired OrganizationWriteMapper org;
     @Autowired UserAccountMapper users;
     @Autowired ExternalEventMapper eventMapper;
@@ -180,7 +177,7 @@ class HrGrantCollaborationIT {
         for (int d : List.of(1, 2, 3, 4))
             db.update(
                     "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                        + " VALUES(?,?,?,'Fixture',?)",
+                            + " VALUES(?,?,?,'Fixture',?)",
                     id(d),
                     d == 1 ? 0 : id(d == 4 ? 2 : 1),
                     code(d),
@@ -207,7 +204,7 @@ class HrGrantCollaborationIT {
         for (int r : List.of(30, 31, 32))
             db.update(
                     "INSERT INTO sys_role(id,role_code,role_name,role_type,status)"
-                        + " VALUES(?,?,'Fixture',?,?)",
+                            + " VALUES(?,?,'Fixture',?,?)",
                     id(r),
                     "R" + id(r),
                     r == 32 ? 2 : 1,
@@ -215,13 +212,13 @@ class HrGrantCollaborationIT {
         for (int r : List.of(30, 31))
             db.update(
                     "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                        + " VALUES(?,?,?)",
+                            + " VALUES(?,?,?)",
                     id(20),
                     id(r),
                     id(10));
         db.update(
                 "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                    + " VALUES(?,?,?),(?,?,?)",
+                        + " VALUES(?,?,?),(?,?,?)",
                 id(21),
                 id(30),
                 id(20),
@@ -280,8 +277,8 @@ class HrGrantCollaborationIT {
      * call.
      */
     HrService service() {
-        DepartmentCollaboration port =
-                new DepartmentCollaboration() {
+        DepartmentAccessService port =
+                new DepartmentAccessService(null, null, null, null, null, null, null) {
                     public Manager authenticateManager(
                             jakarta.servlet.http.HttpServletRequest r, String p) {
                         throw new UnsupportedOperationException();
@@ -332,9 +329,25 @@ class HrGrantCollaborationIT {
                                 evidence.get("eventId").toString(),
                                 evidence);
                     }
+
+                    @Override
+                    public void prepareManagement(Manager actor) {}
+
+                    @Override
+                    public void prepareDepartmentManagement(Manager actor, long departmentId) {
+                        prepareManagement(actor);
+                    }
+
+                    @Override
+                    public void prepareOrganizationChange(
+                            com.whatname.iam.service.event.TrustedEventContext actor,
+                            String eventId) {
+                        throw new com.whatname.iam.common.exception.BusinessException(
+                                com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE);
+                    }
                 };
         AccountSecurity identity =
-                new AccountSecurity() {
+                new AccountSecurity(null, null) {
                     public void verifyIdentity(UserAccount u) {
                         signatures.verify(USER_IDENTITY, u.id);
                     }
@@ -351,8 +364,16 @@ class HrGrantCollaborationIT {
                     public void audit(String o, Long a, Long t, String reason) {
                         throw new UnsupportedOperationException();
                     }
+
+                    @Override
+                    public void prepareManagement(long actorId, long... targetUserIds) {}
+
+                    @Override
+                    public void prepareDepartmentManagement(long actorId, long departmentId) {
+                        prepareManagement(actorId);
+                    }
                 };
-        var events = new ExternalEventService(eventMapper, codec, port, json, manager);
+        var events = new ExternalEventService(eventMapper, codec, port, json, manager, null);
         return new HrService(
                 events,
                 org,
@@ -366,7 +387,11 @@ class HrGrantCollaborationIT {
                 Clock.systemUTC());
     }
 
-    class Participant implements HrCollaboration {
+    class Participant extends HrGrantCollaboration {
+        Participant() {
+            super(null, null, null, null, null, null, null);
+        }
+
         public void prepare(TrustedEventContext a, String event, String type, String employeeNo) {
             if (protocol.equals("missing-prepare")) return;
             c.prepare(a, event, type, employeeNo);
@@ -455,11 +480,11 @@ class HrGrantCollaborationIT {
                 "person",
                 db.queryForList(
                         "SELECT id,dept_id,status,session_version,grant_revision,hr_version FROM"
-                            + " sys_user ORDER BY id"),
+                                + " sys_user ORDER BY id"),
                 "sources",
                 db.queryForList(
                         "SELECT id,user_id,role_id,status,revoked_by,revoked_at FROM"
-                            + " sys_user_role_source ORDER BY id"),
+                                + " sys_user_role_source ORDER BY id"),
                 "roles",
                 db.queryForList(
                         "SELECT user_id,role_id FROM sys_user_role ORDER BY user_id,role_id"),
@@ -469,7 +494,7 @@ class HrGrantCollaborationIT {
                 "lists",
                 db.queryForList(
                         "SELECT admin_user_id,role_id,configured_by FROM sys_admin_delegable_role"
-                            + " ORDER BY admin_user_id,role_id"));
+                                + " ORDER BY admin_user_id,role_id"));
     }
 
     void verifiable() {
@@ -524,14 +549,14 @@ class HrGrantCollaborationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT source_ref FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1 ORDER BY source_ref",
+                                        + " status=1 ORDER BY source_ref",
                                 String.class,
                                 id(20)))
                 .containsExactly("approval", "disabled", "manual", "other");
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_user_role WHERE user_id=? ORDER BY"
-                                    + " role_id",
+                                        + " role_id",
                                 Long.class,
                                 id(20)))
                 .containsExactly(id(30), id(32));
@@ -561,7 +586,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
                 .containsExactly(id(32));
@@ -574,7 +599,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isEqualTo(4);
         assertThat(scalar("SELECT grant_revision FROM sys_user WHERE id=?", id(20))).isEqualTo(2);
@@ -592,7 +617,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isZero();
         assertThat(scalar("SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=?", id(20)))
@@ -602,13 +627,13 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 id(20)))
                 .isZero();
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
                 .containsExactly(id(32));
@@ -667,7 +692,7 @@ class HrGrantCollaborationIT {
         var before =
                 db.queryForList(
                         "SELECT data_type,data_id,signature FROM sys_data_signature ORDER BY"
-                            + " data_type,data_id");
+                                + " data_type,data_id");
         var beforeFacts = facts();
         fault.point = point;
         assertThatThrownBy(() -> service().terminate(ACTOR, termination()))
@@ -679,7 +704,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isEqualTo(7);
         assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(20))).isEqualTo(1);
@@ -691,7 +716,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT data_type,data_id,signature FROM sys_data_signature ORDER"
-                                    + " BY data_type,data_id"))
+                                        + " BY data_type,data_id"))
                 .isEqualTo(before);
         assertThat(facts()).isEqualTo(beforeFacts);
         assertThat(state(event())).isEqualTo("PENDING_RECOVERY");
@@ -728,7 +753,7 @@ class HrGrantCollaborationIT {
             case "source" ->
                     db.update(
                             "UPDATE sys_user_role_source SET status=1,revoked_at=NULL WHERE"
-                                + " user_id=? AND source_ref='manual'",
+                                    + " user_id=? AND source_ref='manual'",
                             id(20));
             case "relation" ->
                     db.update(
@@ -792,17 +817,17 @@ class HrGrantCollaborationIT {
             case "missing-signature" ->
                     db.update(
                             "DELETE FROM sys_data_signature WHERE data_type='USER_GRANTS' AND"
-                                + " data_id=?",
+                                    + " data_id=?",
                             id(20));
             case "tamper" ->
                     db.update(
                             "UPDATE sys_user_role_source SET source_ref='tampered' WHERE user_id=?"
-                                + " AND source_ref='manual'",
+                                    + " AND source_ref='manual'",
                             id(20));
             case "unbacked-relation" ->
                     db.update(
                             "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE"
-                                + " user_id=? AND role_id=?",
+                                    + " user_id=? AND role_id=?",
                             id(20),
                             id(31));
             case "missing-relation" ->
@@ -832,7 +857,7 @@ class HrGrantCollaborationIT {
             assertThat(
                             scalar(
                                     "SELECT COUNT(*) FROM sys_data_signature WHERE"
-                                        + " data_type='USER_GRANTS' AND data_id=?",
+                                            + " data_type='USER_GRANTS' AND data_id=?",
                                     id(20)))
                     .isZero();
     }
@@ -860,7 +885,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isEqualTo(7);
         assertThat(
@@ -929,8 +954,8 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND"
-                                    + " operation_type IN"
-                                    + " ('HR_POSITION_REVOKE','HR_GRANTS_REVOKE_ALL')",
+                                        + " operation_type IN"
+                                        + " ('HR_POSITION_REVOKE','HR_GRANTS_REVOKE_ALL')",
                                 id(20)))
                 .isZero();
         verifiable();
@@ -985,7 +1010,7 @@ class HrGrantCollaborationIT {
                         () ->
                                 root.queryForObject(
                                                 "SELECT COUNT(*) FROM"
-                                                    + " performance_schema.data_lock_waits",
+                                                        + " performance_schema.data_lock_waits",
                                                 Long.class)
                                         > 0);
     }
@@ -1039,7 +1064,7 @@ class HrGrantCollaborationIT {
                                                 source(30, "MANUAL", "concurrent", null);
                                                 db.update(
                                                         "UPDATE sys_user SET grant_revision=2 WHERE"
-                                                            + " id=?",
+                                                                + " id=?",
                                                         id(20));
                                                 signatures.sign(USER_GRANTS, id(20));
                                                 signatures.sign(USER_IDENTITY, id(20));
@@ -1059,7 +1084,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isZero();
         assertThat(scalar("SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=?", id(20)))
@@ -1101,7 +1126,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=? OR configured_by=?",
+                                        + " admin_user_id=? OR configured_by=?",
                                 id(20),
                                 id(20)))
                 .isZero();
@@ -1110,7 +1135,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_admin_delegable_role WHERE"
-                                    + " admin_user_id=?",
+                                        + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
                 .containsExactly(id(32));
@@ -1123,7 +1148,7 @@ class HrGrantCollaborationIT {
         String encoded =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE external_event_id=? AND"
-                            + " operation_type='HR_GRANTS_REVOKE_ALL'",
+                                + " operation_type='HR_GRANTS_REVOKE_ALL'",
                         String.class,
                         event());
         var tree = json.readTree(encoded);
@@ -1135,7 +1160,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?"
-                                    + " AND user_id IS NOT NULL",
+                                        + " AND user_id IS NOT NULL",
                                 event()))
                 .isZero();
         assertThat(encoded).doesNotContain("13800000000", "测试员工", "password_hash", "ciphertext");

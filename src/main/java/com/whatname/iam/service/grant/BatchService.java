@@ -25,8 +25,7 @@ public class BatchService {
     private final BatchMapper mapper;
     private final AdminPolicyService policy;
     private final AdminRules rules;
-    private final AdminPorts.Identity identity;
-    private final AdminPorts.Functions functions;
+    private final RequestSecurity security;
     private final BatchRecoveryService recovery;
     private final TransactionTemplate write;
     private final TransactionTemplate read;
@@ -35,15 +34,13 @@ public class BatchService {
             BatchMapper mapper,
             AdminPolicyService policy,
             AdminRules rules,
-            AdminPorts.Identity identity,
-            AdminPorts.Functions functions,
+            RequestSecurity security,
             BatchRecoveryService recovery,
             PlatformTransactionManager manager) {
         this.mapper = mapper;
         this.policy = policy;
         this.rules = rules;
-        this.identity = identity;
-        this.functions = functions;
+        this.security = security;
         this.recovery = recovery;
         write = new TransactionTemplate(manager);
         write.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -53,7 +50,7 @@ public class BatchService {
     }
 
     public Submission submit(String key, Request request) {
-        // 必须在本入口的新事务中先加 M5 锁，再建立 D 的一致视图。
+        // 必须在本入口的新事务中先加管理锁，再读取功能权限。
         if (TransactionSynchronizationManager.isActualTransactionActive())
             throw new BusinessException(AUTH_STATE_UNAVAILABLE);
         var input = BatchInput.parse(key, request);
@@ -62,7 +59,7 @@ public class BatchService {
             return write.execute(
                     tx -> {
                         policy.requireAdministrator(actor);
-                        functions.require(actor, "IAM_GRANTS_WRITE");
+                        security.require(actor, "IAM_GRANTS_WRITE");
                         var existing = mapper.byKey(actor, key);
                         if (existing != null) return replay(actor, input, existing);
                         policy.requireDelegableRole(actor, input.roleId());
@@ -125,7 +122,7 @@ public class BatchService {
             // 唯一键竞争失败后，必须开启新事务读取已成功提交的任务，不能沿用失败事务的旧快照。
             return read.execute(
                     tx -> {
-                        functions.require(actor, "IAM_GRANTS_WRITE");
+                        security.require(actor, "IAM_GRANTS_WRITE");
                         var batch = mapper.byKey(actor, key);
                         if (batch == null) throw race;
                         return replay(actor, input, batch);
@@ -148,7 +145,7 @@ public class BatchService {
     }
 
     private Result view(long actor, long batchId, int page, int size) {
-        functions.require(actor, "IAM_GRANTS_VIEW");
+        security.require(actor, "IAM_GRANTS_VIEW");
         var batch = mapper.batch(batchId);
         if (batch == null) throw new BusinessException(RESOURCE_NOT_FOUND);
         var all = mapper.items(batchId);
@@ -218,7 +215,7 @@ public class BatchService {
     }
 
     private long actor() {
-        long actor = identity.currentUserId();
+        long actor = security.currentUserId();
         if (actor <= 0) throw new BusinessException(INVALID_TOKEN);
         return actor;
     }

@@ -15,7 +15,7 @@ import com.whatname.iam.mapper.department.OrganizationWriteMapper;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.department.*;
-import com.whatname.iam.service.hr.HrCollaboration;
+import com.whatname.iam.service.grant.HrGrantCollaboration;
 import com.whatname.iam.service.permission.*;
 import com.whatname.iam.service.user.UserService;
 import com.whatname.iam.support.TestDatabase;
@@ -70,8 +70,8 @@ class AccountIntegrityIntegrationTest {
     static class Fixtures {
         @Bean
         @Primary
-        AdminPorts.Integrity fixtureCIntegrity(DataSignatureService signatures) {
-            return new AdminPorts.Integrity() {
+        AdminIntegrity fixtureAdminIntegrity(DataSignatureService signatures) {
+            return new AdminIntegrity(null, null) {
                 public void verify(AdminState state) {
                     signatures.verify(ORGANIZATION, 0);
                     state.users().keySet().forEach(id -> signatures.verify(USER_IDENTITY, id));
@@ -212,15 +212,15 @@ class AccountIntegrityIntegrationTest {
         originalOrgSignatures =
                 db.queryForList(
                         "SELECT * FROM sys_data_signature WHERE data_type IN"
-                            + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id");
+                                + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id");
         dept =
                 db.queryForObject(
                         "SELECT id FROM sys_dept WHERE dept_code='TEST-SEED-ROOT'", Long.class);
         leaf =
                 db.queryForObject(
                         "SELECT id FROM sys_dept WHERE status=1 AND merged_into_dept_id IS NULL AND"
-                            + " dept_path LIKE ? AND id NOT IN (SELECT parent_id FROM sys_dept)"
-                            + " ORDER BY id LIMIT 1",
+                                + " dept_path LIKE ? AND id NOT IN (SELECT parent_id FROM sys_dept)"
+                                + " ORDER BY id LIMIT 1",
                         Long.class,
                         "/" + dept + "/%");
         tx.executeWithoutResult(
@@ -249,7 +249,7 @@ class AccountIntegrityIntegrationTest {
             long id =
                     insert(
                             "INSERT INTO sys_menu(app_id,parent_id,menu_code,menu_name,menu_type)"
-                                + " VALUES(?,0,?,?,2)",
+                                    + " VALUES(?,0,?,?,2)",
                             application,
                             permission,
                             permission);
@@ -290,7 +290,7 @@ class AccountIntegrityIntegrationTest {
                         for (long id : accounts) {
                             db.update(
                                     "UPDATE sys_user_role_source SET status=0,revoked_at=NOW()"
-                                        + " WHERE user_id=? AND status=1",
+                                            + " WHERE user_id=? AND status=1",
                                     id);
                             db.update("DELETE FROM sys_user_role WHERE user_id=?", id);
                             db.update(
@@ -329,7 +329,7 @@ class AccountIntegrityIntegrationTest {
                                     row.get("id"));
                         db.update(
                                 "DELETE FROM sys_data_signature WHERE data_type IN"
-                                    + " ('ORGANIZATION','DEPARTMENT')");
+                                        + " ('ORGANIZATION','DEPARTMENT')");
                         for (var row : originalOrgSignatures)
                             db.update(
                                     "INSERT INTO"
@@ -350,12 +350,12 @@ class AccountIntegrityIntegrationTest {
                     originalOrgSignatures,
                     db.queryForList(
                             "SELECT * FROM sys_data_signature WHERE data_type IN"
-                                + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id"));
+                                    + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id"));
             assertEquals(
                     accounts.size(),
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_user WHERE status=2 AND (username LIKE ? OR"
-                                + " temp_reason LIKE ?)",
+                                    + " temp_reason LIKE ?)",
                             Integer.class,
                             prefix + "%",
                             prefix + "%"));
@@ -363,15 +363,15 @@ class AccountIntegrityIntegrationTest {
                     0,
                     count(
                             "SELECT COUNT(*) FROM sys_user_role_source s JOIN sys_user u ON"
-                                + " u.id=s.user_id WHERE s.status=1 AND (u.username LIKE ? OR"
-                                + " u.temp_reason LIKE ?)",
+                                    + " u.id=s.user_id WHERE s.status=1 AND (u.username LIKE ? OR"
+                                    + " u.temp_reason LIKE ?)",
                             prefix + "%",
                             prefix + "%"));
             assertEquals(
                     0,
                     count(
                             "SELECT COUNT(*) FROM sys_user_role r JOIN sys_user u ON u.id=r.user_id"
-                                + " WHERE u.username LIKE ? OR u.temp_reason LIKE ?",
+                                    + " WHERE u.username LIKE ? OR u.temp_reason LIKE ?",
                             prefix + "%",
                             prefix + "%"));
             System.out.println(
@@ -387,21 +387,19 @@ class AccountIntegrityIntegrationTest {
     @Test
     void productionBeansAreSelectedAndUnprovenHrCallsRefuse() {
         assertInstanceOf(
-                ManagementDataSecurityService.class,
+                ManagementDataSecurity.class,
                 org.springframework.test.util.AopTestUtils.getUltimateTargetObject(data));
-        assertInstanceOf(AccountSecurityService.class, app.getBean(AccountSecurity.class));
-        expect(
-                ErrorCode.INVALID_TOKEN,
-                () -> app.getBean(AdminPorts.Identity.class).currentUserId());
+        assertInstanceOf(AccountSecurity.class, app.getBean(AccountSecurity.class));
+        expect(ErrorCode.INVALID_TOKEN, () -> app.getBean(RequestSecurity.class).currentUserId());
         expect(
                 ErrorCode.AUTH_STATE_UNAVAILABLE,
-                () -> app.getBean(AdminPorts.Functions.class).require(actor.id, "IAM_USERS_VIEW"));
+                () -> app.getBean(RequestSecurity.class).require(actor.id, "IAM_USERS_VIEW"));
         expect(
                 ErrorCode.INVALID_SERVICE,
                 () ->
-                        app.getBean(DepartmentCollaboration.class)
+                        app.getBean(DepartmentAccessService.class)
                                 .authenticateHr(new MockHttpServletRequest(), "HR_EMPLOYEE"));
-        var hr = app.getBean(HrCollaboration.class);
+        var hr = app.getBean(HrGrantCollaboration.class);
         assertInstanceOf(
                 com.whatname.iam.service.grant.HrGrantCollaboration.class,
                 org.springframework.test.util.AopTestUtils.getUltimateTargetObject(hr));
@@ -462,7 +460,7 @@ class AccountIntegrityIntegrationTest {
                 1,
                 count(
                         "SELECT COUNT(*) FROM sys_operation_log WHERE operation_type='AU01_LOGIN'"
-                            + " AND target_id=?",
+                                + " AND target_id=?",
                         target.id));
     }
 
@@ -510,7 +508,7 @@ class AccountIntegrityIntegrationTest {
                     1,
                     count(
                             "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND"
-                                + " purpose='SET_PASSWORD' AND consumed_at IS NOT NULL",
+                                    + " purpose='SET_PASSWORD' AND consumed_at IS NOT NULL",
                             created.phoneHash));
             assertEquals(1, count("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?", id));
             assertEquals(grants, signature(USER_GRANTS, id));
@@ -615,7 +613,7 @@ class AccountIntegrityIntegrationTest {
                     0,
                     count(
                             "SELECT COUNT(*) FROM sys_operation_log WHERE operation_type='AU05_SMS'"
-                                + " AND target_id=?",
+                                    + " AND target_id=?",
                             target.id));
             failure.fail = false;
             assertEquals(
@@ -667,7 +665,7 @@ class AccountIntegrityIntegrationTest {
                 0,
                 count(
                         "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='USER_IDENTITY'"
-                            + " AND data_id=?",
+                                + " AND data_id=?",
                         target.id));
     }
 
@@ -744,7 +742,7 @@ class AccountIntegrityIntegrationTest {
                 0,
                 count(
                         "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='USER_GRANTS' AND"
-                            + " data_id=?",
+                                + " data_id=?",
                         actor.id));
     }
 
@@ -781,7 +779,7 @@ class AccountIntegrityIntegrationTest {
                 0,
                 count(
                         "SELECT COUNT(*) FROM sys_operation_log WHERE operation_type='US04_STATUS'"
-                            + " AND target_id=?",
+                                + " AND target_id=?",
                         target.id));
     }
 
@@ -821,14 +819,14 @@ class AccountIntegrityIntegrationTest {
                 1,
                 count(
                         "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at IS"
-                            + " NULL",
+                                + " NULL",
                         target.phoneHash));
     }
 
     @Test
     void freezeAndUnfreezeSignWrittenDepartmentAndWholeOrganization() {
         var manager =
-                new DepartmentCollaboration.Manager(actor.id.toString(), jwt.verifyBearer(bearer));
+                new DepartmentAccessService.Manager(actor.id.toString(), jwt.verifyBearer(bearer));
         try {
             departments.freeze(manager, leaf, true, prefix + " freeze");
             signVerify(DEPARTMENT, leaf);
@@ -846,7 +844,7 @@ class AccountIntegrityIntegrationTest {
         String before = signature(DEPARTMENT, leaf), whole = signature(ORGANIZATION, 0);
         failure.fail = true;
         var manager =
-                new DepartmentCollaboration.Manager(actor.id.toString(), jwt.verifyBearer(bearer));
+                new DepartmentAccessService.Manager(actor.id.toString(), jwt.verifyBearer(bearer));
         expect(
                 ErrorCode.AUDIT_UNAVAILABLE,
                 () -> departments.freeze(manager, leaf, true, "rollback"));
@@ -904,7 +902,7 @@ class AccountIntegrityIntegrationTest {
                                             inner -> {
                                                 db.update(
                                                         "UPDATE sys_user SET session_version=2"
-                                                            + " WHERE id=?",
+                                                                + " WHERE id=?",
                                                         target.id);
                                                 signatures.sign(USER_IDENTITY, target.id);
                                             });
@@ -971,7 +969,7 @@ class AccountIntegrityIntegrationTest {
         accounts.add(id);
         db.update(
                 "INSERT INTO sys_password_history(user_id,password_hash) SELECT id,password_hash"
-                    + " FROM sys_user WHERE id=?",
+                        + " FROM sys_user WHERE id=?",
                 id);
         if (admin) {
             db.update(
@@ -981,7 +979,7 @@ class AccountIntegrityIntegrationTest {
             db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)", id, role);
             db.update(
                     "INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref)"
-                        + " VALUES(?,?,'MANUAL',?)",
+                            + " VALUES(?,?,'MANUAL',?)",
                     id,
                     role,
                     prefix + suffix);
@@ -1027,7 +1025,7 @@ class AccountIntegrityIntegrationTest {
     String evidence(String operation, long id) {
         return db.queryForObject(
                 "SELECT evidence FROM sys_operation_log WHERE operation_type=? AND target_id=?"
-                    + " ORDER BY id DESC LIMIT 1",
+                        + " ORDER BY id DESC LIMIT 1",
                 String.class,
                 operation,
                 id);

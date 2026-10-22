@@ -4,7 +4,6 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.mapper.admin.AdminMapper;
-import com.whatname.iam.service.admin.integration.CChangeEvidence;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.event.TrustedEventContext;
 
@@ -15,7 +14,7 @@ import org.springframework.transaction.support.*;
 
 import java.util.*;
 
-/** 参与 A/C 组织变更事务；服务身份认证由 A/D 在调用前完成。 */
+/** 参与组织变更事务，复核受影响的管理范围；服务身份认证须在调用前完成。 */
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class AdminOrganizationLifecycle {
@@ -23,13 +22,13 @@ public class AdminOrganizationLifecycle {
     private final AdminMapper mapper;
     private final AdminStateLoader loader;
     private final AdminRules rules;
-    private final AdminPorts.Integrity integrity;
+    private final AdminIntegrity integrity;
     private final ObjectProvider<AuditService> audit;
 
     public AdminOrganizationLifecycle(
             AdminMapper mapper,
             AdminRules rules,
-            AdminPorts.Integrity integrity,
+            AdminIntegrity integrity,
             ObjectProvider<AuditService> audit) {
         this.mapper = mapper;
         this.loader = new AdminStateLoader(mapper);
@@ -38,7 +37,7 @@ public class AdminOrganizationLifecycle {
         this.audit = audit;
     }
 
-    /** A 验证服务身份并锁定事件行后、读取组织或用户前调用；构造上下文不能代替认证。 */
+    /** 验证服务身份并锁定事件行后、读取组织或用户前调用；构造上下文不能代替认证。 */
     public void prepare(TrustedEventContext actor, String eventId) {
         prepare(actor, eventId, false);
     }
@@ -82,7 +81,7 @@ public class AdminOrganizationLifecycle {
                         if (!pending.applied) fail(AUTH_STATE_UNAVAILABLE);
                         var finalState = loader.loadOrganization();
                         if (!finalState.equals(pending.after)) fail(AUTH_STATE_UNAVAILABLE);
-                        // A 完成组织和人员的最终签名后，业务结果才能一起提交。
+                        // 组织和人员的最终签名完成后，业务结果才能一起提交。
                         integrity.verify(finalState);
                     }
 
@@ -240,7 +239,7 @@ public class AdminOrganizationLifecycle {
     }
 
     private Map<String, Object> evidence(AdminState state, long id) {
-        return CChangeEvidence.authority(
+        return ChangeEvidence.authority(
                 new AdminState(
                         Map.of(id, state.appointments().get(id)),
                         state.departments(),

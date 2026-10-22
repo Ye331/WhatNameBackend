@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.admin.AdminDtos.*;
+import com.whatname.iam.support.Fakes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -87,7 +88,7 @@ class AdminIT {
             }
             jdbc.update(
                     "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path,status)"
-                        + " VALUES(?,?,?,?,?,?)",
+                            + " VALUES(?,?,?,?,?,?)",
                     id(department.id()),
                     department.parentId() == 0 ? 0 : id(department.parentId()),
                     "D" + id(department.id()),
@@ -113,7 +114,7 @@ class AdminIT {
         for (var role : data.roles.values()) {
             jdbc.update(
                     "INSERT INTO sys_role(id,role_code,role_name,role_type,status)"
-                        + " VALUES(?,?,?,?,?)",
+                            + " VALUES(?,?,?,?,?)",
                     id(role.id()),
                     "R" + id(role.id()),
                     "test role",
@@ -135,7 +136,7 @@ class AdminIT {
         for (var item : data.delegations) {
             jdbc.update(
                     "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                        + " VALUES(?,?,?)",
+                            + " VALUES(?,?,?)",
                     id(item.adminUserId()),
                     id(item.roleId()),
                     id(item.configuredBy()));
@@ -401,20 +402,14 @@ class AdminIT {
 
         @Bean
         @Primary
-        AdminPorts.Identity testIdentity(TestState state) {
-            return state.actor::get;
+        RequestSecurity testSecurity(TestState state) {
+            return Fakes.security(state.actor::get, (actor, permission) -> {});
         }
 
         @Bean
         @Primary
-        AdminPorts.Functions testFunctions() {
-            return (actor, permission) -> {};
-        }
-
-        @Bean
-        @Primary
-        AdminPorts.Integrity testIntegrity(TestState state) {
-            return new AdminPorts.Integrity() {
+        AdminIntegrity testIntegrity(TestState state) {
+            return new AdminIntegrity(null, null) {
                 public void verify(AdminState facts) {}
 
                 public void sign(AdminState facts, Set<Long> changed) {
@@ -426,20 +421,22 @@ class AdminIT {
 
         @Bean
         @Primary
-        AdminPorts.Audit testAudit(TestState state, JdbcTemplate jdbc) {
-            return change -> {
-                jdbc.update(
-                        "INSERT INTO"
-                            + " sys_operation_log(user_id,request_id,operation_type,operation_desc,target_type,target_id,status)"
-                            + " VALUES(?,?,?,?,?,?,1)",
-                        change.actorId(),
-                        UUID.randomUUID().toString(),
-                        change.operation(),
-                        change.reason(),
-                        "ADMIN",
-                        change.targetId());
-                if ("AUDIT".equals(state.failure)) throw new BusinessException(AUDIT_UNAVAILABLE);
-            };
+        AdminAudit testAudit(TestState state, JdbcTemplate jdbc) {
+            return Fakes.adminAudit(
+                    change -> {
+                        jdbc.update(
+                                "INSERT INTO"
+                                    + " sys_operation_log(user_id,request_id,operation_type,operation_desc,target_type,target_id,status)"
+                                    + " VALUES(?,?,?,?,?,?,1)",
+                                change.actorId(),
+                                UUID.randomUUID().toString(),
+                                change.operation(),
+                                change.reason(),
+                                "ADMIN",
+                                change.targetId());
+                        if ("AUDIT".equals(state.failure))
+                            throw new BusinessException(AUDIT_UNAVAILABLE);
+                    });
         }
     }
 }

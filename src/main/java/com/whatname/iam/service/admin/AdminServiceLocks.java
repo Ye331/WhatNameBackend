@@ -16,9 +16,9 @@ import java.util.Objects;
 @Transactional(propagation = Propagation.MANDATORY)
 public class AdminServiceLocks {
     private final AdminStateLoader loader;
-    private final AdminPorts.Integrity integrity;
+    private final AdminIntegrity integrity;
 
-    public AdminServiceLocks(AdminMapper mapper, AdminPorts.Integrity integrity) {
+    public AdminServiceLocks(AdminMapper mapper, AdminIntegrity integrity) {
         this.loader = new AdminStateLoader(mapper);
         this.integrity = integrity;
     }

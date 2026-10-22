@@ -14,13 +14,21 @@ import com.whatname.iam.service.permission.ServiceRequestSignature;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import org.springframework.stereotype.Service;
+
 import java.util.*;
 
-/**
- * C management and organization review adapters. HR authentication/recovery and A's organization
- * signing still require their own production providers.
- */
-public class DepartmentAccessService implements DepartmentCollaboration {
+/** 部门模块的安全入口：管理员身份与范围、HR 服务认证、组织数据验签/签名和审计。 全部加入调用方事务；范围是当前已授权的部门 ID 集合，不是客户端提交的路径。 */
+@Service
+public class DepartmentAccessService {
+    public record Manager(
+            String actorId,
+            com.whatname.iam.common.security.JwtTokenService.SessionPrincipal session) {
+        public Manager(String actorId) {
+            this(actorId, null);
+        }
+    }
+
     private final AccountManagementPolicy policy;
     private final JwtTokenService jwt;
     private final AuthService auth;
@@ -70,7 +78,7 @@ public class DepartmentAccessService implements DepartmentCollaboration {
     }
 
     public Set<Long> scope(Manager actor, String permission, List<Department> organization) {
-        // The service already acquired C's current locks and checked the session before
+        // The service already acquired the admin locks and checked the session before
         // any organization read. Do not introduce another lock phase after those reads.
         requirePrincipal(actor);
         var result = policy.scope(actor.session().userId());

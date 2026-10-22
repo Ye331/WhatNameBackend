@@ -25,7 +25,7 @@ final class AdminStateLoader {
     }
 
     private AdminState load(boolean lock, boolean allUsers, long... userIds) {
-        // 第一阶段将 M5 写入串行化，包括委派清单的递归变更。
+        // 将管理员相关写入串行化，包括委派清单的递归变更。
         // 使用当前读和固定加锁顺序，避免并发写入时依赖可重复读事务中的旧快照。
         var appointments = index(mapper.selectAppointments(lock), Appointment::userId);
         var departments = index(mapper.selectDepartments(lock), Department::id);

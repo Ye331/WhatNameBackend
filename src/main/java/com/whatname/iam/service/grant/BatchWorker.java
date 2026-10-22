@@ -148,7 +148,7 @@ public class BatchWorker {
     private void apply(Batch batch, long itemId) {
         var item = mapper.lockItem(itemId);
         if (item == null || !"PENDING".equals(item.processingStatus())) return;
-        com.whatname.iam.service.admin.integration.CExecutionContext.batch(
+        com.whatname.iam.service.admin.AuthorizationContext.batch(
                 batch.actorUserId(), batch.id(), item.id());
         Object result;
         long source;

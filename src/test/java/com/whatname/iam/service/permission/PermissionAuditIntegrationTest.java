@@ -33,9 +33,7 @@ import java.security.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Opt-in real MySQL/HTTP. Only service authentication and the C integrity adapter are TEST wiring.
- */
+/** 真实 MySQL/HTTP；只有服务认证和管理员验签是测试替身。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PermissionAuditIntegrationTest {
@@ -73,18 +71,22 @@ class PermissionAuditIntegrationTest {
         }
 
         @Bean
-        TrustedApiCaller fixtureCaller(AtomicLong appId) {
-            return (request, body) -> {
-                if (!"fixture-only".equals(request.getHeader("X-Test-Service")))
-                    throw new BusinessException(
-                            com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE);
-                return appId.get();
+        ServiceApiCaller fixtureCaller(AtomicLong appId) {
+            return new ServiceApiCaller(null) {
+                @Override
+                public long authenticatedApplication(
+                        jakarta.servlet.http.HttpServletRequest request, byte[] body) {
+                    if (!"fixture-only".equals(request.getHeader("X-Test-Service")))
+                        throw new BusinessException(
+                                com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE);
+                    return appId.get();
+                }
             };
         }
 
         @Bean
-        AdminPorts.Integrity testCReadAdapter(DataSignatureService signatures) {
-            return new AdminPorts.Integrity() {
+        AdminIntegrity testCReadAdapter(DataSignatureService signatures) {
+            return new AdminIntegrity(null, null) {
                 public void verify(AdminState state) {
                     signatures.verify(ORGANIZATION, 0);
                     state.users().keySet().forEach(id -> signatures.verify(USER_IDENTITY, id));
@@ -199,7 +201,7 @@ class PermissionAuditIntegrationTest {
         root =
                 insert(
                         "INSERT INTO sys_dept(parent_id,dept_code,dept_name,dept_path)"
-                            + " VALUES(0,?,?, '/')",
+                                + " VALUES(0,?,?, '/')",
                         prefix + "r",
                         "Root");
         db.update("UPDATE sys_dept SET dept_path=? WHERE id=?", "/" + root + "/", root);
@@ -211,7 +213,7 @@ class PermissionAuditIntegrationTest {
         outsideUser = account(outside, "x");
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
-                    + " VALUES(?,1,?,1),(?,2,?,1)",
+                        + " VALUES(?,1,?,1),(?,2,?,1)",
                 admin,
                 root,
                 limited,
@@ -252,7 +254,7 @@ class PermissionAuditIntegrationTest {
         api =
                 insert(
                         "INSERT INTO sys_api(app_id,api_code,api_name,api_path,http_method)"
-                            + " VALUES(?,?,'Fixture','/records/{id}','GET')",
+                                + " VALUES(?,?,'Fixture','/records/{id}','GET')",
                         app,
                         prefix + "api");
         db.update(
@@ -510,7 +512,7 @@ class PermissionAuditIntegrationTest {
         var principal = jwt.verifyBearer(token);
         db.update(
                 "INSERT INTO sys_session_invalidation(user_id,jti,reason,expires_at)"
-                    + " VALUES(?,?,'LOGOUT',DATE_ADD(NOW(),INTERVAL 1 HOUR))",
+                        + " VALUES(?,?,'LOGOUT',DATE_ADD(NOW(),INTERVAL 1 HOUR))",
                 user,
                 principal.jti());
         http("POST", "/auth/check", body(), token, true, 401);
@@ -542,7 +544,7 @@ class PermissionAuditIntegrationTest {
         String before =
                 db.queryForObject(
                         "SELECT signature FROM sys_data_signature WHERE data_type='USER_IDENTITY'"
-                            + " AND data_id=?",
+                                + " AND data_id=?",
                         String.class,
                         user);
         long logs = db.queryForObject("SELECT COUNT(*) FROM sys_operation_log", Long.class);
@@ -572,7 +574,7 @@ class PermissionAuditIntegrationTest {
                 before,
                 db.queryForObject(
                         "SELECT signature FROM sys_data_signature WHERE data_type='USER_IDENTITY'"
-                            + " AND data_id=?",
+                                + " AND data_id=?",
                         String.class,
                         user));
         assertEquals(logs, db.queryForObject("SELECT COUNT(*) FROM sys_operation_log", Long.class));
@@ -686,7 +688,7 @@ class PermissionAuditIntegrationTest {
         long id =
                 insert(
                         "INSERT INTO sys_dept(parent_id,dept_code,dept_name,dept_path)"
-                            + " VALUES(?,?,?,?)",
+                                + " VALUES(?,?,?,?)",
                         parent,
                         prefix + code,
                         code,
@@ -708,7 +710,7 @@ class PermissionAuditIntegrationTest {
     private long menu(long parent, String code, int type) {
         return insert(
                 "INSERT INTO sys_menu(app_id,parent_id,menu_code,menu_name,menu_type,path)"
-                    + " VALUES(?,?,?,?,?,?)",
+                        + " VALUES(?,?,?,?,?,?)",
                 app,
                 parent,
                 code,
@@ -721,7 +723,7 @@ class PermissionAuditIntegrationTest {
         db.update("INSERT IGNORE INTO sys_user_role(user_id,role_id) VALUES(?,?)", account, roleId);
         db.update(
                 "INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref)"
-                    + " VALUES(?,?,?,?)",
+                        + " VALUES(?,?,?,?)",
                 account,
                 roleId,
                 type,
@@ -731,7 +733,7 @@ class PermissionAuditIntegrationTest {
     private void revokeSources(String type) {
         db.update(
                 "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE user_id=? AND"
-                    + " source_type=? AND status=1",
+                        + " source_type=? AND status=1",
                 user,
                 type);
     }

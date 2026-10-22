@@ -111,9 +111,13 @@ class OaDecisionIT {
         r.add("iam.security.data-key", () -> base64(new byte[32]));
     }
 
-    static class Caller implements TrustedOaCaller {
+    static class Caller extends ServiceOaCaller {
         final ThreadLocal<TrustedEventContext> issued = new ThreadLocal<>();
         volatile String client;
+
+        Caller() {
+            super(null);
+        }
 
         public TrustedEventContext authenticate(
                 jakarta.servlet.http.HttpServletRequest request, byte[] body) {
@@ -211,7 +215,7 @@ class OaDecisionIT {
         tx = new TransactionTemplate(manager);
         db.update(
                 "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path)"
-                    + " VALUES(?,0,?,'Fixture',?),(?,?,?,'Fixture',?),(?,0,?,'Fixture',?)",
+                        + " VALUES(?,0,?,'Fixture',?),(?,?,?,'Fixture',?),(?,0,?,'Fixture',?)",
                 id(1),
                 "D" + id(1),
                 "/" + id(1) + "/",
@@ -239,7 +243,7 @@ class OaDecisionIT {
         for (int r : List.of(30, 31, 32))
             db.update(
                     "INSERT INTO sys_role(id,role_code,role_name,role_type)"
-                        + " VALUES(?,?,'Fixture',?)",
+                            + " VALUES(?,?,'Fixture',?)",
                     id(r),
                     "R" + id(r),
                     r == 30 ? 1 : r == 31 ? 2 : 3);
@@ -335,14 +339,14 @@ class OaDecisionIT {
     long logs() {
         return count(
                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND"
-                    + " operation_type='OA_DECISION'",
+                        + " operation_type='OA_DECISION'",
                 id(20));
     }
 
     String eventState(String event) {
         return db.queryForObject(
                 "SELECT processing_status FROM sys_external_event WHERE source_system='OA' AND"
-                    + " event_id=?",
+                        + " event_id=?",
                 String.class,
                 event);
     }
@@ -384,7 +388,7 @@ class OaDecisionIT {
                 "person",
                 db.queryForList(
                         "SELECT dept_id,status,grant_revision,session_version FROM sys_user WHERE"
-                            + " id=?",
+                                + " id=?",
                         id(20)),
                 "sources",
                 db.queryForList(
@@ -395,7 +399,7 @@ class OaDecisionIT {
                 "signatures",
                 db.queryForList(
                         "SELECT data_type,signature FROM sys_data_signature WHERE data_id=? ORDER"
-                            + " BY data_type",
+                                + " BY data_type",
                         id(20)));
     }
 
@@ -435,7 +439,7 @@ class OaDecisionIT {
         assertThat(
                         db.queryForMap(
                                 "SELECT source_type,source_ref,status FROM sys_user_role_source"
-                                    + " WHERE user_id=?",
+                                        + " WHERE user_id=?",
                                 id(20)))
                 .containsEntry("source_type", "OA_APPROVAL")
                 .containsEntry("source_ref", approval())
@@ -443,13 +447,13 @@ class OaDecisionIT {
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " granted_by IS NULL AND source_dept_id IS NULL",
+                                        + " granted_by IS NULL AND source_dept_id IS NULL",
                                 id(20)))
                 .isEqualTo(1);
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM sys_user_role WHERE user_id=? AND granted_by"
-                                    + " IS NULL",
+                                        + " IS NULL",
                                 id(20)))
                 .isEqualTo(1);
         assertThat(revision()).isEqualTo(2);
@@ -499,7 +503,7 @@ class OaDecisionIT {
         assertThat(
                         db.queryForList(
                                 "SELECT source_type FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1 ORDER BY source_type",
+                                        + " status=1 ORDER BY source_type",
                                 String.class,
                                 id(20)))
                 .containsExactly("DEPT_POSITION", "MANUAL");
@@ -556,7 +560,7 @@ class OaDecisionIT {
             case "operation" ->
                     db.update(
                             "UPDATE sys_service_identity SET allowed_operations='[\"REVOKE\"]'"
-                                + " WHERE id=?",
+                                    + " WHERE id=?",
                             id(40));
             case "department" ->
                     db.update(
@@ -701,7 +705,7 @@ class OaDecisionIT {
             case "service-missing" ->
                     db.update(
                             "DELETE FROM sys_data_signature WHERE data_type='SERVICE_IDENTITY' AND"
-                                + " data_id=?",
+                                    + " data_id=?",
                             id(40));
             case "service-tamper" ->
                     db.update(
@@ -710,12 +714,12 @@ class OaDecisionIT {
             case "grants-missing" ->
                     db.update(
                             "DELETE FROM sys_data_signature WHERE data_type='USER_GRANTS' AND"
-                                + " data_id=?",
+                                    + " data_id=?",
                             id(20));
             case "identity-missing" ->
                     db.update(
                             "DELETE FROM sys_data_signature WHERE data_type='USER_IDENTITY' AND"
-                                + " data_id=?",
+                                    + " data_id=?",
                             id(20));
             case "inconsistent" -> {
                 db.update("INSERT INTO sys_user_role(user_id,role_id) VALUES(?,?)", id(20), id(30));
@@ -737,7 +741,7 @@ class OaDecisionIT {
             assertThat(
                             count(
                                     "SELECT COUNT(*) FROM sys_data_signature WHERE"
-                                        + " data_type='SERVICE_IDENTITY' AND data_id=?",
+                                            + " data_type='SERVICE_IDENTITY' AND data_id=?",
                                     id(40)))
                     .isZero();
     }
@@ -760,7 +764,7 @@ class OaDecisionIT {
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isEqualTo(2);
         verifiable();
@@ -778,7 +782,7 @@ class OaDecisionIT {
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id(20)))
                 .isEqualTo(1);
     }
@@ -844,7 +848,7 @@ class OaDecisionIT {
                         () ->
                                 root.queryForObject(
                                                 "SELECT COUNT(*) FROM"
-                                                    + " performance_schema.data_lock_waits",
+                                                        + " performance_schema.data_lock_waits",
                                                 Long.class)
                                         > 0);
     }
@@ -881,7 +885,7 @@ class OaDecisionIT {
         String encoded =
                 db.queryForObject(
                         "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                            + " operation_type='OA_DECISION'",
+                                + " operation_type='OA_DECISION'",
                         String.class,
                         id(20));
         var tree = json.readTree(encoded);
@@ -896,7 +900,7 @@ class OaDecisionIT {
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_id=? AND"
-                                    + " user_id IS NULL",
+                                        + " user_id IS NULL",
                                 id(20)))
                 .isEqualTo(1);
         assertThat(encoded)
@@ -912,7 +916,7 @@ class OaDecisionIT {
         assertThat(
                         db.queryForObject(
                                 "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                                    + " operation_type='OA_DECISION'",
+                                        + " operation_type='OA_DECISION'",
                                 String.class,
                                 id(20)))
                 .isEqualTo(encoded);
@@ -1009,7 +1013,7 @@ class OaDecisionIT {
                                             s -> {
                                                 db.queryForList(
                                                         "SELECT user_id FROM sys_admin ORDER BY"
-                                                            + " user_id FOR UPDATE");
+                                                                + " user_id FOR UPDATE");
                                                 locked.countDown();
                                                 try {
                                                     if (!release.await(15, TimeUnit.SECONDS))

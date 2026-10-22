@@ -16,6 +16,7 @@ import com.whatname.iam.mapper.department.OrganizationWriteMapper;
 import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
+import com.whatname.iam.service.grant.HrGrantCollaboration;
 import com.whatname.iam.service.hr.*;
 import com.whatname.iam.service.permission.*;
 import com.whatname.iam.support.TestDatabase;
@@ -41,11 +42,7 @@ import java.security.*;
 import java.time.OffsetDateTime;
 import java.util.*;
 
-/**
- * Actual A event/HR/organization services, MySQL transactions and D canonical signatures/audit. HR
- * service authentication and C HR/reapproval are explicit test-only substitutes. This does not
- * validate those missing production providers. No original user is changed.
- */
+/** 真实的事件、HR、组织服务，MySQL 事务和签名/审计；HR 服务认证和授权回收是测试替身， 这里不验证它们的生产实现。不修改原有用户。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class HrIntegrityIntegrationTest {
@@ -84,7 +81,7 @@ class HrIntegrityIntegrationTest {
         }
     }
 
-    static class FixtureDepartment implements DepartmentCollaboration {
+    static class FixtureDepartment extends DepartmentAccessService {
         final ManagementDataSecurity data;
         final DataSignatureService signatures;
         final JdbcTemplate db;
@@ -97,6 +94,7 @@ class HrIntegrityIntegrationTest {
 
         FixtureDepartment(
                 ManagementDataSecurity data, DataSignatureService signatures, JdbcTemplate db) {
+            super(null, null, null, null, null, null, null);
             this.data = data;
             this.signatures = signatures;
             this.db = db;
@@ -153,7 +151,7 @@ class HrIntegrityIntegrationTest {
             if (corruptMergedIdentity && !moved.isEmpty())
                 db.update(
                         "UPDATE sys_user SET password_hash='unexpected-fixture-mutation' WHERE"
-                            + " id=?",
+                                + " id=?",
                         moved.get(0).get("id"));
             if (corruptOtherDepartment)
                 db.update("UPDATE sys_dept SET status=0 WHERE id=?", unaffectedDepartment);
@@ -170,19 +168,29 @@ class HrIntegrityIntegrationTest {
                 }
                 signatures.verify(ORGANIZATION, 0);
                 throw new BusinessException(
-                        ErrorCode
-                                .AUTH_STATE_UNAVAILABLE); // Deliberately roll back HR01's new
-                                                          // member.
+                        ErrorCode.AUTH_STATE_UNAVAILABLE); // Deliberately roll back HR01's new
+                // member.
             }
+        }
+
+        @Override
+        public void prepareManagement(Manager actor) {}
+
+        @Override
+        public void prepareDepartmentManagement(Manager actor, long departmentId) {
+            prepareManagement(actor);
         }
     }
 
-    static class FixtureGrants implements HrCollaboration {
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.SUPPORTS)
+    static class FixtureGrants extends HrGrantCollaboration {
         final DataSignatureService signatures;
         final JdbcTemplate db;
         boolean omitCollectionSignature, corruptIdentity;
 
         FixtureGrants(DataSignatureService signatures, JdbcTemplate db) {
+            super(null, null, null, null, null, null, null);
             this.signatures = signatures;
             this.db = db;
         }
@@ -198,7 +206,8 @@ class HrIntegrityIntegrationTest {
 
         private void revoke(long id) {
             signatures.verify(USER_GRANTS, id);
-            // This fixture has no grants/appointments: only model C owning the revision and seal.
+            // This fixture has no grants/appointments: it only models the grant module owning the
+            // revision and seal.
             assertEquals(
                     0,
                     db.queryForObject(
@@ -209,7 +218,7 @@ class HrIntegrityIntegrationTest {
             if (corruptIdentity)
                 db.update(
                         "UPDATE sys_user SET password_hash='unexpected-fixture-mutation' WHERE"
-                            + " id=?",
+                                + " id=?",
                         id);
             if (!omitCollectionSignature) signatures.sign(USER_GRANTS, id);
         }
@@ -229,7 +238,7 @@ class HrIntegrityIntegrationTest {
                     0,
                     db.queryForObject(
                             "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                + " status=1",
+                                    + " status=1",
                             Integer.class,
                             id));
             assertEquals(
@@ -335,7 +344,9 @@ class HrIntegrityIntegrationTest {
         departments = app.getBean(DepartmentService.class);
         json = app.getBean(ObjectMapper.class);
         port = app.getBean(FixtureDepartment.class);
-        grants = app.getBean(FixtureGrants.class);
+        grants =
+                org.springframework.test.util.AopTestUtils.getUltimateTargetObject(
+                        app.getBean(FixtureGrants.class));
         failure = app.getBean(AuditFailure.class);
         tx = new TransactionTemplate(app.getBean(PlatformTransactionManager.class));
         tx.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
@@ -348,7 +359,7 @@ class HrIntegrityIntegrationTest {
         originalOrgSignatures =
                 db.queryForList(
                         "SELECT * FROM sys_data_signature WHERE data_type IN"
-                            + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id");
+                                + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id");
         var available =
                 db.queryForList(
                         "SELECT d.id,d.dept_code FROM sys_dept d WHERE d.parent_id<>0 AND"
@@ -418,7 +429,7 @@ class HrIntegrityIntegrationTest {
                         for (long id : accounts) {
                             db.update(
                                     "UPDATE sys_user SET status=2,session_version=session_version+1"
-                                        + " WHERE id=?",
+                                            + " WHERE id=?",
                                     id);
                             signatures.sign(USER_IDENTITY, id);
                             signatures.sign(USER_GRANTS, id);
@@ -426,7 +437,7 @@ class HrIntegrityIntegrationTest {
                         restoreDepartmentRows();
                         db.update(
                                 "DELETE FROM sys_data_signature WHERE data_type IN"
-                                    + " ('ORGANIZATION','DEPARTMENT')");
+                                        + " ('ORGANIZATION','DEPARTMENT')");
                         for (var row : originalOrgSignatures)
                             db.update(
                                     "INSERT INTO"
@@ -447,7 +458,7 @@ class HrIntegrityIntegrationTest {
                     originalOrgSignatures,
                     db.queryForList(
                             "SELECT * FROM sys_data_signature WHERE data_type IN"
-                                + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id"));
+                                    + " ('ORGANIZATION','DEPARTMENT') ORDER BY data_type,data_id"));
             for (long id : accounts) {
                 assertEquals(2, users.findById(id).status);
                 assertEquals(0, count("SELECT COUNT(*) FROM sys_user_role WHERE user_id=?", id));
@@ -455,7 +466,7 @@ class HrIntegrityIntegrationTest {
                         0,
                         count(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " status=1",
+                                        + " status=1",
                                 id));
                 assertEquals(
                         0,
@@ -681,7 +692,7 @@ class HrIntegrityIntegrationTest {
         var entries =
                 db.queryForList(
                         "SELECT target_type,target_id,evidence FROM sys_operation_log WHERE"
-                            + " external_event_id=? ORDER BY id",
+                                + " external_event_id=? ORDER BY id",
                         event);
         assertEquals(2, entries.size());
         for (var entry : entries) {
@@ -856,7 +867,7 @@ class HrIntegrityIntegrationTest {
                 0,
                 count(
                         "SELECT COUNT(*) FROM sys_data_signature WHERE data_type='DEPARTMENT' AND"
-                            + " data_id=?",
+                                + " data_id=?",
                         source));
     }
 
@@ -1012,7 +1023,7 @@ class HrIntegrityIntegrationTest {
     String eventStatus(String event) {
         return db.queryForObject(
                 "SELECT processing_status FROM sys_external_event WHERE source_system='HR' AND"
-                    + " event_id=?",
+                        + " event_id=?",
                 String.class,
                 event);
     }

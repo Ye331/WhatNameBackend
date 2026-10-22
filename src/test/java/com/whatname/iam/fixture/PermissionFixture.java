@@ -3,7 +3,7 @@ package com.whatname.iam.fixture;
 import java.util.List;
 
 /**
- * Deterministic, in-memory facts for D-module unit tests.
+ * Deterministic, in-memory facts for permission-module unit tests.
  *
  * <p>These values are not SQL seed data. They deliberately contain no password, private key,
  * database credential, or production identity, so loading the test class cannot affect an

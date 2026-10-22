@@ -1,8 +1,11 @@
 ﻿param(
-    [ValidateSet('setup','test','data')][string]$Action = 'setup',
+    [ValidateSet('setup','test','data','init','recover')][string]$Action = 'setup',
     [ValidateRange(1024,65535)][int]$Port = 3307,
     [switch]$Integration,
-    [string]$Python = 'python'
+    [string]$Python = 'python',
+    [string]$SuperUser = 'superadmin',
+    [string]$SuperName = '系统管理员',
+    [string]$SuperPhone = ''
 )
 # 从任意目录调用；不会重置已有数据库或覆盖已有个人配置。
 $ErrorActionPreference = 'Stop'
@@ -10,7 +13,23 @@ $projectDirectory = Split-Path -Parent $PSScriptRoot
 if ($Action -ne 'setup') {
     Push-Location $projectDirectory
     try {
-        if ($Action -eq 'test') {
+        if ($Action -eq 'init' -or $Action -eq 'recover') {
+            # 受控初始化：先整理 Excel，再由后端一次性导入空库；recover 只恢复超级用户。
+            $arguments = "--iam.init.mode=$Action --iam.init.super-username=$SuperUser"
+            if ($Action -eq 'init') {
+                & $Python (Join-Path $PSScriptRoot 'prepare-data.py')
+                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                if (-not $SuperPhone) { throw '请用 -SuperPhone 指定超级用户手机号' }
+                if (-not $env:IAM_INIT_SUPER_PASSWORD) {
+                    $secure = Read-Host '超级用户密码（至少 8 位，含字母和数字）' -AsSecureString
+                    $env:IAM_INIT_SUPER_PASSWORD = [System.Net.NetworkCredential]::new('', $secure).Password
+                }
+                $arguments = "--iam.init.mode=import --iam.init.data=target/prepared-data.json " +
+                    "--iam.init.super-username=$SuperUser --iam.init.super-name=$SuperName --iam.init.super-phone=$SuperPhone"
+            }
+            & (Join-Path $projectDirectory 'mvnw.cmd') spring-boot:run "-Dspring-boot.run.arguments=$arguments"
+            Remove-Item Env:IAM_INIT_SUPER_PASSWORD -ErrorAction SilentlyContinue
+        } elseif ($Action -eq 'test') {
             & $Python -m unittest discover -s scripts -p 'test_*.py' -v
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $profile = if ($Integration) { '-Pcoverage,integration-tests' } else { '-Pcoverage' }

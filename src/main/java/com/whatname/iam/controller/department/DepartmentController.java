@@ -4,7 +4,7 @@ import com.whatname.iam.common.api.ApiResponse;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.department.DepartmentRequests;
-import com.whatname.iam.service.department.DepartmentCollaboration;
+import com.whatname.iam.service.department.DepartmentAccessService;
 import com.whatname.iam.service.department.DepartmentService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,9 +18,9 @@ import java.util.Map;
 @RequestMapping("/api/v1")
 public class DepartmentController {
     private final DepartmentService service;
-    private final DepartmentCollaboration integration;
+    private final DepartmentAccessService integration;
 
-    public DepartmentController(DepartmentService service, DepartmentCollaboration integration) {
+    public DepartmentController(DepartmentService service, DepartmentAccessService integration) {
         this.service = service;
         this.integration = integration;
     }

@@ -15,6 +15,7 @@ import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.service.auth.*;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
+import com.whatname.iam.service.grant.HrGrantCollaboration;
 import com.whatname.iam.support.TestDatabase;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,7 +41,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Actual MySQL/HTTP/transactions/crypto. All C/D writes below are src/test-only substitutes. */
+/** 真实的 MySQL、HTTP、事务和加密；下面的授权与签名审计写入都是测试替身。 */
 @ExtendWith(TestDatabase.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class HrBusinessIntegrationTest {
@@ -75,6 +76,27 @@ class HrBusinessIntegrationTest {
             return new TestPort(db);
         }
 
+        @Bean
+        HrGrantCollaboration testGrants(TestPort port) {
+            return port.grants();
+        }
+
+        @Bean
+        AccountSecurity testIdentity(TestPort port) {
+            return port.identity();
+        }
+
+        /** 本测试不涉及 OA：OA 事件一律按无效服务拒绝。 */
+        @Bean
+        com.whatname.iam.service.permission.ServiceOaCaller noOa() {
+            return new com.whatname.iam.service.permission.ServiceOaCaller(null) {
+                @Override
+                public void verifyTrustedEvent(TrustedEventContext context, String eventType) {
+                    throw new BusinessException(ErrorCode.INVALID_SERVICE);
+                }
+            };
+        }
+
         @Bean(name = "hrClock")
         MutableClock hrClock() {
             return new MutableClock();
@@ -103,9 +125,9 @@ class HrBusinessIntegrationTest {
         SensitiveDataCodec.class,
         PasswordHasher.class,
         GlobalExceptionHandler.class,
-        DepartmentIntegrationConfiguration.class,
+        DepartmentAccessService.class,
         HrIntegrationConfiguration.class,
-        AccountSecurityConfiguration.class
+        AccountSecurity.class
     })
     static class DefaultApplication {}
 
@@ -125,17 +147,97 @@ class HrBusinessIntegrationTest {
         }
     }
 
-    /**
-     * Fake fingerprint, source reconciliation and SQL audit prove A's transaction boundary; they do
-     * not implement or validate C's production algorithms or D's Ed25519/service auth.
-     */
-    static class TestPort implements DepartmentCollaboration, HrCollaboration, AccountSecurity {
+    /** 用假指纹、来源对账和 SQL 审计验证 HR 流程的事务边界；不实现也不验证真实的授权算法、 Ed25519 签名或服务认证。 */
+    static class TestPort extends DepartmentAccessService {
         final JdbcTemplate db;
         volatile String fault = "";
         volatile long managementActor;
+        private final HrGrantCollaboration grants = new Grants();
+        private final AccountSecurity identity = new Identity();
+
+        /** 同一份测试状态同时充当部门、授权和账号三个模块的替身。 */
+        HrGrantCollaboration grants() {
+            return grants;
+        }
+
+        AccountSecurity identity() {
+            return identity;
+        }
+
+        @org.springframework.transaction.annotation.Transactional(
+                propagation = org.springframework.transaction.annotation.Propagation.SUPPORTS)
+        private class Grants extends HrGrantCollaboration {
+            Grants() {
+                super(null, null, null, null, null, null, null);
+            }
+
+            @Override
+            public void prepare(TrustedEventContext a, String e, String t, String no) {
+                TestPort.this.prepare(a, e, t, no);
+            }
+
+            @Override
+            public void complete(long userId) {
+                TestPort.this.complete(userId);
+            }
+
+            @Override
+            public void revokePosition(TrustedEventContext a, String e, long user, long dept) {
+                TestPort.this.revokePosition(a, e, user, dept);
+            }
+
+            @Override
+            public void revokeAll(TrustedEventContext a, String e, long user) {
+                TestPort.this.revokeAll(a, e, user);
+            }
+
+            @Override
+            public void requireRehireEligible(long user) {
+                TestPort.this.requireRehireEligible(user);
+            }
+
+            @Override
+            public void departmentChanged(long user, long old, long next) {
+                TestPort.this.departmentChanged(user, old, next);
+            }
+        }
+
+        private class Identity extends AccountSecurity {
+            Identity() {
+                super(null, null);
+            }
+
+            @Override
+            public void prepareManagement(long actorId, long... targetUserIds) {}
+
+            @Override
+            public void prepareDepartmentManagement(long actorId, long departmentId) {}
+
+            @Override
+            public void verifyIdentity(UserAccount u) {
+                TestPort.this.verifyIdentity(u);
+            }
+
+            @Override
+            public Set<Long> authorizeManagement(UserAccount a, String p) {
+                return TestPort.this.authorizeManagement(a, p);
+            }
+
+            @Override
+            public void signIdentity(UserAccount u) {
+                TestPort.this.signIdentity(u);
+            }
+
+            @Override
+            public void audit(String op, Long actor, Long target, String reason) {
+                TestPort.this.audit(op, actor, target, reason);
+            }
+        }
+
         volatile Set<Long> managementScope = Set.of();
 
         TestPort(JdbcTemplate db) {
+            super(null, null, null, null, null, null, null);
             this.db = db;
         }
 
@@ -162,13 +264,13 @@ class HrBusinessIntegrationTest {
         }
 
         public TrustedEventContext authenticateHr(HttpServletRequest r, String t) {
-            if (!"task07-hr".equals(r.getHeader("X-Test-Identity")))
+            if (!"hr-hr".equals(r.getHeader("X-Test-Identity")))
                 throw new BusinessException(ErrorCode.INVALID_SERVICE);
-            return new TrustedEventContext("HR", "task07-hr", "test-request");
+            return new TrustedEventContext("HR", "hr-hr", "test-request");
         }
 
         public void verifyTrustedEvent(TrustedEventContext c, String type) {
-            if (!"task07-hr".equals(c.clientId())
+            if (!"hr-hr".equals(c.clientId())
                     || !"HR".equals(c.sourceSystem())
                     || !Set.of("HR_EMPLOYEE", "HR_TRANSFER", "HR_TERMINATION").contains(type))
                 throw new BusinessException(ErrorCode.INVALID_SERVICE);
@@ -200,7 +302,7 @@ class HrBusinessIntegrationTest {
             db.update(
                     "INSERT INTO"
                         + " sys_operation_log(request_id,source_system,external_event_id,operation_type,target_type,target_id,operation_desc,evidence,status)"
-                        + " VALUES(?,'TASK07_TEST',?,?,'USER',?,'task07 C/D substitute',?,1)",
+                        + " VALUES(?,'HR_TEST',?,?,'USER',?,'hr C/D substitute',?,1)",
                     UUID.randomUUID().toString(),
                     e.get("eventId"),
                     op,
@@ -217,8 +319,8 @@ class HrBusinessIntegrationTest {
             stage("verify");
             String stored =
                     db.queryForObject(
-                            "SELECT signature FROM sys_data_signature WHERE data_type='TASK07_USER'"
-                                + " AND data_id=?",
+                            "SELECT signature FROM sys_data_signature WHERE data_type='HR_USER'"
+                                    + " AND data_id=?",
                             String.class,
                             u.id);
             if (!fingerprint(u).equals(stored))
@@ -240,8 +342,8 @@ class HrBusinessIntegrationTest {
         void seedSignature(UserAccount u) {
             db.update(
                     "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                        + " VALUES('TASK07_USER',?,?,'TASK07_FAKE') ON DUPLICATE KEY UPDATE"
-                        + " signature=VALUES(signature)",
+                            + " VALUES('HR_USER',?,?,'HR_FAKE') ON DUPLICATE KEY UPDATE"
+                            + " signature=VALUES(signature)",
                     u.id,
                     fingerprint(u));
         }
@@ -272,7 +374,7 @@ class HrBusinessIntegrationTest {
             lockFacts(user);
             db.update(
                     "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE user_id=? AND"
-                        + " status=1 AND source_type='DEPT_POSITION' AND source_dept_id=?",
+                            + " status=1 AND source_type='DEPT_POSITION' AND source_dept_id=?",
                     user,
                     dept);
             reconcile(user);
@@ -283,7 +385,7 @@ class HrBusinessIntegrationTest {
             lockFacts(user);
             db.update(
                     "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE user_id=? AND"
-                        + " status=1",
+                            + " status=1",
                     user);
             db.update("UPDATE sys_admin SET status=0 WHERE user_id=?", user);
             reconcile(user);
@@ -293,8 +395,8 @@ class HrBusinessIntegrationTest {
         void reconcile(long user) {
             db.update(
                     "DELETE r FROM sys_user_role r WHERE r.user_id=? AND NOT EXISTS (SELECT 1 FROM"
-                        + " sys_user_role_source s WHERE s.user_id=r.user_id AND"
-                        + " s.role_id=r.role_id AND s.status=1)",
+                            + " sys_user_role_source s WHERE s.user_id=r.user_id AND"
+                            + " s.role_id=r.role_id AND s.status=1)",
                     user);
             db.update("UPDATE sys_user SET grant_revision=grant_revision+1 WHERE id=?", user);
         }
@@ -303,7 +405,7 @@ class HrBusinessIntegrationTest {
             lockFacts(user);
             if (db.queryForObject(
                                     "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                        + " status=1",
+                                            + " status=1",
                                     Integer.class,
                                     user)
                             != 0
@@ -366,6 +468,21 @@ class HrBusinessIntegrationTest {
                 throw new AssertionError(e);
             }
         }
+
+        @Override
+        public void prepareManagement(Manager actor) {}
+
+        @Override
+        public void prepareDepartmentManagement(Manager actor, long departmentId) {
+            prepareManagement(actor);
+        }
+
+        @Override
+        public void prepareOrganizationChange(
+                com.whatname.iam.service.event.TrustedEventContext actor, String eventId) {
+            throw new com.whatname.iam.common.exception.BusinessException(
+                    com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE);
+        }
     }
 
     ServletWebServerApplicationContext app;
@@ -383,7 +500,7 @@ class HrBusinessIntegrationTest {
     long a, b, mergedId, role1, role2;
     List<Map<String, Object>> seedBefore;
     final AtomicInteger seq = new AtomicInteger();
-    final TrustedEventContext actor = new TrustedEventContext("HR", "task07-hr", "test-request");
+    final TrustedEventContext actor = new TrustedEventContext("HR", "hr-hr", "test-request");
     final OffsetDateTime time = OffsetDateTime.parse("2026-10-16T14:00:00+08:00");
     final List<String> evidence = new CopyOnWriteArrayList<>();
 
@@ -407,9 +524,9 @@ class HrBusinessIntegrationTest {
                                 "--iam.security.jwt-public-key="
                                         + Base64.getEncoder()
                                                 .encodeToString(keys.getPublic().getEncoded()),
-                                "--iam.security.jwt-issuer=task07",
-                                "--iam.security.jwt-audience=task07",
-                                "--iam.security.jwt-key-id=task07",
+                                "--iam.security.jwt-issuer=hr",
+                                "--iam.security.jwt-audience=hr",
+                                "--iam.security.jwt-key-id=hr",
                                 "--logging.level.root=WARN",
                                 "--spring.main.banner-mode=off"));
         app =
@@ -466,15 +583,15 @@ class HrBusinessIntegrationTest {
                         prefix + "%");
                 db.update(
                         "DELETE FROM sys_user_role WHERE user_id IN (SELECT id FROM sys_user WHERE"
-                            + " employee_no LIKE ?)",
+                                + " employee_no LIKE ?)",
                         prefix + "%");
                 db.update(
                         "UPDATE sys_admin SET status=0 WHERE user_id IN (SELECT id FROM sys_user"
-                            + " WHERE employee_no LIKE ?)",
+                                + " WHERE employee_no LIKE ?)",
                         prefix + "%");
                 db.update(
                         "UPDATE sys_user SET status=3,session_version=session_version+1 WHERE"
-                            + " employee_no LIKE ? AND status<>3",
+                                + " employee_no LIKE ? AND status<>3",
                         prefix + "%");
                 db.update("UPDATE sys_dept SET status=0 WHERE dept_code LIKE ?", prefix + "%");
                 db.update("UPDATE sys_role SET status=0 WHERE role_code LIKE ?", prefix + "%");
@@ -482,9 +599,9 @@ class HrBusinessIntegrationTest {
                         seedBefore,
                         db.queryForList(
                                 "SELECT * FROM sys_dept WHERE dept_code LIKE 'TEST-SEED-%' ORDER BY"
-                                    + " id"));
+                                        + " id"));
                 System.out.println(
-                        "TASK07_FIXTURES prefix="
+                        "HR_FIXTURES prefix="
                                 + prefix
                                 + " users="
                                 + db.queryForObject(
@@ -492,7 +609,7 @@ class HrBusinessIntegrationTest {
                                         Integer.class,
                                         prefix + "%")
                                 + " seedUnchanged=3");
-                System.out.println("TASK07_HTTP_EVIDENCE " + String.join(" | ", evidence));
+                System.out.println("HR_HTTP_EVIDENCE " + String.join(" | ", evidence));
             }
         } finally {
             if (app != null) app.close();
@@ -502,7 +619,7 @@ class HrBusinessIntegrationTest {
     long department(String code, Long target) {
         db.update(
                 "INSERT INTO sys_dept(parent_id,dept_code,dept_name,dept_path,merged_into_dept_id)"
-                    + " VALUES(0,?,?,'/',NULL)",
+                        + " VALUES(0,?,?,'/',NULL)",
                 code,
                 code);
         long id = db.queryForObject("SELECT id FROM sys_dept WHERE dept_code=?", Long.class, code);
@@ -619,13 +736,13 @@ class HrBusinessIntegrationTest {
         f.addAll(db.queryForList("SELECT * FROM sys_admin WHERE user_id=?", u.id));
         f.addAll(
                 db.queryForList(
-                        "SELECT * FROM sys_data_signature WHERE data_type='TASK07_USER' AND"
-                            + " data_id=?",
+                        "SELECT * FROM sys_data_signature WHERE data_type='HR_USER' AND"
+                                + " data_id=?",
                         u.id));
         f.addAll(
                 db.queryForList(
-                        "SELECT * FROM sys_operation_log WHERE source_system='TASK07_TEST' AND"
-                            + " target_id=? ORDER BY id",
+                        "SELECT * FROM sys_operation_log WHERE source_system='HR_TEST' AND"
+                                + " target_id=? ORDER BY id",
                         u.id));
         return f;
     }
@@ -635,7 +752,7 @@ class HrBusinessIntegrationTest {
     }
 
     JsonNode http(String method, String path, Object body, int status) throws Exception {
-        return httpAt(base, method, path, body, status, "task07-hr");
+        return httpAt(base, method, path, body, status, "hr-hr");
     }
 
     JsonNode httpAt(
@@ -1037,7 +1154,7 @@ class HrBusinessIntegrationTest {
                 3,
                 db.queryForObject(
                         "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND status=1 AND"
-                            + " (source_type<>'DEPT_POSITION' OR source_dept_id=?)",
+                                + " (source_type<>'DEPT_POSITION' OR source_dept_id=?)",
                         Integer.class,
                         u.id,
                         b));
@@ -1176,7 +1293,8 @@ class HrBusinessIntegrationTest {
                 "/integrations/hr/terminations",
                 new Termination("HR", event(), 3L, sg(), time),
                 404);
-        // Frozen and merged are independent: HR may assign a frozen target, M6 later blocks
+        // Frozen and merged are independent: HR may assign a frozen target, permission checks later
+        // block
         // business.
         db.update("UPDATE sys_dept SET status=0 WHERE id=?", b);
         try {
@@ -1399,9 +1517,9 @@ class HrBusinessIntegrationTest {
                         app.getBean(DepartmentService.class),
                         port,
                         users,
-                        port,
+                        port.identity(),
                         org.mockito.Mockito.mock(
-                                HrCollaboration.class,
+                                HrGrantCollaboration.class,
                                 invocation -> {
                                     throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
                                 }),

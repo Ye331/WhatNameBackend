@@ -1,5 +1,5 @@
-# 开发计划已归档
+# 开发计划
 
-两阶段分工属于历史资料，全文见 [achieve/DEVELOPMENT_PLAN.md](achieve/DEVELOPMENT_PLAN.md)。
+两阶段分工计划属于开发过程记录，已从工作区移除，需要时可在 git 历史中查看（`git log -- achieve/DEVELOPMENT_PLAN.md`）。
 
-当前按功能工作记录见 [重构清单](docs/GUIDE.md)，代码阅读入口见 [最终整合说明](docs/GUIDE.md)。本页仅保留为设计来源文件及已有外部链接的入口。
+当前代码阅读与功能说明见 [docs/GUIDE.md](docs/GUIDE.md)。本页保留是因为设计原件引用了这个路径。

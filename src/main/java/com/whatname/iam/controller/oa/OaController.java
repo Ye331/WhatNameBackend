@@ -7,7 +7,7 @@ import com.whatname.iam.common.api.ApiResponse;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.oa.OaDtos.Decision;
 import com.whatname.iam.service.oa.OaDecisionService;
-import com.whatname.iam.service.permission.TrustedOaCaller;
+import com.whatname.iam.service.permission.ServiceOaCaller;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -19,10 +19,10 @@ import java.util.Map;
 @RequestMapping("/api/v1/integrations/oa")
 public class OaController {
     private final OaDecisionService service;
-    private final TrustedOaCaller callers;
+    private final ServiceOaCaller callers;
     private final ObjectMapper json;
 
-    public OaController(OaDecisionService service, TrustedOaCaller callers, ObjectMapper json) {
+    public OaController(OaDecisionService service, ServiceOaCaller callers, ObjectMapper json) {
         this.service = service;
         this.callers = callers;
         this.json = json;

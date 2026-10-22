@@ -3,6 +3,7 @@ package com.whatname.iam.service.grant;
 import com.whatname.iam.entity.grant.GrantData.*;
 import com.whatname.iam.mapper.grant.GrantMapper;
 import com.whatname.iam.service.admin.*;
+import com.whatname.iam.support.Fakes;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -29,10 +30,10 @@ public class GrantTestFixture implements GrantMapper {
     public final Map<Long, Long> revisions = new HashMap<>();
     public final List<Source> sources = new ArrayList<>();
     public final List<EffectiveRole> effective = new ArrayList<>();
-    public final List<GrantPorts.Change> events = new ArrayList<>();
+    public final List<GrantAudit.Change> events = new ArrayList<>();
     public final List<GrantState> signed = new ArrayList<>();
-    public GrantPorts.Integrity integrity =
-            new GrantPorts.Integrity() {
+    public GrantIntegrity integrity =
+            new GrantIntegrity(null) {
                 public void verify(GrantState state) {}
 
                 public void sign(GrantState state) {
@@ -50,8 +51,10 @@ public class GrantTestFixture implements GrantMapper {
                 new GrantOperations(
                         this,
                         new AdminPolicyService(admins, new AdminRules(), admins.integrity),
-                        (actor, permission) -> admins.functions.require(actor, permission),
-                        new GrantPorts.Integrity() {
+                        Fakes.security(
+                                () -> admins.actorId,
+                                (actor, permission) -> admins.functions.require(actor, permission)),
+                        new GrantIntegrity(null) {
                             public void verify(GrantState state) {
                                 integrity.verify(state);
                             }
@@ -60,8 +63,8 @@ public class GrantTestFixture implements GrantMapper {
                                 integrity.sign(state);
                             }
                         },
-                        events::add),
-                () -> admins.actorId);
+                        Fakes.grantAudit(events::add)),
+                Fakes.security(() -> admins.actorId, (actor, permission) -> {}));
     }
 
     public Long selectRevision(long userId, boolean lock) {

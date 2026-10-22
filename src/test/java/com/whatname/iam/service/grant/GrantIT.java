@@ -8,6 +8,7 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.admin.AdminDtos;
 import com.whatname.iam.dto.grant.GrantDtos.*;
 import com.whatname.iam.service.admin.*;
+import com.whatname.iam.support.Fakes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -94,7 +95,7 @@ class GrantIT {
             }
             jdbc.update(
                     "INSERT INTO sys_dept(id,parent_id,dept_code,dept_name,dept_path,status)"
-                        + " VALUES(?,?,?,?,?,?)",
+                            + " VALUES(?,?,?,?,?,?)",
                     id(department.id()),
                     department.parentId() == 0 ? 0 : id(department.parentId()),
                     "D" + id(department.id()),
@@ -120,7 +121,7 @@ class GrantIT {
         for (var role : data.roles.values()) {
             jdbc.update(
                     "INSERT INTO sys_role(id,role_code,role_name,role_type,status)"
-                        + " VALUES(?,?,?,?,?)",
+                            + " VALUES(?,?,?,?,?)",
                     id(role.id()),
                     "R" + id(role.id()),
                     "grant test role",
@@ -142,7 +143,7 @@ class GrantIT {
         for (var delegation : data.delegations) {
             jdbc.update(
                     "INSERT INTO sys_admin_delegable_role(admin_user_id,role_id,configured_by)"
-                        + " VALUES(?,?,?)",
+                            + " VALUES(?,?,?)",
                     id(delegation.adminUserId()),
                     id(delegation.roleId()),
                     id(delegation.configuredBy()));
@@ -176,7 +177,7 @@ class GrantIT {
     private int audits() {
         return jdbc.queryForObject(
                 "SELECT COUNT(*) FROM sys_operation_log WHERE target_type='USER_GRANT' AND"
-                    + " target_id=?",
+                        + " target_id=?",
                 Integer.class,
                 id(6));
     }
@@ -212,7 +213,7 @@ class GrantIT {
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND"
-                                    + " revoked_by=? AND revoked_at IS NOT NULL",
+                                        + " revoked_by=? AND revoked_at IS NOT NULL",
                                 Integer.class,
                                 id(6),
                                 id(1)))
@@ -273,7 +274,7 @@ class GrantIT {
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT COUNT(*) FROM sys_data_signature WHERE"
-                                    + " data_type='TEST_GRANT' AND data_id=?",
+                                        + " data_type='TEST_GRANT' AND data_id=?",
                                 Integer.class,
                                 id(6)))
                 .isZero();
@@ -303,7 +304,7 @@ class GrantIT {
         var first = service.grant(request("WORK", "v1"));
         jdbc.update(
                 "INSERT INTO sys_user_role_source(user_id,role_id,source_type,source_ref,status)"
-                    + " VALUES(?,?,'OA_APPROVAL','OA-TEST',1)",
+                        + " VALUES(?,?,'OA_APPROVAL','OA-TEST',1)",
                 id(6),
                 id(100));
         state.actor.set(id(2));
@@ -491,24 +492,21 @@ class GrantIT {
 
         @Bean
         @Primary
-        AdminPorts.Identity identity(TestState state) {
-            return state.actor::get;
+        RequestSecurity security(TestState state) {
+            return Fakes.security(
+                    state.actor::get,
+                    (actor, permission) -> {
+                        assertThat(TransactionSynchronizationManager.isActualTransactionActive())
+                                .isTrue();
+                        if (permission.equals(state.deniedPermission))
+                            throw new BusinessException(PERMISSION_DENIED);
+                    });
         }
 
         @Bean
         @Primary
-        AdminPorts.Functions functions(TestState state) {
-            return (actor, permission) -> {
-                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
-                if (permission.equals(state.deniedPermission))
-                    throw new BusinessException(PERMISSION_DENIED);
-            };
-        }
-
-        @Bean
-        @Primary
-        AdminPorts.Integrity testAdminIntegrity() {
-            return new AdminPorts.Integrity() {
+        AdminIntegrity testAdminIntegrity() {
+            return new AdminIntegrity(null, null) {
                 public void verify(AdminState facts) {}
 
                 public void sign(AdminState facts, Set<Long> changed) {}
@@ -517,14 +515,14 @@ class GrantIT {
 
         @Bean
         @Primary
-        AdminPorts.Audit testAdminAudit() {
-            return change -> {};
+        AdminAudit testAdminAudit() {
+            return Fakes.adminAudit(change -> {});
         }
 
         @Bean
         @Primary
-        GrantPorts.Integrity testGrantIntegrity(TestState state, JdbcTemplate jdbc) {
-            return new GrantPorts.Integrity() {
+        GrantIntegrity testGrantIntegrity(TestState state, JdbcTemplate jdbc) {
+            return new GrantIntegrity(null) {
                 public void verify(GrantState facts) {
                     assertThat(TransactionSynchronizationManager.isActualTransactionActive())
                             .isTrue();
@@ -536,8 +534,8 @@ class GrantIT {
                     // 仅用于测试的非密码学签名替身，不会打入应用产物。
                     jdbc.update(
                             "INSERT INTO sys_data_signature(data_type,data_id,signature,key_id)"
-                                + " VALUES('TEST_GRANT',?,?,?) ON DUPLICATE KEY UPDATE"
-                                + " signature=?,key_id=?",
+                                    + " VALUES('TEST_GRANT',?,?,?) ON DUPLICATE KEY UPDATE"
+                                    + " signature=?,key_id=?",
                             facts.userId(),
                             "x".repeat(88),
                             "test-v" + facts.grantRevision(),
@@ -551,33 +549,37 @@ class GrantIT {
 
         @Bean
         @Primary
-        GrantPorts.Audit testGrantAudit(TestState state, JdbcTemplate jdbc) {
-            return change -> {
-                jdbc.update(
-                        "INSERT INTO"
-                            + " sys_operation_log(user_id,request_id,operation_type,operation_desc,target_type,target_id,status,evidence)"
-                            + " VALUES(?,?,?,?,'USER_GRANT',?,1,JSON_OBJECT('sourceId',?,'beforeRevision',?,'afterRevision',?,'remaining',?))",
-                        change.actorId(),
-                        UUID.randomUUID().toString(),
-                        change.operation(),
-                        change.reason(),
-                        change.userId(),
-                        change.sourceId(),
-                        change.before().grantRevision(),
-                        change.after().grantRevision(),
-                        change.after().sources().stream().filter(s -> s.status() == 1).count());
-                if ("AUDIT".equals(state.failure)) throw new BusinessException(AUDIT_UNAVAILABLE);
-                var afterCommit = state.afterGrantCommit;
-                if (afterCommit != null) {
-                    TransactionSynchronizationManager.registerSynchronization(
-                            new TransactionSynchronization() {
-                                @Override
-                                public void afterCommit() {
-                                    afterCommit.accept(change.userId());
-                                }
-                            });
-                }
-            };
+        GrantAudit testGrantAudit(TestState state, JdbcTemplate jdbc) {
+            return Fakes.grantAudit(
+                    change -> {
+                        jdbc.update(
+                                "INSERT INTO"
+                                    + " sys_operation_log(user_id,request_id,operation_type,operation_desc,target_type,target_id,status,evidence)"
+                                    + " VALUES(?,?,?,?,'USER_GRANT',?,1,JSON_OBJECT('sourceId',?,'beforeRevision',?,'afterRevision',?,'remaining',?))",
+                                change.actorId(),
+                                UUID.randomUUID().toString(),
+                                change.operation(),
+                                change.reason(),
+                                change.userId(),
+                                change.sourceId(),
+                                change.before().grantRevision(),
+                                change.after().grantRevision(),
+                                change.after().sources().stream()
+                                        .filter(s -> s.status() == 1)
+                                        .count());
+                        if ("AUDIT".equals(state.failure))
+                            throw new BusinessException(AUDIT_UNAVAILABLE);
+                        var afterCommit = state.afterGrantCommit;
+                        if (afterCommit != null) {
+                            TransactionSynchronizationManager.registerSynchronization(
+                                    new TransactionSynchronization() {
+                                        @Override
+                                        public void afterCommit() {
+                                            afterCommit.accept(change.userId());
+                                        }
+                                    });
+                        }
+                    });
         }
     }
 }
