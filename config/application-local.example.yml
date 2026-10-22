@@ -1,8 +1,30 @@
-# Docker方式运行scripts/setup-local.ps1自动生成配置；手动配置可复制此文件。
+# Docker方式运行scripts/dev.ps1 setup自动生成配置；手动配置可复制此文件。
 # 从backend目录启动；本地文件不会提交，禁止填入正式环境凭据。
 spring:
   datasource:
     url: jdbc:mysql://127.0.0.1:3307/unified_permission?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
     username: iam_dev
-    password: "填写个人本地数据库密码"
+    password: "__MYSQL_APP_PASSWORD__"
 # 不使用Docker时，按实际地址修改url。
+
+# 密钥通过环境变量提供；JWT 使用 RSA，事实签名使用独立 Ed25519 密钥。
+iam:
+  security:
+    data-key: ${IAM_DATA_KEY:}
+    phone-hmac-key: ${IAM_PHONE_HMAC_KEY:}
+    sms-hmac-key: ${IAM_SMS_HMAC_KEY:}
+    jwt-private-key: ${IAM_JWT_PRIVATE_KEY:}
+    jwt-public-key: ${IAM_JWT_PUBLIC_KEY:}
+    jwt-issuer: ${IAM_JWT_ISSUER:}
+    jwt-audience: ${IAM_JWT_AUDIENCE:}
+    jwt-key-id: ${IAM_JWT_KEY_ID:}
+    # Ed25519: PKCS#8 private DER / X.509 public DER, standard Base64.
+    # key-id must match a public-keys entry; retain historical public keys when rotating.
+    data-signing:
+      key-id: local-dev
+      private-key: ${IAM_DATA_SIGNING_PRIVATE_KEY:}
+      public-keys:
+        local-dev: ${IAM_DATA_SIGNING_PUBLIC_KEY:}
+  permission:
+    # Keep this aligned with frontend VITE_IAM_APP_CODE and the initialized IAM application.
+    management-app-code: ${IAM_MANAGEMENT_APP_CODE:IAM}

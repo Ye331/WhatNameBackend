@@ -39,6 +39,11 @@ public enum ErrorCode {
         this.message = message;
     }
 
-    public HttpStatus status() { return status; }
-    public String message() { return message; }
+    public HttpStatus status() {
+        return status;
+    }
+
+    public String message() {
+        return message;
+    }
 }

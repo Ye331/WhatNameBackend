@@ -2,14 +2,10 @@ package com.whatname.iam.service.resource;
 
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.common.util.RevisionUtils;
 import com.whatname.iam.common.util.RouteTemplateUtils;
 import com.whatname.iam.dto.common.PageRequest;
 import com.whatname.iam.dto.common.PageResponse;
-import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.permission.PermissionMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateApiRequest;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateApplicationRequest;
 import com.whatname.iam.dto.resource.ResourceRequests.CreateMenuRequest;
@@ -32,73 +28,65 @@ import com.whatname.iam.entity.resource.ApiEntity;
 import com.whatname.iam.entity.resource.ApplicationEntity;
 import com.whatname.iam.entity.resource.MenuEntity;
 import com.whatname.iam.mapper.resource.ResourceMapper;
-import com.whatname.iam.service.admin.AdminPolicyService;
+import com.whatname.iam.service.admin.ManagementAccessService;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.DataSignatureService;
-import com.whatname.iam.service.permission.PermissionService;
 import com.whatname.iam.service.permission.SignedDataType;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 @Transactional(readOnly = true)
 public class ResourceService {
-    private static final Set<String> HTTP_METHODS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
+    private static final Set<String> HTTP_METHODS =
+            Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
     private final ResourceMapper mapper;
-    private final PermissionService permissions;
-    private final AdminPolicyService adminPolicy;
+    private final ManagementAccessService access;
     private final DataSignatureService signatures;
     private final AuditService audit;
-    private final JwtTokenService jwt;
-    private final UserAccountMapper userAccounts;
-    private final PermissionMapper permissionMapper;
-    private final TransactionTemplate freshCheck;
     private final String protectedAppCode;
 
-    public ResourceService(ResourceMapper mapper, PermissionService permissions, AdminPolicyService adminPolicy,
-                           DataSignatureService signatures, AuditService audit, JwtTokenService jwt,
-                           UserAccountMapper userAccounts, PermissionMapper permissionMapper,
-                           PlatformTransactionManager tx,
-                           @Value("${app.system-app-code:IAM}") String protectedAppCode) {
+    public ResourceService(
+            ResourceMapper mapper,
+            ManagementAccessService access,
+            DataSignatureService signatures,
+            AuditService audit,
+            @Value("${iam.permission.management-app-code:IAM}") String protectedAppCode) {
         this.mapper = mapper;
-        this.permissions = permissions;
-        this.adminPolicy = adminPolicy;
+        this.access = access;
         this.signatures = signatures;
         this.audit = audit;
-        this.jwt = jwt;
-        this.userAccounts = userAccounts;
-        this.permissionMapper = permissionMapper;
-        freshCheck = new TransactionTemplate(tx);
-        freshCheck.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        freshCheck.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         this.protectedAppCode = protectedAppCode;
     }
 
     public PageResponse<ApplicationItem> listApplications(String bearer, PageRequest pageRequest) {
-        requireCurrentView(bearer);
+        access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         int total = mapper.countApplications();
-        List<ApplicationItem> items = mapper.listApplications(pageRequest.offset(), pageRequest.getPageSize())
-                .stream()
-                .map(app -> new ApplicationItem(app.getId(), app.getAppCode(), app.getAppName(), app.getStatus()))
-                .toList();
+        List<ApplicationItem> items =
+                mapper.listApplications(pageRequest.offset(), pageRequest.getPageSize()).stream()
+                        .map(
+                                app ->
+                                        new ApplicationItem(
+                                                app.getId(),
+                                                app.getAppCode(),
+                                                app.getAppName(),
+                                                app.getStatus()))
+                        .toList();
         return new PageResponse<>(items, pageRequest.getPage(), pageRequest.getPageSize(), total);
     }
 
     @Transactional
-    public CreateApplicationResult createApplication(String bearer, CreateApplicationRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+    public CreateApplicationResult createApplication(
+            String bearer, CreateApplicationRequest request) {
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         String appCode = request.getAppCode().trim().toUpperCase(Locale.ROOT);
         if (mapper.countApplicationCode(appCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
@@ -110,15 +98,28 @@ public class ResourceService {
         entity.setStatus(1);
         mapper.insertApplication(entity);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, entity.getId());
-        audit("RESOURCE_APPLICATION_CREATE", actorId, entity.getId(), request.getDescription(),
-                null, signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, entity.getId()),
-                Map.of("appCode", entity.getAppCode(), "appName", entity.getAppName(), "status", entity.getStatus()));
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_APPLICATION_CREATE",
+                actorId,
+                entity.getId(),
+                request.getDescription(),
+                null,
+                signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, entity.getId()),
+                Map.of(
+                        "appCode",
+                        entity.getAppCode(),
+                        "appName",
+                        entity.getAppName(),
+                        "status",
+                        entity.getStatus()));
         return new CreateApplicationResult(entity.getId(), entity.getAppCode(), entity.getStatus());
     }
 
     @Transactional
-    public UpdateApplicationResult updateApplication(String bearer, long appId, UpdateApplicationRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+    public UpdateApplicationResult updateApplication(
+            String bearer, long appId, UpdateApplicationRequest request) {
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         ApplicationEntity existing = requireApplication(appId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, appId);
         Integer status = request.getStatus();
@@ -128,7 +129,8 @@ public class ResourceService {
         if (status != null && status == 0 && isProtectedApp(existing)) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
         }
-        Map<String, Object> before = signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, appId);
+        Map<String, Object> before =
+                signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, appId);
         ApplicationEntity update = new ApplicationEntity();
         update.setId(appId);
         if (request.getAppName() != null) {
@@ -138,26 +140,43 @@ public class ResourceService {
         mapper.updateApplication(update);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
         Map<String, Object> after = signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, appId);
-        audit("RESOURCE_APPLICATION_UPDATE", actorId, appId, request.getReason(), before, after,
-                mapOf("appName", request.getAppName(), "status", status));
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_APPLICATION_UPDATE",
+                actorId,
+                appId,
+                request.getReason(),
+                before,
+                after,
+                AuditService.details("appName", request.getAppName(), "status", status));
         ApplicationEntity latest = requireApplication(appId);
         return new UpdateApplicationResult(latest.getId(), latest.getStatus());
     }
 
     public AppMenusResult listMenus(String bearer, long appId) {
-        requireCurrentView(bearer);
+        access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         requireApplication(appId);
-        List<MenuItem> menus = mapper.listMenusByAppId(appId)
-                .stream()
-                .map(menu -> new MenuItem(menu.getId(), menu.getMenuType(), menu.getStatus(), menu.getParentId()))
-                .toList();
+        List<MenuItem> menus =
+                mapper.listMenusByAppId(appId).stream()
+                        .map(
+                                menu ->
+                                        new MenuItem(
+                                                menu.getId(),
+                                                menu.getMenuType(),
+                                                menu.getStatus(),
+                                                menu.getParentId(),
+                                                menu.getMenuCode(),
+                                                menu.getMenuName(),
+                                                menu.getPath()))
+                        .toList();
         return new AppMenusResult(appId, menus);
     }
 
     @Transactional
     public CreateMenuResult createMenu(String bearer, long appId, CreateMenuRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         requireApplication(appId);
+        signatures.verify(SignedDataType.RESOURCE_APPLICATION, appId);
         int menuType = requireMenuType(request.getMenuType());
         Long parentId = request.getParentId();
         if (parentId < 0) {
@@ -186,15 +205,29 @@ public class ResourceService {
         signatures.sign(SignedDataType.RESOURCE_MENU, entity.getId());
         signatures.sign(SignedDataType.MENU_APIS, entity.getId());
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
-        audit("RESOURCE_MENU_CREATE", actorId, entity.getId(), request.getPath(),
-                null, signatures.snapshot(SignedDataType.RESOURCE_MENU, entity.getId()),
-                Map.of("appId", appId, "menuType", menuType, "parentId", parentId, "menuCode", entity.getMenuCode()));
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_MENU_CREATE",
+                actorId,
+                entity.getId(),
+                request.getPath(),
+                null,
+                signatures.snapshot(SignedDataType.RESOURCE_MENU, entity.getId()),
+                Map.of(
+                        "appId",
+                        appId,
+                        "menuType",
+                        menuType,
+                        "parentId",
+                        parentId,
+                        "menuCode",
+                        entity.getMenuCode()));
         return new CreateMenuResult(entity.getId(), entity.getMenuType(), entity.getStatus());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public UpdateMenuResult updateMenu(String bearer, long menuId, UpdateMenuRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         MenuEntity existing = requireMenu(menuId);
         signatures.verify(SignedDataType.RESOURCE_MENU, menuId);
         signatures.verify(SignedDataType.MENU_APIS, menuId);
@@ -235,28 +268,58 @@ public class ResourceService {
         signatures.sign(SignedDataType.MENU_APIS, menuId);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
         Map<String, Object> after = signatures.snapshot(SignedDataType.RESOURCE_MENU, menuId);
-        audit("RESOURCE_MENU_UPDATE", actorId, menuId, request.getReason(), before, after,
-                mapOf("parentId", parentId, "status", request.getStatus(), "menuName", request.getMenuName()));
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_MENU_UPDATE",
+                actorId,
+                menuId,
+                request.getReason(),
+                before,
+                after,
+                AuditService.details(
+                        "parentId",
+                        parentId,
+                        "status",
+                        request.getStatus(),
+                        "menuName",
+                        request.getMenuName()));
         MenuEntity latest = requireMenu(menuId);
         return new UpdateMenuResult(latest.getId(), latest.getParentId(), latest.getStatus());
     }
 
-    public PageResponse<ApiItem> listApis(String bearer, long appId, String httpMethod, PageRequest pageRequest) {
-        requireCurrentView(bearer);
+    public PageResponse<ApiItem> listApis(
+            String bearer, long appId, String httpMethod, PageRequest pageRequest) {
+        access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         requireApplication(appId);
         String normalizedMethod = normalizeMethod(httpMethod, true);
         long total = mapper.countApisByApp(appId, normalizedMethod);
-        List<ApiItem> items = mapper.listApisByApp(appId, normalizedMethod, pageRequest.offset(), pageRequest.getPageSize())
-                .stream()
-                .map(api -> new ApiItem(api.getId(), api.getApiCode(), api.getApiPath(), api.getHttpMethod(), api.getStatus()))
-                .toList();
-        return new PageResponse<>(items, pageRequest.getPage(), pageRequest.getPageSize(), (int) total);
+        List<ApiItem> items =
+                mapper
+                        .listApisByApp(
+                                appId,
+                                normalizedMethod,
+                                pageRequest.offset(),
+                                pageRequest.getPageSize())
+                        .stream()
+                        .map(
+                                api ->
+                                        new ApiItem(
+                                                api.getId(),
+                                                api.getApiCode(),
+                                                api.getApiPath(),
+                                                api.getHttpMethod(),
+                                                api.getStatus(),
+                                                api.getApiName()))
+                        .toList();
+        return new PageResponse<>(
+                items, pageRequest.getPage(), pageRequest.getPageSize(), (int) total);
     }
 
     @Transactional
     public CreateApiResult createApi(String bearer, long appId, CreateApiRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         requireApplication(appId);
+        signatures.verify(SignedDataType.RESOURCE_APPLICATION, appId);
         String method = normalizeMethod(request.getHttpMethod(), false);
         String apiPath = RouteTemplateUtils.normalizeTemplate(request.getApiPath());
         String canonical = RouteTemplateUtils.canonicalTemplate(apiPath);
@@ -273,16 +336,30 @@ public class ResourceService {
         mapper.insertApi(entity);
         signatures.sign(SignedDataType.RESOURCE_API, entity.getId());
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
-        audit("RESOURCE_API_CREATE", actorId, entity.getId(), request.getApiPath(), null,
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_API_CREATE",
+                actorId,
+                entity.getId(),
+                request.getApiPath(),
+                null,
                 signatures.snapshot(SignedDataType.RESOURCE_API, entity.getId()),
-                Map.of("appId", appId, "apiCode", entity.getApiCode(), "apiPath", entity.getApiPath(),
-                        "httpMethod", entity.getHttpMethod()));
-        return new CreateApiResult(entity.getId(), entity.getApiPath(), entity.getHttpMethod(), entity.getStatus());
+                Map.of(
+                        "appId",
+                        appId,
+                        "apiCode",
+                        entity.getApiCode(),
+                        "apiPath",
+                        entity.getApiPath(),
+                        "httpMethod",
+                        entity.getHttpMethod()));
+        return new CreateApiResult(
+                entity.getId(), entity.getApiPath(), entity.getHttpMethod(), entity.getStatus());
     }
 
     @Transactional
     public UpdateApiResult updateApi(String bearer, long apiId, UpdateApiRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         ApiEntity existing = requireApi(apiId);
         signatures.verify(SignedDataType.RESOURCE_API, apiId);
         signatures.verify(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
@@ -302,14 +379,21 @@ public class ResourceService {
         signatures.sign(SignedDataType.RESOURCE_API, apiId);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
         Map<String, Object> after = signatures.snapshot(SignedDataType.RESOURCE_API, apiId);
-        audit("RESOURCE_API_UPDATE", actorId, apiId, request.getReason(), before, after,
-                mapOf("apiName", request.getApiName(), "status", status));
+        audit.resourceChange(
+                "RESOURCE",
+                "RESOURCE_API_UPDATE",
+                actorId,
+                apiId,
+                request.getReason(),
+                before,
+                after,
+                AuditService.details("apiName", request.getApiName(), "status", status));
         ApiEntity latest = requireApi(apiId);
         return new UpdateApiResult(latest.getId(), latest.getStatus());
     }
 
     public MenuApisResult listMenuApis(String bearer, long menuId) {
-        requireCurrentView(bearer);
+        access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         MenuEntity menu = requireMenu(menuId);
         if (menu.getMenuType() != 2) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
@@ -319,11 +403,13 @@ public class ResourceService {
     }
 
     @Transactional
-    public MenuApisResult replaceMenuApis(String bearer, long menuId, ReplaceMenuApisRequest request) {
-        long actorId = requireCurrentWrite(bearer, "IAM_RESOURCES_WRITE");
+    public MenuApisResult replaceMenuApis(
+            String bearer, long menuId, ReplaceMenuApisRequest request) {
+        long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         MenuEntity menu = requireMenu(menuId);
         signatures.verify(SignedDataType.RESOURCE_MENU, menuId);
         signatures.verify(SignedDataType.MENU_APIS, menuId);
+        signatures.verify(SignedDataType.RESOURCE_APPLICATION, menu.getAppId());
         if (menu.getMenuType() != 2) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
         }
@@ -332,7 +418,7 @@ public class ResourceService {
             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
         }
 
-        List<Long> dedupApiIds = deduplicateIds(request.getApiIds());
+        List<Long> dedupApiIds = com.whatname.iam.common.util.IdUtils.distinct(request.getApiIds());
         if (!dedupApiIds.isEmpty()) {
             List<ApiEntity> apis = mapper.listApisByIds(dedupApiIds);
             if (apis.size() != dedupApiIds.size()) {
@@ -358,10 +444,19 @@ public class ResourceService {
         signatures.sign(SignedDataType.RESOURCE_MENU, menuId);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, menu.getAppId());
         Map<String, Object> after = signatures.snapshot(SignedDataType.MENU_APIS, menuId);
-        audit("MENU_APIS_REPLACE", actorId, menuId, request.getExpectedVersion(), before, after,
-                mapOf("apiIds", dedupApiIds, "expectedVersion", request.getExpectedVersion()));
+        audit.resourceChange(
+                "RESOURCE",
+                "MENU_APIS_REPLACE",
+                actorId,
+                menuId,
+                request.getExpectedVersion(),
+                before,
+                after,
+                AuditService.details(
+                        "apiIds", dedupApiIds, "expectedVersion", request.getExpectedVersion()));
         MenuEntity latest = requireMenu(menuId);
-        return new MenuApisResult(menuId, dedupApiIds, RevisionUtils.toVersion(latest.getApiRevision()));
+        return new MenuApisResult(
+                menuId, dedupApiIds, RevisionUtils.toVersion(latest.getApiRevision()));
     }
 
     private int requireMenuType(Integer menuType) {
@@ -369,46 +464,6 @@ public class ResourceService {
             throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         }
         return menuType;
-    }
-
-    private long actorId(String bearer) {
-        long actorId = jwt.verifyBearer(bearer).userId();
-        if (actorId <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_TOKEN);
-        }
-        return actorId;
-    }
-
-    private void requireCurrentView(String bearer) {
-        long actorId = actorId(bearer);
-        adminPolicy.requireAdministratorReadOnly(actorId);
-        permissions.requireFunction(actorId, "IAM_RESOURCES_VIEW");
-    }
-
-    private long requireCurrentWrite(String bearer, String permission) {
-        long actorId = actorId(bearer);
-        adminPolicy.requireLevelOne(actorId);
-        var principal = jwt.verifyBearer(bearer);
-        if (principal.userId() != actorId) {
-            throw new BusinessException(ErrorCode.INVALID_TOKEN);
-        }
-        recheckCurrentSessionAndFunction(principal, permission, actorId);
-        return actorId;
-    }
-
-    private void recheckCurrentSessionAndFunction(JwtTokenService.SessionPrincipal principal, String permission, long actorId) {
-        freshCheck.executeWithoutResult(status -> {
-            UserAccount user = userAccounts.findById(actorId);
-            if (user == null || user.status == null || user.status != 1
-                    || user.passwordInitialized == null || user.passwordInitialized != 1
-                    || user.sessionVersion == null || user.sessionVersion != principal.sessionVersion()) {
-                throw new BusinessException(ErrorCode.INVALID_TOKEN);
-            }
-            if (permissionMapper.invalidated(principal.jti()) != 0) {
-                throw new BusinessException(ErrorCode.INVALID_TOKEN);
-            }
-            permissions.requireFunction(actorId, permission);
-        });
     }
 
     private boolean isProtectedApp(ApplicationEntity app) {
@@ -453,7 +508,8 @@ public class ResourceService {
         return normalized;
     }
 
-    private void validateTemplateConflict(long appId, String method, String apiPath, Long excludeApiId) {
+    private void validateTemplateConflict(
+            long appId, String method, String apiPath, Long excludeApiId) {
         List<ApiEntity> existing = mapper.listApisByAppAndMethod(appId, method);
         for (ApiEntity candidate : existing) {
             if (excludeApiId != null && excludeApiId.equals(candidate.getId())) {
@@ -479,43 +535,5 @@ public class ResourceService {
             current = parent.getParentId();
         }
         return false;
-    }
-
-    private List<Long> deduplicateIds(List<Long> source) {
-        if (source == null) {
-            return List.of();
-        }
-        Set<Long> set = new LinkedHashSet<>();
-        for (Long id : source) {
-            if (id == null || id <= 0) {
-                throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
-            }
-            set.add(id);
-        }
-        return new ArrayList<>(set);
-    }
-
-    private void audit(String operation, long actorId, long targetId, String reason,
-                       Map<String, Object> before, Map<String, Object> after, Map<String, Object> details) {
-        Map<String, Object> evidence = new LinkedHashMap<>();
-        evidence.put("reason", reason);
-        if (before != null) {
-            evidence.put("before", before);
-        }
-        if (after != null) {
-            evidence.put("after", after);
-        }
-        if (details != null && !details.isEmpty()) {
-            evidence.put("details", details);
-        }
-        audit.change(operation, actorId, "RESOURCE", targetId, null, evidence);
-    }
-
-    private Map<String, Object> mapOf(Object... items) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        for (int i = 0; i < items.length; i += 2) {
-            map.put((String) items[i], items[i + 1]);
-        }
-        return map;
     }
 }

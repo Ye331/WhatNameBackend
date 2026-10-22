@@ -47,3 +47,7 @@ Thumbs.db
 Desktop.ini
 
 # 必须保留：.mvn/、mvnw、mvnw.cmd、pom.xml、compose.yaml、SQL及配置模板
+
+# Python 本地校验缓存
+__pycache__/
+*.pyc

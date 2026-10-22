@@ -1,0 +1,415 @@
+# 唯一手工联调入口。逐条执行，不要对真实数据使用“运行全部”。
+# 在 http-client.private.env.json 中填写变量，凭据与响应不提交。
+# accessToken 为管理账号令牌，targetToken 为被授权用户令牌；登录响应中复制令牌。
+# ID 与 expectedVersion 均取自当前查询响应，禁止照抄历史编号。
+# appCode=IAM 用于演示平台自身；平台应用禁止停用。
+# HR/OA 请求需要已登记服务身份和对实际请求字节生成的新时间戳、nonce、签名。
+# 此集合是手工示例；完整异常、回滚、并发验证在 src/test 中。
+@baseUrl = http://localhost:8080/api/v1
+@appCode = IAM
+
+### 连通性：GET /system/ping
+GET {{baseUrl}}/system/ping
+X-Request-Id: local-ping-001
+
+### 连通性：GET /system/database
+GET {{baseUrl}}/system/database
+
+### 登录与鉴权：POST /auth/login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{"loginType":"USERNAME","identifier":"{{username}}","password":"{{password}}"}
+
+### 登录与鉴权：POST /auth/sms/send
+POST {{baseUrl}}/auth/sms/send
+Content-Type: application/json
+
+{"phone":"{{phone}}","purpose":"SET_PASSWORD"}
+
+### 登录与鉴权：POST /auth/password/initialize
+POST {{baseUrl}}/auth/password/initialize
+Content-Type: application/json
+
+{"phone":"{{phone}}","code":"{{setPasswordCode}}","newPassword":"{{newPassword}}"}
+
+### 登录与鉴权：POST /auth/password/reset
+POST {{baseUrl}}/auth/password/reset
+Content-Type: application/json
+
+{"phone":"{{phone}}","code":"{{resetPasswordCode}}","newPassword":"{{newPassword}}"}
+
+### 登录与鉴权：POST /auth/logout
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{accessToken}}
+
+### 登录与鉴权：GET /auth/menus?appCode={{appCode}}
+GET {{baseUrl}}/auth/menus?appCode={{appCode}}
+Authorization: Bearer {{targetToken}}
+
+### 登录与鉴权：POST /auth/check
+POST {{baseUrl}}/auth/check
+Authorization: Bearer {{targetToken}}
+Content-Type: application/json
+
+{"httpMethod":"GET","routeTemplate":"{{routeTemplate}}"}
+
+### 账号与授权：GET /users?keyword={{keyword}}&page=1&pageSize=20
+GET {{baseUrl}}/users?keyword={{keyword}}&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### 账号与授权：GET /users/{{userId}}
+GET {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+
+### 账号与授权：POST /users/temporary
+POST {{baseUrl}}/users/temporary
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"realName":"{{realName}}","phone":"{{phone}}","deptId":"{{deptId}}","reason":"temporary support"}
+
+### 账号与授权：PATCH /users/{{userId}}/status
+PATCH {{baseUrl}}/users/{{userId}}/status
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"status":2,"reason":"temporary account paused"}
+
+### 账号与授权：GET /users/{{userId}}/roles
+GET {{baseUrl}}/users/{{userId}}/roles
+Authorization: Bearer {{accessToken}}
+
+### 账号与授权：GET /users/{{userId}}/roles/{{roleId}}/sources
+GET {{baseUrl}}/users/{{userId}}/roles/{{roleId}}/sources
+Authorization: Bearer {{accessToken}}
+
+### 组织：GET /departments?includeDescendants=true
+GET {{baseUrl}}/departments?includeDescendants=true
+Authorization: Bearer {{bearer}}
+
+### 组织：GET /departments/{{deptId}}/users?includeDescendants=true&page=1&pageSize=20
+GET {{baseUrl}}/departments/{{deptId}}/users?includeDescendants=true&page=1&pageSize=20
+Authorization: Bearer {{bearer}}
+
+### 组织：POST /departments/{{deptId}}/freeze
+POST {{baseUrl}}/departments/{{deptId}}/freeze
+Authorization: Bearer {{bearer}}
+Content-Type: application/json
+
+{"reason":"Organization review"}
+
+### 组织：POST /departments/{{deptId}}/unfreeze
+POST {{baseUrl}}/departments/{{deptId}}/unfreeze
+Authorization: Bearer {{bearer}}
+Content-Type: application/json
+
+{"reason":"Review completed"}
+
+### 应用资源：GET /applications?page=1&pageSize=20
+GET {{baseUrl}}/applications?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### 应用资源：POST /applications
+POST {{baseUrl}}/applications
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "appCode": "ATTEND",
+  "appName": "考勤系统",
+  "description": "演示业务系统"
+}
+
+### 应用资源：PATCH /applications/{{appId}}
+PATCH {{baseUrl}}/applications/{{appId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "status": 0,
+  "reason": "系统维护"
+}
+
+### 应用资源：GET /applications/{{appId}}/menus
+GET {{baseUrl}}/applications/{{appId}}/menus
+Authorization: Bearer {{accessToken}}
+
+### 应用资源：POST /applications/{{appId}}/menus
+POST {{baseUrl}}/applications/{{appId}}/menus
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "menuCode": "ROOT",
+  "menuName": "根目录",
+  "menuType": 1,
+  "parentId": 0,
+  "path": "/root"
+}
+
+### 应用资源：GET /applications/{{appId}}/apis?page=1&pageSize=20
+GET {{baseUrl}}/applications/{{appId}}/apis?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### 应用资源：POST /applications/{{appId}}/apis
+POST {{baseUrl}}/applications/{{appId}}/apis
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "apiCode": "ATTEND_LIST",
+  "apiName": "考勤记录查询",
+  "apiPath": "/attendance/records/{id}",
+  "httpMethod": "GET"
+}
+
+### 菜单：PATCH /menus/{{menuId}}
+PATCH {{baseUrl}}/menus/{{menuId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "menuName": "演示菜单",
+  "reason": "更新菜单名称"
+}
+
+### 菜单：GET /menus/{{menuId}}/apis
+GET {{baseUrl}}/menus/{{menuId}}/apis
+Authorization: Bearer {{accessToken}}
+
+### 菜单：PUT /menus/{{menuId}}/apis
+PUT {{baseUrl}}/menus/{{menuId}}/apis
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "apiIds": ["{{apiId}}"],
+  "expectedVersion": "{{expectedVersion}}"
+}
+
+### API：PATCH /apis/{{apiId}}
+PATCH {{baseUrl}}/apis/{{apiId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "status": 0,
+  "reason": "接口停用"
+}
+
+### 角色：GET /roles?page=1&pageSize=20
+GET {{baseUrl}}/roles?page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+
+### 角色：POST /roles
+POST {{baseUrl}}/roles
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "roleCode": "ATTEND_STAFF",
+  "roleName": "考勤人员",
+  "roleType": 1,
+  "description": "考勤岗位"
+}
+
+### 角色：GET /roles/{{roleId}}
+GET {{baseUrl}}/roles/{{roleId}}
+Authorization: Bearer {{accessToken}}
+
+### 角色：PATCH /roles/{{roleId}}
+PATCH {{baseUrl}}/roles/{{roleId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "status": 0,
+  "reason": "岗位调整"
+}
+
+### 角色：GET /roles/{{roleId}}/menus
+GET {{baseUrl}}/roles/{{roleId}}/menus
+Authorization: Bearer {{accessToken}}
+
+### 角色：PUT /roles/{{roleId}}/menus
+PUT {{baseUrl}}/roles/{{roleId}}/menus
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "menuIds": ["{{menuId}}"],
+  "expectedVersion": "{{expectedVersion}}"
+}
+
+### 管理员：GET /admins
+GET {{baseUrl}}/admins
+Authorization: Bearer {{accessToken}}
+
+### 管理员：GET /admins/me/scope
+GET {{baseUrl}}/admins/me/scope
+Authorization: Bearer {{accessToken}}
+
+### 管理员：POST /admins/appointments
+POST {{baseUrl}}/admins/appointments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "adminLevel": 2,
+  "deptId": "{{deptId}}",
+  "reason": "演示下级管理员任命"
+}
+
+### 管理员：GET /admins/{{userId}}/delegable-roles
+GET {{baseUrl}}/admins/{{userId}}/delegable-roles
+Authorization: Bearer {{accessToken}}
+
+### 管理员：PUT /admins/{{userId}}/delegable-roles
+PUT {{baseUrl}}/admins/{{userId}}/delegable-roles
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "roleIds": [
+    "{{roleId}}"
+  ],
+  "expectedVersion": "{{expectedVersion}}",
+  "reason": "演示委派角色"
+}
+
+### 管理员：POST /admins/{{userId}}/revoke
+POST {{baseUrl}}/admins/{{userId}}/revoke
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "演示撤销任命"
+}
+
+### 授权记录：POST /grants/user-roles
+POST {{baseUrl}}/grants/user-roles
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"userId":"{{userId}}","roleId":"{{roleId}}","sourceType":"MANUAL","sourceRef":"{{uniqueRunRef}}","reason":"演示授权","expectedVersion":"{{grantVersion}}"}
+
+### 授权记录：POST /grants/user-roles/revoke
+POST {{baseUrl}}/grants/user-roles/revoke
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"userId":"{{userId}}","roleId":"{{roleId}}","grantSourceId":"{{sourceId}}","reason":"演示回收来源","expectedVersion":"{{revokeVersion}}"}
+
+### 授权记录：GET /grants/history?userId={{userId}}&roleId={{roleId}}&page=1&pageSize=500
+GET {{baseUrl}}/grants/history?userId={{userId}}&roleId={{roleId}}&page=1&pageSize=500
+Authorization: Bearer {{accessToken}}
+
+### 授权记录：GET /grants/batches/{{batchId}}?page=5&pageSize=500
+GET {{baseUrl}}/grants/batches/{{batchId}}?page=5&pageSize=500
+Authorization: Bearer {{accessToken}}
+
+### 审计：GET /audit/evidence/{{eventId}}
+GET {{baseUrl}}/audit/evidence/{{eventId}}
+Authorization: Bearer {{accessToken}}
+
+### 外部服务：PUT /integrations/hr/departments/D017
+PUT {{baseUrl}}/integrations/hr/departments/D017
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{"sourceSystem":"HR","eventId":"HR-D-001","eventVersion":10,"deptCode":"D017","deptName":"Example department","parentDeptCode":"D001","occurredAt":"2026-10-16T12:00:00+08:00"}
+
+### 外部服务：POST /integrations/hr/merges
+POST {{baseUrl}}/integrations/hr/merges
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{"sourceSystem":"HR","eventId":"HR-M-001","eventVersion":11,"sourceDeptCode":"D017","targetDeptCode":"D018","occurredAt":"2026-10-16T12:00:00+08:00"}
+
+### 外部服务：PUT /integrations/hr/employees/SG000123
+PUT {{baseUrl}}/integrations/hr/employees/SG000123
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-event-id",
+  "eventVersion": 25,
+  "sgNo": "SG000123",
+  "realName": "示例用户",
+  "phone": "replace-with-authorized-test-phone",
+  "deptCode": "D017",
+  "employeeAction": "UPSERT",
+  "employmentType": "FORMAL",
+  "occurredAt": "2026-10-16T13:00:00+08:00"
+}
+
+### 外部服务：POST /integrations/hr/transfers
+POST {{baseUrl}}/integrations/hr/transfers
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-transfer-event-id",
+  "eventVersion": 26,
+  "sgNo": "SG000123",
+  "fromDeptCode": "D017",
+  "toDeptCode": "D018",
+  "occurredAt": "2026-10-16T13:00:00+08:00"
+}
+
+### 外部服务：POST /integrations/hr/terminations
+POST {{baseUrl}}/integrations/hr/terminations
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Key-Id: {{keyId}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "HR",
+  "eventId": "replace-with-new-termination-event-id",
+  "eventVersion": 27,
+  "sgNo": "SG000123",
+  "effectiveAt": "2026-10-16T13:00:00+08:00"
+}
+
+### 外部服务：POST /integrations/oa/decisions
+POST {{baseUrl}}/integrations/oa/decisions
+Content-Type: application/json
+X-Client-Id: {{clientId}}
+X-Key-Id: {{keyId}}
+X-Request-Timestamp: {{timestamp}}
+X-Request-Nonce: {{nonce}}
+X-Request-Signature: {{signature}}
+
+{
+  "sourceSystem": "OA",
+  "eventId": "OA-C2-04-GRANT-001",
+  "approvalId": "APPR-C2-04-001",
+  "approvalStatus": "APPROVED",
+  "operation": "GRANT",
+  "targetUserId": "101",
+  "roleId": "5",
+  "approvedAt": "2026-10-19T10:00:00+08:00"
+}

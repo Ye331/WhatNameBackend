@@ -1,9 +1,10 @@
 package com.whatname.iam.service.auth;
 
+import org.springframework.stereotype.Service;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
 
 /** 首次设密/改密/重置复用的纯规则检查；不查询或保存历史，不负责账号状态及事务。 */
 @Service
@@ -31,8 +32,8 @@ public final class PasswordPolicy {
 
     /**
      * Username is required. Name pinyin and phone may be absent only when genuinely unavailable.
-     * Caller supplies the full name pinyin and normalized full phone, not ciphertext or HMAC.
-     * Known fields must not be omitted to bypass checks. This class does not decrypt/transliterate.
+     * Caller supplies the full name pinyin and normalized full phone, not ciphertext or HMAC. Known
+     * fields must not be omitted to bypass checks. This class does not decrypt/transliterate.
      */
     public record IdentityContext(String username, String namePinyin, String phone) {
         @Override
@@ -44,13 +45,13 @@ public final class PasswordPolicy {
     /**
      * Returns the first failure. Length counts Unicode code points; letters/digits use Java's
      * Unicode classifications. Password whitespace/case is preserved. Identity substring checks
-     * ignore case (Locale.ROOT); identity fields have surrounding whitespace stripped.
-     * recentHashes must be non-null, newest first, and contain 0..5 actual stored encodings.
-     * Empty means no prior passwords, null means missing history, and more than five is rejected.
-     * Caller owns history completeness/order; this method cannot verify database facts.
+     * ignore case (Locale.ROOT); identity fields have surrounding whitespace stripped. recentHashes
+     * must be non-null, newest first, and contain 0..5 actual stored encodings. Empty means no
+     * prior passwords, null means missing history, and more than five is rejected. Caller owns
+     * history completeness/order; this method cannot verify database facts.
      */
-    public ValidationResult validate(String password, IdentityContext identity,
-                                     List<String> recentHashes) {
+    public ValidationResult validate(
+            String password, IdentityContext identity, List<String> recentHashes) {
         if (password == null || password.isEmpty()) {
             return ValidationResult.PASSWORD_REQUIRED;
         }
@@ -100,7 +101,8 @@ public final class PasswordPolicy {
     }
 
     private static boolean containsIdentity(String foldedPassword, String identityValue) {
-        return identityValue != null && !identityValue.isBlank()
+        return identityValue != null
+                && !identityValue.isBlank()
                 && foldedPassword.contains(identityValue.strip().toLowerCase(Locale.ROOT));
     }
 }

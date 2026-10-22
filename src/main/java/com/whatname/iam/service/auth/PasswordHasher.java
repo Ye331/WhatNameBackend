@@ -1,11 +1,12 @@
 package com.whatname.iam.service.auth;
 
-import java.util.Base64;
-import java.util.regex.Pattern;
 import org.springframework.security.crypto.scrypt.SCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-/** A内部密码编码组件；不访问数据库，不记录密码或编码。 */
+import java.util.Base64;
+import java.util.regex.Pattern;
+
+/** 密码哈希组件；不访问数据库，不记录密码或编码。 */
 @Service
 public final class PasswordHasher {
     public static final int MAX_PASSWORD_CODE_POINTS = 64;
@@ -18,20 +19,24 @@ public final class PasswordHasher {
     private static final int ENCODED_LENGTH = 77;
     // Spring's raw scrypt format: $hex(log2(N)<<16 | r<<8 | p)$saltBase64$keyBase64.
     // Accept only this bounded profile before allowing the library to allocate memory.
-    private static final Pattern ENCODING = Pattern.compile(
-            "\\$110801\\$([A-Za-z0-9+/]{22}==)\\$([A-Za-z0-9+/]{43}=)");
+    private static final Pattern ENCODING =
+            Pattern.compile("\\$110801\\$([A-Za-z0-9+/]{22}==)\\$([A-Za-z0-9+/]{43}=)");
 
-    private final SCryptPasswordEncoder encoder = new SCryptPasswordEncoder(
-            CPU_COST, BLOCK_SIZE, PARALLELIZATION, KEY_BYTES, SALT_BYTES);
+    private final SCryptPasswordEncoder encoder =
+            new SCryptPasswordEncoder(CPU_COST, BLOCK_SIZE, PARALLELIZATION, KEY_BYTES, SALT_BYTES);
 
     public enum VerificationResult {
-        MATCH, MISMATCH, INVALID_PASSWORD, INVALID_HASH, VERIFICATION_FAILED
+        MATCH,
+        MISMATCH,
+        INVALID_PASSWORD,
+        INVALID_HASH,
+        VERIFICATION_FAILED
     }
 
     /**
      * Generates a fresh random salt. This primitive does not enforce business complexity rules;
-     * callers setting a password must first pass PasswordPolicy.validate.
-     * Null/empty or over-64-code-point input is rejected without including it in an error.
+     * callers setting a password must first pass PasswordPolicy.validate. Null/empty or
+     * over-64-code-point input is rejected without including it in an error.
      */
     public String hash(String rawPassword) {
         if (!hasValidInputSize(rawPassword)) {
@@ -64,14 +69,16 @@ public final class PasswordHasher {
         }
         try {
             return encoder.matches(rawPassword, encodedPassword)
-                    ? VerificationResult.MATCH : VerificationResult.MISMATCH;
+                    ? VerificationResult.MATCH
+                    : VerificationResult.MISMATCH;
         } catch (RuntimeException exception) {
             return VerificationResult.VERIFICATION_FAILED;
         }
     }
 
     private static boolean hasValidInputSize(String password) {
-        return password != null && !password.isEmpty()
+        return password != null
+                && !password.isEmpty()
                 && password.length() <= MAX_PASSWORD_CODE_POINTS * 2
                 && password.codePointCount(0, password.length()) <= MAX_PASSWORD_CODE_POINTS;
     }

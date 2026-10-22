@@ -21,15 +21,17 @@ import com.whatname.iam.dto.resource.ResourceResponses.UpdateApiResult;
 import com.whatname.iam.dto.resource.ResourceResponses.UpdateApplicationResult;
 import com.whatname.iam.dto.resource.ResourceResponses.UpdateMenuResult;
 import com.whatname.iam.service.resource.ResourceService;
+
 import jakarta.validation.Valid;
+
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -60,60 +62,72 @@ public class ResourceController {
 
     @PatchMapping("/applications/{appId}")
     public ApiResponse<UpdateApplicationResult> updateApplication(
-                                                                  @RequestHeader(value = "Authorization", required = false) String bearer,
-                                                                  @PathVariable long appId,
-                                                                  @Valid @RequestBody UpdateApplicationRequest request) {
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long appId,
+            @Valid @RequestBody UpdateApplicationRequest request) {
         return ApiResponse.ok(service.updateApplication(bearer, appId, request));
     }
 
     @GetMapping("/applications/{appId}/menus")
-    public ApiResponse<AppMenusResult> listMenus(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                 @PathVariable long appId) {
+    public ApiResponse<AppMenusResult> listMenus(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long appId) {
         return ApiResponse.ok(service.listMenus(bearer, appId));
     }
 
     @PostMapping("/applications/{appId}/menus")
-    public ApiResponse<CreateMenuResult> createMenu(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                    @PathVariable long appId, @Valid @RequestBody CreateMenuRequest request) {
+    public ApiResponse<CreateMenuResult> createMenu(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long appId,
+            @Valid @RequestBody CreateMenuRequest request) {
         return ApiResponse.ok(service.createMenu(bearer, appId, request));
     }
 
     @PatchMapping("/menus/{menuId}")
-    public ApiResponse<UpdateMenuResult> updateMenu(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                    @PathVariable long menuId, @Valid @RequestBody UpdateMenuRequest request) {
+    public ApiResponse<UpdateMenuResult> updateMenu(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long menuId,
+            @Valid @RequestBody UpdateMenuRequest request) {
         return ApiResponse.ok(service.updateMenu(bearer, menuId, request));
     }
 
     @GetMapping("/applications/{appId}/apis")
-    public ApiResponse<PageResponse<ApiItem>> listApis(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                       @PathVariable long appId,
-                                                       @RequestParam(required = false) String httpMethod,
-                                                       @Valid PageRequest pageRequest) {
+    public ApiResponse<PageResponse<ApiItem>> listApis(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long appId,
+            @RequestParam(required = false) String httpMethod,
+            @Valid PageRequest pageRequest) {
         return ApiResponse.ok(service.listApis(bearer, appId, httpMethod, pageRequest));
     }
 
     @PostMapping("/applications/{appId}/apis")
-    public ApiResponse<CreateApiResult> createApi(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                  @PathVariable long appId, @Valid @RequestBody CreateApiRequest request) {
+    public ApiResponse<CreateApiResult> createApi(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long appId,
+            @Valid @RequestBody CreateApiRequest request) {
         return ApiResponse.ok(service.createApi(bearer, appId, request));
     }
 
     @PatchMapping("/apis/{apiId}")
-    public ApiResponse<UpdateApiResult> updateApi(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                  @PathVariable long apiId, @Valid @RequestBody UpdateApiRequest request) {
+    public ApiResponse<UpdateApiResult> updateApi(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long apiId,
+            @Valid @RequestBody UpdateApiRequest request) {
         return ApiResponse.ok(service.updateApi(bearer, apiId, request));
     }
 
     @GetMapping("/menus/{menuId}/apis")
-    public ApiResponse<MenuApisResult> listMenuApis(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                    @PathVariable long menuId) {
+    public ApiResponse<MenuApisResult> listMenuApis(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long menuId) {
         return ApiResponse.ok(service.listMenuApis(bearer, menuId));
     }
 
     @PutMapping("/menus/{menuId}/apis")
-    public ApiResponse<MenuApisResult> replaceMenuApis(@RequestHeader(value = "Authorization", required = false) String bearer,
-                                                       @PathVariable long menuId,
-                                                       @Valid @RequestBody ReplaceMenuApisRequest request) {
+    public ApiResponse<MenuApisResult> replaceMenuApis(
+            @RequestHeader(value = "Authorization", required = false) String bearer,
+            @PathVariable long menuId,
+            @Valid @RequestBody ReplaceMenuApisRequest request) {
         return ApiResponse.ok(service.replaceMenuApis(bearer, menuId, request));
     }
 }

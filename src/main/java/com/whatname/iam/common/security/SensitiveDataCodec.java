@@ -2,6 +2,10 @@ package com.whatname.iam.common.security;
 
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -9,14 +13,13 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
+
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
-/** A internal format. Keys are deliberately absent by default; no plaintext fallback. */
+/** 姓名、手机号的加密与 HMAC 索引。默认不带密钥，缺少密钥时拒绝而不是退回明文。 */
 @Component
 public final class SensitiveDataCodec {
     private static final String PREFIX = "gcm1:";
@@ -25,8 +28,9 @@ public final class SensitiveDataCodec {
     private final String phoneKey;
     private final SecureRandom random = new SecureRandom();
 
-    public SensitiveDataCodec(@Value("${iam.security.data-key:}") String encryptionKey,
-                              @Value("${iam.security.phone-hmac-key:}") String phoneKey) {
+    public SensitiveDataCodec(
+            @Value("${iam.security.data-key:}") String encryptionKey,
+            @Value("${iam.security.phone-hmac-key:}") String phoneKey) {
         this.encryptionKey = encryptionKey;
         this.phoneKey = phoneKey;
     }
@@ -37,11 +41,20 @@ public final class SensitiveDataCodec {
             byte[] nonce = new byte[12];
             random.nextBytes(nonce);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(dataKey(), "AES"), new GCMParameterSpec(128, nonce));
+            cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    new SecretKeySpec(dataKey(), "AES"),
+                    new GCMParameterSpec(128, nonce));
             cipher.updateAAD(AAD);
             byte[] encrypted = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
-            return PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    ByteBuffer.allocate(nonce.length + encrypted.length).put(nonce).put(encrypted).array());
+            return PREFIX
+                    + Base64.getUrlEncoder()
+                            .withoutPadding()
+                            .encodeToString(
+                                    ByteBuffer.allocate(nonce.length + encrypted.length)
+                                            .put(nonce)
+                                            .put(encrypted)
+                                            .array());
         } catch (GeneralSecurityException | IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
         }
@@ -49,11 +62,15 @@ public final class SensitiveDataCodec {
 
     public String decrypt(String ciphertext) {
         try {
-            if (ciphertext == null || !ciphertext.startsWith(PREFIX)) throw new IllegalArgumentException();
+            if (ciphertext == null || !ciphertext.startsWith(PREFIX))
+                throw new IllegalArgumentException();
             byte[] bytes = Base64.getUrlDecoder().decode(ciphertext.substring(PREFIX.length()));
             if (bytes.length < 28) throw new IllegalArgumentException();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(dataKey(), "AES"), new GCMParameterSpec(128, bytes, 0, 12));
+            cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    new SecretKeySpec(dataKey(), "AES"),
+                    new GCMParameterSpec(128, bytes, 0, 12));
             cipher.updateAAD(AAD);
             return new String(cipher.doFinal(bytes, 12, bytes.length - 12), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException e) {
@@ -61,7 +78,9 @@ public final class SensitiveDataCodec {
         }
     }
 
-    /** Input must already be canonical; reject callers accidentally hashing another representation. */
+    /**
+     * Input must already be canonical; reject callers accidentally hashing another representation.
+     */
     public String phoneHash(String normalizedPhone) {
         if (normalizedPhone == null || !normalizedPhone.matches("1[3-9][0-9]{9}"))
             throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
@@ -76,7 +95,8 @@ public final class SensitiveDataCodec {
         if (phone == null) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         String value = phone.strip();
         if (value.startsWith("+86")) value = value.substring(3);
-        if (!value.matches("1[3-9][0-9]{9}")) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        if (!value.matches("1[3-9][0-9]{9}"))
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
         return value;
     }
 
@@ -100,5 +120,7 @@ public final class SensitiveDataCodec {
         }
     }
 
-    private byte[] dataKey() { return requiredKey(encryptionKey); }
+    private byte[] dataKey() {
+        return requiredKey(encryptionKey);
+    }
 }
