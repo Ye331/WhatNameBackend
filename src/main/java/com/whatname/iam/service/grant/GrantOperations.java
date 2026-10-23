@@ -7,7 +7,7 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.util.IdUtils;
 import com.whatname.iam.dto.grant.GrantDtos.*;
 import com.whatname.iam.entity.grant.GrantData.*;
-import com.whatname.iam.mapper.grant.GrantMapper;
+import com.whatname.iam.repository.grant.GrantRepository;
 import com.whatname.iam.service.admin.*;
 
 import org.springframework.stereotype.Service;
@@ -19,19 +19,19 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class GrantOperations {
-    private final GrantMapper mapper;
+    private final GrantRepository repository;
     private final AdminPolicyService policy;
     private final RequestSecurity security;
     private final GrantIntegrity integrity;
     private final GrantAudit audit;
 
     public GrantOperations(
-            GrantMapper mapper,
+            GrantRepository repository,
             AdminPolicyService policy,
             RequestSecurity security,
             GrantIntegrity integrity,
             GrantAudit audit) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.policy = policy;
         this.security = security;
         this.integrity = integrity;
@@ -98,7 +98,7 @@ public class GrantOperations {
         if (expected != null) checkVersion(context.before(), expected);
         // 查重与插入使用相同的数据库唯一键排序规则。
         var existing =
-                mapper.selectSourceByKey(user, role, request.sourceType(), request.sourceRef());
+                repository.selectSourceByKey(user, role, request.sourceType(), request.sourceRef());
         if (existing != null) {
             if (!Objects.equals(existing.sourceDeptId(), dept)) fail(IDEMPOTENCY_CONFLICT);
             if (existing.status() != 1) fail(DUPLICATE_RESOURCE);
@@ -111,7 +111,7 @@ public class GrantOperations {
         }
         requireIncrementable(context.before().grantRevision());
         expectOne(
-                mapper.insertSource(
+                repository.insertSource(
                         user,
                         role,
                         request.sourceType(),
@@ -119,10 +119,10 @@ public class GrantOperations {
                         dept,
                         context.actorId()));
         var inserted =
-                mapper.selectSourceByKey(user, role, request.sourceType(), request.sourceRef());
+                repository.selectSourceByKey(user, role, request.sourceType(), request.sourceRef());
         if (inserted == null) fail(AUTH_STATE_UNAVAILABLE);
         if (activeCount(context.before(), role) == 0)
-            expectOne(mapper.insertEffectiveRole(user, role, context.actorId()));
+            expectOne(repository.insertEffectiveRole(user, role, context.actorId()));
         var after = finish(context, role, inserted.id(), "USER_ROLE_GRANT", request.reason());
         return new Granted(
                 request.userId(), request.roleId(), inserted.id().toString(), true, version(after));
@@ -146,8 +146,8 @@ public class GrantOperations {
         int remaining = activeCount(context.before(), role);
         if (existing.status() == 1) {
             requireIncrementable(context.before().grantRevision());
-            expectOne(mapper.revokeSource(user, role, source, context.actorId()));
-            if (--remaining == 0) expectOne(mapper.deleteEffectiveRole(user, role));
+            expectOne(repository.revokeSource(user, role, source, context.actorId()));
+            if (--remaining == 0) expectOne(repository.deleteEffectiveRole(user, role));
             finish(context, role, source, "USER_ROLE_REVOKE", request.reason());
         }
         return new Revoked(
@@ -172,19 +172,19 @@ public class GrantOperations {
     }
 
     private GrantState load(long user, boolean lock) {
-        Long revision = mapper.selectRevision(user, lock);
+        Long revision = repository.selectRevision(user, lock);
         if (revision == null || revision < 1) fail(AUTH_STATE_UNAVAILABLE);
         return new GrantState(
                 user,
                 revision,
-                mapper.selectSources(user, lock),
-                mapper.selectEffectiveRoles(user, lock));
+                repository.selectSources(user, lock),
+                repository.selectEffectiveRoles(user, lock));
     }
 
     private GrantState finish(
             Context context, long role, long source, String operation, String reason) {
         var before = context.before();
-        expectOne(mapper.advanceRevision(before.userId(), before.grantRevision()));
+        expectOne(repository.advanceRevision(before.userId(), before.grantRevision()));
         var after = load(before.userId(), true);
         consistent(after);
         integrity.sign(after);

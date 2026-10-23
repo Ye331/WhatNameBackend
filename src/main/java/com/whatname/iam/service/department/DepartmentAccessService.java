@@ -5,7 +5,7 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.common.security.ManagementDataSecurity;
 import com.whatname.iam.entity.department.Department;
-import com.whatname.iam.mapper.service.ServiceIdentityMapper;
+import com.whatname.iam.repository.service.ServiceIdentityRepository;
 import com.whatname.iam.service.admin.AccountManagementPolicy;
 import com.whatname.iam.service.auth.AuthService;
 import com.whatname.iam.service.event.TrustedEventContext;
@@ -35,7 +35,7 @@ public class DepartmentAccessService {
     private final ManagementDataSecurity data;
     private final com.whatname.iam.service.admin.AdminOrganizationLifecycle lifecycle;
     private final ServiceRequestAuthenticator services;
-    private final ServiceIdentityMapper identities;
+    private final ServiceIdentityRepository identities;
 
     public DepartmentAccessService(
             AccountManagementPolicy policy,
@@ -44,7 +44,7 @@ public class DepartmentAccessService {
             ManagementDataSecurity data,
             com.whatname.iam.service.admin.AdminOrganizationLifecycle lifecycle,
             ServiceRequestAuthenticator services,
-            ServiceIdentityMapper identities) {
+            ServiceIdentityRepository identities) {
         this.policy = policy;
         this.jwt = jwt;
         this.auth = auth;

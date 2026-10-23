@@ -11,8 +11,8 @@ import com.whatname.iam.common.security.*;
 import com.whatname.iam.dto.auth.AuthRequests.*;
 import com.whatname.iam.dto.user.UserRequests;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.grant.HrGrantCollaboration;
@@ -20,9 +20,6 @@ import com.whatname.iam.service.permission.*;
 import com.whatname.iam.service.user.UserService;
 import com.whatname.iam.support.TestDatabase;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -114,19 +111,14 @@ class AccountIntegrityIntegrationTest {
         }
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class AuditFailure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class AuditFailure extends com.whatname.iam.support.RepositoryProbe {
         boolean fail;
 
         public Object intercept(Invocation call) throws Throwable {
             if (fail
-                    && ((MappedStatement) call.getArgs()[0])
-                            .getId()
-                            .equals("com.whatname.iam.mapper.audit.AuditMapper.insert"))
+                    && call.id()
+                            .equals("com.whatname.iam.repository.audit.AuditRepository.insert"))
                 throw new org.springframework.dao.DataAccessResourceFailureException(
                         "fixture audit outage");
             return call.proceed();
@@ -138,12 +130,12 @@ class AccountIntegrityIntegrationTest {
     final List<Long> accounts = new ArrayList<>(), menus = new ArrayList<>();
     ConfigurableApplicationContext app;
     JdbcTemplate db;
-    UserAccountMapper mapper;
-    OrganizationWriteMapper organization;
+    UserAccountRepository repository;
+    OrganizationWriteRepository organization;
     DataSignatureService signatures;
     ManagementDataSecurity data;
     JwtTokenService jwt;
-    SensitiveDataCodec codec;
+
     AuthService auth;
     UserService users;
     DepartmentService departments;
@@ -177,7 +169,7 @@ class AccountIntegrityIntegrationTest {
         settings.put(
                 "iam.security.data-signing.public-keys.fixture-as2",
                 encode(signing.getPublic().getEncoded()));
-        for (String key : List.of("data-key", "phone-hmac-key", "sms-hmac-key")) {
+        for (String key : List.of("sms-hmac-key")) {
             byte[] bytes = new byte[32];
             new SecureRandom().nextBytes(bytes);
             settings.put("iam.security." + key, encode(bytes));
@@ -190,12 +182,11 @@ class AccountIntegrityIntegrationTest {
                                 TestDatabase.arguments(
                                         "--server.port=0", "--server.address=127.0.0.1"));
         db = app.getBean(JdbcTemplate.class);
-        mapper = app.getBean(UserAccountMapper.class);
-        organization = app.getBean(OrganizationWriteMapper.class);
+        repository = app.getBean(UserAccountRepository.class);
+        organization = app.getBean(OrganizationWriteRepository.class);
         signatures = app.getBean(DataSignatureService.class);
         data = app.getBean(ManagementDataSecurity.class);
         jwt = app.getBean(JwtTokenService.class);
-        codec = app.getBean(SensitiveDataCodec.class);
         auth = app.getBean(AuthService.class);
         users = app.getBean(UserService.class);
         departments = app.getBean(DepartmentService.class);
@@ -308,7 +299,7 @@ class AccountIntegrityIntegrationTest {
                         }
                         db.update(
                                 "UPDATE sys_sms_code SET consumed_at=COALESCE(consumed_at,NOW())"
-                                    + " WHERE phone_hash IN (SELECT phone_hash FROM sys_user WHERE"
+                                    + " WHERE phone IN (SELECT phone FROM sys_user WHERE"
                                     + " username LIKE ? OR temp_reason LIKE ?)",
                                 prefix + "%",
                                 prefix + "%");
@@ -470,7 +461,7 @@ class AccountIntegrityIntegrationTest {
         var result = create();
         long id = Long.parseLong(result.userId());
         accounts.add(id);
-        UserAccount created = mapper.findById(id);
+        UserAccount created = repository.findById(id);
         String grants = signature(USER_GRANTS, id), phone = phone(created);
         sms.delegate = new LocalDemoSmsSender(inbox.toString());
         try {
@@ -503,13 +494,13 @@ class AccountIntegrityIntegrationTest {
                                     nextPassword),
                             200);
             assertEquals(id, jwt.verify(loggedIn.at("/data/accessToken").asText()).userId());
-            assertEquals(1, mapper.findById(id).passwordInitialized);
+            assertEquals(1, repository.findById(id).passwordInitialized);
             assertEquals(
                     1,
                     count(
-                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND"
+                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone=? AND"
                                     + " purpose='SET_PASSWORD' AND consumed_at IS NOT NULL",
-                            created.phoneHash));
+                            created.phone));
             assertEquals(1, count("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?", id));
             assertEquals(grants, signature(USER_GRANTS, id));
             signVerify(USER_IDENTITY, id);
@@ -580,7 +571,7 @@ class AccountIntegrityIntegrationTest {
                                     nextPassword),
                             200);
             assertEquals(2, jwt.verify(after.at("/data/accessToken").asText()).sessionVersion());
-            assertEquals(2, mapper.findById(target.id).sessionVersion);
+            assertEquals(2, repository.findById(target.id).sessionVersion);
             assertEquals(
                     2,
                     count("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?", target.id));
@@ -607,8 +598,8 @@ class AccountIntegrityIntegrationTest {
             assertEquals(
                     0,
                     count(
-                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=?",
-                            target.phoneHash));
+                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone=?",
+                            target.phone));
             assertEquals(
                     0,
                     count(
@@ -630,7 +621,7 @@ class AccountIntegrityIntegrationTest {
                                     401)
                             .path("code")
                             .asText());
-            assertEquals(target.passwordHash, mapper.findById(target.id).passwordHash);
+            assertEquals(target.passwordHash, repository.findById(target.id).passwordHash);
             assertEquals(
                     1,
                     count("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?", target.id));
@@ -656,7 +647,7 @@ class AccountIntegrityIntegrationTest {
                 "DELETE FROM sys_data_signature WHERE data_type='USER_IDENTITY' AND data_id=?",
                 target.id);
         expect(ErrorCode.INTEGRITY_FAILURE, () -> login(target));
-        UserAccount old = mapper.findById(target.id);
+        UserAccount old = repository.findById(target.id);
         old.createdAt = null;
         expect(
                 ErrorCode.INTEGRITY_FAILURE,
@@ -674,7 +665,7 @@ class AccountIntegrityIntegrationTest {
         failure.fail = true;
         expect(ErrorCode.AUDIT_UNAVAILABLE, () -> login(target));
         assertEquals(0, count("SELECT COUNT(*) FROM sys_login_log WHERE user_id=?", target.id));
-        assertNull(mapper.findById(target.id).lastLoginAt);
+        assertNull(repository.findById(target.id).lastLoginAt);
     }
 
     @Test
@@ -693,14 +684,14 @@ class AccountIntegrityIntegrationTest {
         assertEquals(
                 prefix + " reason",
                 json.readTree(evidence("US03_CREATE", id)).path("reason").asText());
-        UserAccount created = mapper.findById(id);
+        UserAccount created = repository.findById(id);
         String grants = signature(USER_GRANTS, id);
         auth.sendSms(new SendSms(phone(created), Purpose.SET_PASSWORD));
         String proof = sms.codes.get(phone(created) + Purpose.SET_PASSWORD.name());
         auth.changePassword(new Password(phone(created), proof, nextPassword), true);
         signVerify(USER_IDENTITY, id);
         signVerify(USER_GRANTS, id);
-        assertEquals(1, mapper.findById(id).passwordInitialized);
+        assertEquals(1, repository.findById(id).passwordInitialized);
         assertEquals(grants, signature(USER_GRANTS, id));
         assertNotNull(
                 auth.login(
@@ -752,7 +743,7 @@ class AccountIntegrityIntegrationTest {
                 grants = signature(USER_GRANTS, target.id);
         users.changeStatus(
                 bearer, target.id.toString(), new UserRequests.Status(2, prefix + " disable"));
-        assertEquals(2, mapper.findById(target.id).sessionVersion);
+        assertEquals(2, repository.findById(target.id).sessionVersion);
         signVerify(USER_IDENTITY, target.id);
         assertEquals(grants, signature(USER_GRANTS, target.id));
         expect(
@@ -773,7 +764,7 @@ class AccountIntegrityIntegrationTest {
                                 bearer,
                                 target.id.toString(),
                                 new UserRequests.Status(2, "rollback")));
-        assertEquals(1, mapper.findById(target.id).status);
+        assertEquals(1, repository.findById(target.id).status);
         assertEquals(before, signature(USER_IDENTITY, target.id));
         assertEquals(
                 0,
@@ -791,7 +782,7 @@ class AccountIntegrityIntegrationTest {
         auth.changePassword(new Password(phone(target), code, nextPassword), false);
         signVerify(USER_IDENTITY, target.id);
         assertEquals(grants, signature(USER_GRANTS, target.id));
-        assertEquals(2, mapper.findById(target.id).sessionVersion);
+        assertEquals(2, repository.findById(target.id).sessionVersion);
         expect(
                 ErrorCode.INVALID_TOKEN,
                 () ->
@@ -811,16 +802,16 @@ class AccountIntegrityIntegrationTest {
         expect(
                 ErrorCode.AUDIT_UNAVAILABLE,
                 () -> auth.changePassword(new Password(phone(target), code, nextPassword), false));
-        assertEquals(target.passwordHash, mapper.findById(target.id).passwordHash);
+        assertEquals(target.passwordHash, repository.findById(target.id).passwordHash);
         assertEquals(before, signature(USER_IDENTITY, target.id));
         assertEquals(
                 1, count("SELECT COUNT(*) FROM sys_password_history WHERE user_id=?", target.id));
         assertEquals(
                 1,
                 count(
-                        "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at IS"
+                        "SELECT COUNT(*) FROM sys_sms_code WHERE phone=? AND consumed_at IS"
                                 + " NULL",
-                        target.phoneHash));
+                        target.phone));
     }
 
     @Test
@@ -907,7 +898,7 @@ class AccountIntegrityIntegrationTest {
                                                 signatures.sign(USER_IDENTITY, target.id);
                                             });
                                     data.verifyIdentity(
-                                            mapper.lockById(
+                                            repository.lockById(
                                                     target.id)); // current locking read is version
                                     // 2
                                 }));
@@ -938,12 +929,12 @@ class AccountIntegrityIntegrationTest {
 
     @Test
     void verificationProvenanceDoesNotLeakIntoNextTransaction() {
-        tx.executeWithoutResult(status -> data.verifyIdentity(mapper.lockById(target.id)));
+        tx.executeWithoutResult(status -> data.verifyIdentity(repository.lockById(target.id)));
         expect(
                 ErrorCode.INTEGRITY_FAILURE,
                 () ->
                         tx.executeWithoutResult(
-                                status -> data.signIdentity(mapper.lockById(target.id))));
+                                status -> data.signIdentity(repository.lockById(target.id))));
     }
 
     UserAccount account(boolean admin) {
@@ -955,12 +946,11 @@ class AccountIntegrityIntegrationTest {
         long id =
                 insert(
                         "INSERT INTO"
-                            + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,created_by,temp_reason,password_initialized)"
-                            + " VALUES(?,?,?,?,?,?,?,?,?,1)",
+                            + " sys_user(username,real_name,phone,password_hash,dept_id,source,created_by,temp_reason,password_initialized)"
+                            + " VALUES(?,?,?,?,?,?,?,?,1)",
                         prefix + suffix,
-                        codec.encrypt("张三"),
-                        codec.encrypt(phone),
-                        codec.phoneHash(phone),
+                        ("张三"),
+                        (phone),
                         app.getBean(PasswordHasher.class).hash(password),
                         dept,
                         admin ? 3 : 2,
@@ -993,7 +983,7 @@ class AccountIntegrityIntegrationTest {
                         signatures.sign(ADMIN_DELEGABLE_ROLES, id);
                     }
                 });
-        return mapper.findById(id);
+        return repository.findById(id);
     }
 
     UserService.Created create() {
@@ -1014,7 +1004,7 @@ class AccountIntegrityIntegrationTest {
     }
 
     String phone(UserAccount account) {
-        return codec.decrypt(account.phone);
+        return (account.phone);
     }
 
     String resetCode() {

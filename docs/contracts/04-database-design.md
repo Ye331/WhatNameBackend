@@ -1,8 +1,12 @@
+> 当前验收按 [2026-10-23 课程作业简化范围](../COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
+
+> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
+
 # 数据库设计说明
 
-版本：v3.1。MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。对应课程功能完整版本，Controller → Service → Mapper，MyBatis访问数据库，不增加DAO，不使用Redis或消息队列。
+版本：v3.1。MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。对应课程功能完整版本，Controller → Service → Repository，Spring Data JPA访问数据库，不增加DAO，不使用Redis或消息队列。
 
-RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并集。不引入角色继承、显式禁止、权限自动过期。当前移除原sys_permission_revision和sys_deny_fence，授权事实、签名与关键审计同事务；M6每次独立请求读取MySQL主库当前一致视图。20ms/50ms和约一万人集中登录仍是待实测目标，不视为当前已通过。
+RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并集。不引入角色继承、显式禁止、权限自动过期。当前移除原sys_permission_revision和sys_deny_fence，授权事实、签名与关键审计同事务；M6每次独立请求读取MySQL主库当前一致视图。本期仅记录课堂规模数据的实测耗时，不设20/50ms或万人集中登录硬指标。
 
 ## 1. 表关系与开发边界
 
@@ -172,9 +176,8 @@ CHECK约束：`ck_api_status`、`ck_api_method`；完整布尔条件见建表SQL
 |---|---|---|
 | `id` | `BIGINT NOT NULL AUTO_INCREMENT` | 用户ID |
 | `username` | `VARCHAR(64) NOT NULL` | 用户名 |
-| `real_name_ciphertext` | `VARCHAR(512) NOT NULL` | 姓名AES-GCM密文，界面授权解密展示 |
-| `phone` | `VARCHAR(256) NOT NULL` | 规范化手机号AES-GCM密文，界面脱敏 |
-| `phone_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 规范化手机号HMAC-SHA256查询索引 |
+| `real_name` | `VARCHAR(64) NOT NULL` | 演示姓名，明文保存 |
+| `phone` | `VARCHAR(11) NOT NULL` | 规范化演示手机号，唯一索引，明文保存 |
 | `password_hash` | `VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 带盐scrypt密码哈希编码，不可逆 |
 | `employee_no` | `VARCHAR(64) DEFAULT NULL` | 工号 |
 | `dept_id` | `BIGINT NOT NULL` | 所属部门ID |
@@ -198,7 +201,7 @@ CHECK约束：`ck_api_status`、`ck_api_method`；完整布尔条件见建表SQL
 - `PRIMARY KEY (`id`)`。
 - `UNIQUE KEY `uk_username` (`username`)`。
 - `UNIQUE KEY `uk_employee_no` (`employee_no`)`。
-- `UNIQUE KEY `uk_phone_hash` (`phone_hash`)`。
+- `UNIQUE KEY `uk_phone` (`phone`)`。
 - `KEY `idx_dept_id` (`dept_id`)`。
 - `KEY `idx_status` (`status`)`。
 
@@ -451,7 +454,7 @@ CHECK约束：`ck_urs_type`、`ck_urs_dept`、`ck_urs_status`、`ck_urs_revoke`�
 
 ### 2.16 `sys_external_event` — HR/OA外部事件幂等与阶段记录表
 
-事件接收可独立提交；业务事实、签名、审计和APPLIED结果在单个事务提交。输入加密保存用于恢复；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
+事件接收可独立提交；业务事实、签名、审计和APPLIED结果在单个事务提交。输入 JSON 明文保存用于重复请求核对；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -465,7 +468,7 @@ CHECK约束：`ck_urs_type`、`ck_urs_dept`、`ck_urs_status`、`ck_urs_revoke`�
 | `target_ref` | `VARCHAR(64) DEFAULT NULL` | 目标外部标识：SG号或部门编码 |
 | `processing_status` | `VARCHAR(20) NOT NULL DEFAULT 'PROCESSING'` | 处理阶段：APPLIED/PROCESSING/PENDING_RECOVERY/REJECTED |
 | `processing_stage` | `VARCHAR(32) NOT NULL DEFAULT 'RECEIVED'` | RECEIVED/APPLYING/COMPLETED，业务事实在单个事务应用 |
-| `payload_ciphertext` | `MEDIUMTEXT NOT NULL` | 规范化输入加密保存，恢复重放使用，禁止保存明文手机号 |
+| `payload_json` | `MEDIUMTEXT NOT NULL` | 规范化输入 JSON 明文保存，供重复请求核对 |
 | `result_data` | `JSON DEFAULT NULL` | 可重放的业务结果；脱敏，不含密码、验证码或完整JWT |
 | `result_summary` | `VARCHAR(512) DEFAULT NULL` | 执行结果或失败原因摘要 |
 | `occurred_at` | `DATETIME DEFAULT NULL` | 业务事件时间 |
@@ -488,7 +491,7 @@ CHECK约束：`ck_ee_status`、`ck_ee_version`、`ck_ee_stage`；完整布尔条
 | 字段 | 定义 | 含义 |
 |---|---|---|
 | `id` | `BIGINT NOT NULL AUTO_INCREMENT` | 主键 |
-| `phone_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 手机号HMAC-SHA256索引 |
+| `phone` | `VARCHAR(11) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 规范化演示手机号 |
 | `purpose` | `VARCHAR(32) NOT NULL` | 用途：SET_PASSWORD首次设密 / RESET_PASSWORD重置；不设LOGIN |
 | `code_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 验证码HMAC-SHA256，不保存明文 |
 | `expires_at` | `DATETIME NOT NULL` | 过期时间 |
@@ -499,7 +502,7 @@ CHECK约束：`ck_ee_status`、`ck_ee_version`、`ck_ee_stage`；完整布尔条
 索引：
 
 - `PRIMARY KEY (`id`)`。
-- `KEY `idx_phone_purpose` (`phone_hash`, `purpose`)`。
+- `KEY `idx_phone_purpose` (`phone`, `purpose`)`。
 
 CHECK约束：`ck_sms_purpose`、`ck_sms_attempts`；完整布尔条件见建表SQL。
 
@@ -566,7 +569,7 @@ CHECK约束：`ck_sms_purpose`、`ck_sms_attempts`；完整布尔条件见建表
 
 CHECK约束：`ck_sid_status`、`ck_sid_scope`、`ck_sid_binding`、`ck_sid_oa`；完整布尔条件见建表SQL。
 
-### 2.21 `sys_grant_batch` — 批量授权任务表（数据库工作线程，无消息队列）
+### 2.21 `sys_grant_batch` — 旧版批量任务历史兼容表（当前不再写入）
 
 GR03异步接收，GR06必做。Idempotency-Key在发起人范围唯一；同键同内容返回已有状态，同键不同内容409。dryRun只校验，不写任务。
 
@@ -592,9 +595,9 @@ GR03异步接收，GR06必做。Idempotency-Key在发起人范围唯一；同键
 
 CHECK约束：`ck_batch_operation`、`ck_batch_status`、`ck_batch_count`；完整布尔条件见建表SQL。
 
-### 2.22 `sys_grant_batch_item` — 批量授权逐项结果表（项目业务变更与APPLIED状态同事务提交）
+### 2.22 `sys_grant_batch_item` — 旧版批量逐项历史兼容表（当前不再写入）
 
-按用户去重；每项业务事实和APPLIED同事务。行锁认领，未完成项可恢复；业务规则失败保留FAILED，暂时故障最多重试3次后FAILED；纠正后用新键仅提交失败目标。不能为不存在目标设置用户外键，否则无法记录逐项失败。
+以下字段仅用于保存旧版任务历史；当前同步批量不创建任务、明细或后台恢复进度。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -673,18 +676,18 @@ CHECK约束：`ck_item_status`、`ck_item_attempts`、`ck_item_source`、`ck_ite
 - 每次鉴权开启新事务，以主库REPEATABLE READ一致视图完成状态、来源、菜单、API和验签；鉴权审计同步提交后返回。变更成功后开始读取的新请求必须读到新状态；已建立旧快照的在途请求不追溯取消。
 - 管理写操作事务内复核功能权限和M5范围，支持判定的相关行按统一顺序加锁；用户角色来源增删与有效关联、grant_revision、签名、审计同事务。
 - 调岗来源回收与部门更新同事务；离职将来源置回收、移除当前角色、递增会话版本并提交审计；复职不恢复旧来源。
-- HR/OA接收记录保存加密输入、摘要和结果；HR锁定目标hr_version比较，OA使用业务审批来源唯一性，不伪造HR版本。
-- 批量任务接收与全部输入项同事务；项目业务与APPLIED同事务，启动及周期工作线程恢复PENDING项。计数按项目汇总，工作线程不需要Redis或消息队列。
+- HR/OA接收记录保存 JSON 输入、摘要和结果；HR锁定目标hr_version比较，OA使用业务审批来源唯一性，不伪造HR版本。
+- 同步批量每次最多100人，逐人独立事务并返回全部结果；无后台任务、自动重试或恢复。
 - 验证码核销与密码写入同事务；发送新码需锁定对应账号并核销同用途旧码，失败次数限额5次。nonce验签后独立原子插入，业务事务回滚不允许重放相同nonce。
 - 集合签名验证成员完整性；签名与事实同事务。日志request_params/response_result仅写允许字段，禁止整份凭据请求直接入库。
 
 ## 5. 建表、初始化与验证
 
-本脚本仅用于首次空库，不是旧库迁移。组织者统一管理迁移文件，不运行删除或清空既有数据库的命令。初始化由Service生成加密、HMAC、密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
+本脚本仅用于首次空库，不是旧库迁移。组织者统一管理迁移文件，不运行删除或清空既有数据库的命令。初始化由 Service 保存演示身份、生成密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
 
-测试数据至少包含两个业务系统（各3—4菜单）、本系统菜单/API、一级和部门管理员、多角色重叠、多授权来源、冻结部门和临时账号。备份仍每周全量、每日增量；篡改保全现场后人工恢复并重新验签。
+测试数据至少包含两个业务系统（各3—4菜单）、本系统菜单/API、一级和部门管理员、多角色重叠、多授权来源、冻结部门和临时账号。采用手动完整备份及独立库恢复演示；篡改保全现场后人工处理并重新验签。
 
-本次只修改设计和建表脚本，未操作实际数据库。静态字段与契约检查不等同于MySQL执行验证；建表及事务并发行为须在开发环境实际验证。
+当前空库脚本配合真实MySQL测试验证。已有演示库先手动备份，再应用 db/migrations/20261023-coursework-scope.sql 调整鉴权基础日志约束；不删除历史数据。
 
 当前SQL包含49个CHECK、16个触发器。
 
@@ -692,6 +695,4 @@ CHECK约束：`ck_item_status`、`ck_item_attempts`、`ck_item_source`、`ck_ite
 
 sys_dept新增nullable BIGINT merged_into_dept_id及自引用RESTRICT外键，NULL未合并；非空即已合并并保留去向。status=0/1仍只表示冻结。空源不能再接收人员/新任命，源/祖先冻结先显式解冻，子冻结保留。合并只推进源hr_version，目标/人员版本不变。路径统一/id/.../id/，包括自身及尾斜杠。
 
-sys_external_event新增nullable CHAR(36) ascii_bin claim_token：独立认领产生随机令牌；受控恢复锁行并换令牌，旧工作者不能提交APPLIED。历史APPLIED/REJECTED不重执；PROCESSING/PENDING_RECOVERY仅由授权恢复；无自动过期抢占。OA版本可null，HR正版本。
-
-已有库依次执行仓库db/migrations/20261016_01_department_merge.sql及20261016_02_external_event_owner.sql；执行前检查information_schema，不能重复空库建表。空库双份SQL快照同步；没有新增表，Compose的23表健康检查不变。
+当前事件登记与业务成功结果同事务；失败整体回滚。不使用认领令牌或在线恢复；旧版非终态记录由人核对。

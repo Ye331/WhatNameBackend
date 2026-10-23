@@ -88,7 +88,6 @@ class ResourceRoleIntegrationTest {
         r.add(
                 "iam.security.data-signing.public-keys.resource-test",
                 () -> b64(ED.getPublic().getEncoded()));
-        r.add("iam.security.data-key", () -> b64(new byte[32]));
         r.add("iam.permission.management-app-code", () -> "CONSOLE");
     }
 
@@ -122,9 +121,9 @@ class ResourceRoleIntegrationTest {
                                         + " VALUES(1,0,'ROOT','Root','/1/')");
                             db.update(
                                     "INSERT INTO"
-                                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                                        + " VALUES(1,'resource-admin','fixture','fixture',?,?,1,3,1,1)",
-                                    "0".repeat(64),
+                                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                                        + " VALUES(1,'resource-admin','fixture',?,?,1,3,1,1)",
+                                    "13800000000",
                                     passwords.hash(PASSWORD));
                             db.update(
                                     "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
@@ -233,9 +232,9 @@ class ResourceRoleIntegrationTest {
                         status -> {
                             db.update(
                                     "INSERT INTO"
-                                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                                        + " VALUES(2,'business-user','fixture','fixture',?,?,1,3,1,1)",
-                                    "1".repeat(64),
+                                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                                        + " VALUES(2,'business-user','fixture',?,?,1,3,1,1)",
+                                    "13800000001",
                                     passwords.hash(PASSWORD));
                             signatures.sign(USER_IDENTITY, 2);
                             signatures.sign(USER_GRANTS, 2);
@@ -422,11 +421,11 @@ class ResourceRoleIntegrationTest {
                         status -> {
                             db.update(
                                     "INSERT INTO"
-                                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                                        + " VALUES(?,?,'fixture','fixture',?,?,1,3,1,1)",
+                                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                                        + " VALUES(?,?,'fixture',?,?,1,3,1,1)",
                                     id,
                                     username,
-                                    String.format("%064x", id),
+                                    String.format("138%08d", id),
                                     passwords.hash(PASSWORD));
                             if (managementRole) {
                                 db.update(

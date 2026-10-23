@@ -3,7 +3,7 @@ package com.whatname.iam.service.admin;
 import static com.whatname.iam.common.api.ErrorCode.AUTH_STATE_UNAVAILABLE;
 
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -18,8 +18,8 @@ public class AdminServiceLocks {
     private final AdminStateLoader loader;
     private final AdminIntegrity integrity;
 
-    public AdminServiceLocks(AdminMapper mapper, AdminIntegrity integrity) {
-        this.loader = new AdminStateLoader(mapper);
+    public AdminServiceLocks(AdminRepository repository, AdminIntegrity integrity) {
+        this.loader = new AdminStateLoader(repository);
         this.integrity = integrity;
     }
 

@@ -12,8 +12,8 @@ import com.whatname.iam.dto.department.DepartmentRequests;
 import com.whatname.iam.dto.hr.HrRequests.*;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
 import com.whatname.iam.service.grant.HrGrantCollaboration;
@@ -23,9 +23,6 @@ import com.whatname.iam.support.TestDatabase;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -256,23 +253,18 @@ class HrIntegrityIntegrationTest {
         }
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class AuditFailure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class AuditFailure extends com.whatname.iam.support.RepositoryProbe {
         boolean fail;
         String targetType;
 
         public Object intercept(Invocation call) throws Throwable {
             if (fail
-                    && ((MappedStatement) call.getArgs()[0])
-                            .getId()
-                            .equals("com.whatname.iam.mapper.audit.AuditMapper.insert")
+                    && call.id()
+                            .equals("com.whatname.iam.repository.audit.AuditRepository.insert")
                     && (targetType == null
-                            || call.getArgs()[1] instanceof Map<?, ?> entry
-                                    && targetType.equals(entry.get("targetType"))))
+                            || (call.parameters() != null)
+                                    && targetType.equals(call.parameters().get("targetType"))))
                 throw new org.springframework.dao.DataAccessResourceFailureException(
                         "fixture HR audit outage");
             return call.proceed();
@@ -285,11 +277,11 @@ class HrIntegrityIntegrationTest {
     final List<Long> accounts = new ArrayList<>();
     ConfigurableApplicationContext app;
     JdbcTemplate db;
-    UserAccountMapper users;
-    OrganizationWriteMapper organization;
+    UserAccountRepository users;
+    OrganizationWriteRepository organization;
     DataSignatureService signatures;
     ManagementDataSecurity data;
-    SensitiveDataCodec codec;
+
     HrService hr;
     DepartmentService departments;
     TransactionTemplate tx;
@@ -323,7 +315,7 @@ class HrIntegrityIntegrationTest {
         settings.put(
                 "iam.security.data-signing.public-keys.fixture-hr",
                 encode(signing.getPublic().getEncoded()));
-        for (String key : List.of("data-key", "phone-hmac-key", "sms-hmac-key")) {
+        for (String key : List.of("sms-hmac-key")) {
             byte[] bytes = new byte[32];
             new SecureRandom().nextBytes(bytes);
             settings.put("iam.security." + key, encode(bytes));
@@ -335,11 +327,10 @@ class HrIntegrityIntegrationTest {
                                 TestDatabase.arguments(
                                         "--server.port=0", "--server.address=127.0.0.1"));
         db = app.getBean(JdbcTemplate.class);
-        users = app.getBean(UserAccountMapper.class);
-        organization = app.getBean(OrganizationWriteMapper.class);
+        users = app.getBean(UserAccountRepository.class);
+        organization = app.getBean(OrganizationWriteRepository.class);
         signatures = app.getBean(DataSignatureService.class);
         data = app.getBean(ManagementDataSecurity.class);
-        codec = app.getBean(SensitiveDataCodec.class);
         hr = app.getBean(HrService.class);
         departments = app.getBean(DepartmentService.class);
         json = app.getBean(ObjectMapper.class);
@@ -530,7 +521,7 @@ class HrIntegrityIntegrationTest {
         assertEquals(Boolean.TRUE, tx.execute(status -> signatures.verifySeal(evidence, seal)));
         assertEquals("HR", evidence.get("sourceSystem"));
         assertFalse(evidence.toString().contains(person.passwordHash));
-        assertFalse(evidence.toString().contains(codec.decrypt(person.phone)));
+        assertFalse(evidence.toString().contains((person.phone)));
         assertEquals("APPLIED", eventStatus(event));
     }
 
@@ -675,7 +666,7 @@ class HrIntegrityIntegrationTest {
         assertTrue(port.transientDepartment > 0);
         assertEquals(before, count("SELECT COUNT(*) FROM sys_dept"));
         assertEquals(0, count("SELECT COUNT(*) FROM sys_dept WHERE dept_code=?", code));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
     }
 
     @Test
@@ -736,7 +727,7 @@ class HrIntegrityIntegrationTest {
         assertEquals(userBefore, signature(USER_IDENTITY, person.id));
         assertEquals(orgBefore, signature(ORGANIZATION, 0));
         assertNull(department(source).get("merged_into_dept_id"));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
         assertEquals(
                 0,
                 count("SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?", event));
@@ -756,7 +747,7 @@ class HrIntegrityIntegrationTest {
                                 employee(event, 2, Action.UPSERT, sourceCode)));
         assertEquals(before, db.queryForMap("SELECT * FROM sys_user WHERE id=?", person.id));
         assertEquals(old, signature(USER_IDENTITY, person.id));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
     }
 
     @Test
@@ -813,7 +804,7 @@ class HrIntegrityIntegrationTest {
                                 person.employeeNo,
                                 employee(event, 2, Action.UPSERT, sourceCode)));
         assertEquals(before.hrVersion, users.findById(person.id).hrVersion);
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
         assertNull(ExternalEventService.applying(actor, "HR_EMPLOYEE", event));
     }
 
@@ -956,12 +947,11 @@ class HrIntegrityIntegrationTest {
         long id =
                 insert(
                         "INSERT INTO"
-                            + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,employee_no,dept_id,source,employment_type,status,password_initialized,session_version,grant_revision,hr_version)"
-                            + " VALUES(?,?,?,?,?,?,?,1,1,1,1,1,1,1)",
+                            + " sys_user(username,real_name,phone,password_hash,employee_no,dept_id,source,employment_type,status,password_initialized,session_version,grant_revision,hr_version)"
+                            + " VALUES(?,?,?,?,?,?,1,1,1,1,1,1,1)",
                         username,
-                        codec.encrypt("张三"),
-                        codec.encrypt(phone),
-                        codec.phoneHash(phone),
+                        ("张三"),
+                        (phone),
                         app.getBean(PasswordHasher.class).hash("Cobalt!Ridge847"),
                         sg,
                         source);

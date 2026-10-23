@@ -10,7 +10,7 @@ import com.whatname.iam.common.security.*;
 import com.whatname.iam.dto.auth.AuthRequests.*;
 import com.whatname.iam.dto.user.UserRequests;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.user.UserService;
 import com.whatname.iam.support.TestDatabase;
 
@@ -47,8 +47,8 @@ class AccountAuthenticationIntegrationTest {
     JdbcTemplate db;
     AuthService auth;
     UserService users;
-    UserAccountMapper mapper;
-    SensitiveDataCodec codec;
+    UserAccountRepository repository;
+
     JwtTokenService jwt;
     TestGateway gateway;
     TestSms sms;
@@ -72,8 +72,6 @@ class AccountAuthenticationIntegrationTest {
         settings = new HashMap<>();
         settings.put("server.port", "18085");
         settings.put("server.address", "127.0.0.1");
-        settings.put("iam.security.data-key", randomKey());
-        settings.put("iam.security.phone-hmac-key", randomKey());
         settings.put("iam.security.sms-hmac-key", randomKey());
         settings.put(
                 "iam.security.jwt-private-key",
@@ -94,8 +92,7 @@ class AccountAuthenticationIntegrationTest {
         db = context.getBean(JdbcTemplate.class);
         auth = context.getBean(AuthService.class);
         users = context.getBean(UserService.class);
-        mapper = context.getBean(UserAccountMapper.class);
-        codec = context.getBean(SensitiveDataCodec.class);
+        repository = context.getBean(UserAccountRepository.class);
         jwt = context.getBean(JwtTokenService.class);
         gateway = context.getBean(TestGateway.class);
         sms = context.getBean(TestSms.class);
@@ -158,13 +155,13 @@ class AccountAuthenticationIntegrationTest {
                 db.update(
                         "UPDATE sys_user SET status=2,session_version=session_version+1 WHERE id=?",
                         id);
-                gateway.seedSignature(mapper.findById(id));
+                gateway.seedSignature(repository.findById(id));
             }
-            for (String phoneHash : fixturePhones)
+            for (String phoneLookup : fixturePhones)
                 db.update(
                         "UPDATE sys_sms_code SET consumed_at=COALESCE(consumed_at,NOW()) WHERE"
-                                + " phone_hash=?",
-                        phoneHash);
+                                + " phone=?",
+                        phoneLookup);
             for (Long id : fixtureDepts)
                 db.update(
                         "UPDATE sys_dept SET status=0 WHERE id=? AND dept_code LIKE ?",
@@ -276,22 +273,22 @@ class AccountAuthenticationIntegrationTest {
         UserAccount u = seed("locked", 1, 1, allowedDept, 2);
         for (int i = 1; i <= 5; i++) {
             expect(ErrorCode.INVALID_CREDENTIALS, () -> login(u, "WrongPassword91"));
-            assertEquals(i, mapper.findById(u.id).pwdFailedCount);
+            assertEquals(i, repository.findById(u.id).pwdFailedCount);
         }
-        var locked = mapper.findById(u.id);
+        var locked = repository.findById(u.id);
         assertNotNull(locked.pwdLockedUntil);
         long remaining =
                 java.time.Duration.between(java.time.LocalDateTime.now(), locked.pwdLockedUntil)
                         .getSeconds();
         assertTrue(remaining >= 880 && remaining <= 901);
         expect(ErrorCode.INVALID_CREDENTIALS, () -> login(u, ORIGINAL));
-        assertEquals(5, mapper.findById(u.id).pwdFailedCount);
+        assertEquals(5, repository.findById(u.id).pwdFailedCount);
         db.update(
                 "UPDATE sys_user SET pwd_locked_until=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE id=?",
                 u.id);
         assertNotNull(login(u, ORIGINAL));
-        assertEquals(0, mapper.findById(u.id).pwdFailedCount);
-        assertNull(mapper.findById(u.id).pwdLockedUntil);
+        assertEquals(0, repository.findById(u.id).pwdFailedCount);
+        assertNull(repository.findById(u.id).pwdLockedUntil);
     }
 
     @Test
@@ -319,7 +316,7 @@ class AccountAuthenticationIntegrationTest {
         Map<String, String> request = Map.of("phone", phone(u), "code", code, "newPassword", NEXT);
         http("POST", "/auth/password/initialize", request, null, 200);
         http("POST", "/auth/password/initialize", request, null, 401);
-        assertEquals(1, mapper.findById(u.id).passwordInitialized);
+        assertEquals(1, repository.findById(u.id).passwordInitialized);
         assertEquals(
                 1,
                 db.queryForObject(
@@ -377,7 +374,7 @@ class AccountAuthenticationIntegrationTest {
                 Map.of("phone", phone(u), "code", code, "newPassword", NEXT),
                 null,
                 200);
-        assertEquals(2, mapper.findById(u.id).sessionVersion);
+        assertEquals(2, repository.findById(u.id).sessionVersion);
         expect(ErrorCode.INVALID_CREDENTIALS, () -> login(u, ORIGINAL));
         expect(ErrorCode.INVALID_TOKEN, () -> users.list(old, null, null, null, null, 1, 20));
         assertNotNull(login(u, NEXT));
@@ -399,10 +396,10 @@ class AccountAuthenticationIntegrationTest {
             assertEquals(
                     i,
                     db.queryForObject(
-                            "SELECT attempts FROM sys_sms_code WHERE phone_hash=? AND"
+                            "SELECT attempts FROM sys_sms_code WHERE phone=? AND"
                                     + " purpose='SET_PASSWORD' ORDER BY id DESC LIMIT 1",
                             Integer.class,
-                            u.phoneHash));
+                            u.phone));
         }
         expect(
                 ErrorCode.INVALID_CREDENTIALS,
@@ -411,12 +408,12 @@ class AccountAuthenticationIntegrationTest {
         String expired = send(u, Purpose.SET_PASSWORD);
         db.update(
                 "UPDATE sys_sms_code SET expires_at=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE"
-                        + " phone_hash=?",
-                u.phoneHash);
+                        + " phone=?",
+                u.phone);
         expect(
                 ErrorCode.INVALID_CREDENTIALS,
                 () -> auth.changePassword(new Password(phone(u), expired, NEXT), true));
-        assertEquals(0, mapper.findById(u.id).passwordInitialized);
+        assertEquals(0, repository.findById(u.id).passwordInitialized);
     }
 
     @Test
@@ -429,16 +426,16 @@ class AccountAuthenticationIntegrationTest {
         assertEquals(
                 1,
                 db.queryForObject(
-                        "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at IS"
+                        "SELECT COUNT(*) FROM sys_sms_code WHERE phone=? AND consumed_at IS"
                                 + " NULL",
                         Integer.class,
-                        u.phoneHash));
+                        u.phone));
         String hash =
                 db.queryForObject(
-                        "SELECT code_hash FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC"
+                        "SELECT code_hash FROM sys_sms_code WHERE phone=? ORDER BY id DESC"
                                 + " LIMIT 1",
                         String.class,
-                        u.phoneHash);
+                        u.phone);
         assertEquals(64, hash.length());
         assertNotEquals(replacement, hash);
         assertNotEquals(old, replacement);
@@ -451,7 +448,7 @@ class AccountAuthenticationIntegrationTest {
     @Test
     void unknownPhoneHasOpaqueResponseAndNoSmsButSameResendLimit() throws Exception {
         String unknown = nextPhone();
-        String hash = codec.phoneHash(unknown);
+        String hash = (unknown);
         fixturePhones.add(hash);
         JsonNode result =
                 http(
@@ -490,7 +487,7 @@ class AccountAuthenticationIntegrationTest {
 
     @Test
     void simultaneousFirstSmsForUnknownPhoneCommitsOnlyOneProof() throws Exception {
-        String phone = nextPhone(), hash = codec.phoneHash(phone);
+        String phone = nextPhone(), hash = (phone);
         fixturePhones.add(hash);
         ExecutorService pool = Executors.newFixedThreadPool(4);
         CountDownLatch ready = new CountDownLatch(4), go = new CountDownLatch(1);
@@ -518,7 +515,7 @@ class AccountAuthenticationIntegrationTest {
             assertEquals(
                     1,
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=?",
+                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone=?",
                             Integer.class,
                             hash));
         } finally {
@@ -529,7 +526,7 @@ class AccountAuthenticationIntegrationTest {
     @Test
     void temporarySignatureAuditAndRealDatabaseFailuresRollbackOverHttp() throws Exception {
         for (String fault : List.of("signature", "audit", "database")) {
-            String phone = nextPhone(), hash = codec.phoneHash(phone);
+            String phone = nextPhone(), hash = (phone);
             fixturePhones.add(hash);
             gateway.failSign = fault.equals("signature");
             gateway.failAudit = fault.equals("audit");
@@ -557,7 +554,7 @@ class AccountAuthenticationIntegrationTest {
             assertEquals(
                     0,
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",
+                            "SELECT COUNT(*) FROM sys_user WHERE phone=?",
                             Integer.class,
                             hash));
             assertEquals(
@@ -612,7 +609,7 @@ class AccountAuthenticationIntegrationTest {
                         Integer.class,
                         u.id));
         assertEquals(
-                mapper.findById(u.id).passwordHash,
+                repository.findById(u.id).passwordHash,
                 db.queryForObject(
                         "SELECT password_hash FROM sys_password_history WHERE user_id=? ORDER BY"
                                 + " created_at DESC,id DESC LIMIT 1",
@@ -639,13 +636,13 @@ class AccountAuthenticationIntegrationTest {
         gateway.failAudit = false;
         assertUnchangedPassword(u, proof, before, auditBefore);
         auth.changePassword(new Password(phone(u), proof, NEXT), false);
-        assertEquals(2, mapper.findById(u.id).sessionVersion);
+        assertEquals(2, repository.findById(u.id).sessionVersion);
     }
 
     @Test
-    void createTemporaryOverHttpEncryptsIdentityRecordsTrustedCreatorAndNoRoles() throws Exception {
+    void createTemporaryOverHttpStoresPlainIdentityRecordsTrustedCreatorAndNoRoles() throws Exception {
         String phone = nextPhone();
-        fixturePhones.add(codec.phoneHash(phone));
+        fixturePhones.add((phone));
         JsonNode response =
                 http(
                         "POST",
@@ -663,16 +660,16 @@ class AccountAuthenticationIntegrationTest {
                         200);
         long id = response.at("/data/userId").asLong();
         fixtureIds.add(id);
-        UserAccount u = mapper.findById(id);
+        UserAccount u = repository.findById(id);
         assertTrue(u.username.matches("temp[0-9]+"));
         assertEquals(2, u.source);
         assertNull(u.employeeNo);
         assertNull(u.employmentType);
         assertEquals(admin.id, u.createdBy);
         assertEquals(0, u.passwordInitialized);
-        assertFalse(u.phone.contains(phone));
-        assertEquals("Test Person", codec.decrypt(u.realNameCiphertext));
-        assertEquals(phone, codec.decrypt(u.phone));
+        assertEquals(phone, response.at("/data/phone").asText());
+        assertEquals("Test Person", (u.realName));
+        assertEquals(phone, (u.phone));
         assertEquals(
                 0,
                 db.queryForObject(
@@ -703,7 +700,7 @@ class AccountAuthenticationIntegrationTest {
     @Test
     void unsupportedTemporaryNamesRejectBeforeAnyAccountOrEvidenceWriteOverHttp() throws Exception {
         for (String name : List.of("··", "𠀀", "重".repeat(9))) {
-            String phone = nextPhone(), hash = codec.phoneHash(phone);
+            String phone = nextPhone(), hash = (phone);
             fixturePhones.add(hash);
             var audits =
                     db.queryForList(
@@ -736,7 +733,7 @@ class AccountAuthenticationIntegrationTest {
                 assertEquals(
                         0,
                         db.queryForObject(
-                                "SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",
+                                "SELECT COUNT(*) FROM sys_user WHERE phone=?",
                                 Integer.class,
                                 hash));
                 assertEquals(
@@ -756,7 +753,7 @@ class AccountAuthenticationIntegrationTest {
                 // retirement.
                 fixtureIds.addAll(
                         db.queryForList(
-                                "SELECT id FROM sys_user WHERE phone_hash=?", Long.class, hash));
+                                "SELECT id FROM sys_user WHERE phone=?", Long.class, hash));
             }
         }
     }
@@ -765,7 +762,7 @@ class AccountAuthenticationIntegrationTest {
     void supportedTemporaryNamesCanInitializeAndResetWithDeliveredProofOverHttp() throws Exception {
         for (String name : List.of("张三", "Test Person", "单明")) {
             String phone = nextPhone();
-            fixturePhones.add(codec.phoneHash(phone));
+            fixturePhones.add((phone));
             long id =
                     http(
                                     "POST",
@@ -802,7 +799,7 @@ class AccountAuthenticationIntegrationTest {
                             NEXT),
                     null,
                     200);
-            UserAccount initialized = mapper.findById(id);
+            UserAccount initialized = repository.findById(id);
             assertEquals(1, initialized.passwordInitialized);
             assertEquals(1, initialized.sessionVersion);
             assertNotNull(login(initialized, NEXT));
@@ -824,7 +821,7 @@ class AccountAuthenticationIntegrationTest {
                             "WinterLantern84!"),
                     null,
                     200);
-            UserAccount reset = mapper.findById(id);
+            UserAccount reset = repository.findById(id);
             assertEquals(2, reset.sessionVersion);
             assertEquals(1, reset.passwordInitialized);
             assertNotNull(login(reset, "WinterLantern84!"));
@@ -837,10 +834,10 @@ class AccountAuthenticationIntegrationTest {
             assertEquals(
                     0,
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=? AND consumed_at"
+                            "SELECT COUNT(*) FROM sys_sms_code WHERE phone=? AND consumed_at"
                                     + " IS NULL",
                             Integer.class,
-                            reset.phoneHash));
+                            reset.phone));
         }
     }
 
@@ -881,7 +878,7 @@ class AccountAuthenticationIntegrationTest {
     @Test
     void concurrentTemporaryPhoneUniquenessHasOneWinner() throws Exception {
         String phone = nextPhone();
-        fixturePhones.add(codec.phoneHash(phone));
+        fixturePhones.add((phone));
         var request =
                 new UserRequests.Temporary(
                         "Test Person", phone, Long.toString(allowedDept), PREFIX + "race");
@@ -929,9 +926,9 @@ class AccountAuthenticationIntegrationTest {
             assertEquals(
                     0,
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",
+                            "SELECT COUNT(*) FROM sys_user WHERE phone=?",
                             Integer.class,
-                            codec.phoneHash(phone)));
+                            (phone)));
         }
         // A currently nonexistent department inside a controlled test scope exercises existence.
         gateway.managers.put(admin.id, Set.of(Long.MAX_VALUE));
@@ -1047,9 +1044,9 @@ class AccountAuthenticationIntegrationTest {
     void filteredSearchNeverBypassesFunctionScopeOrCurrentSessionOverHttp() throws Exception {
         UserAccount inside = seed("filterguard", 1, 2, allowedDept, 1),
                 outside = seed("filterguard", 1, 2, outsideDept, 1);
-        // An out-of-scope OR phone match must neither count nor decrypt this identity.
+        // An out-of-scope phone match must neither count nor expose this identity.
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext='unreadable-test-only' WHERE id=?",
+                "UPDATE sys_user SET real_name='unreadable-test-only' WHERE id=?",
                 outside.id);
         String query = "/users?status=2&source=1&keyword=" + phone(outside);
         JsonNode hidden = http("GET", query, null, adminToken, 200);
@@ -1079,7 +1076,7 @@ class AccountAuthenticationIntegrationTest {
         http("GET", query, null, adminToken, 401);
         // The forced stale-session assertion is complete; keep only this test's
         // retained fixtures internally consistent for later full-scope searches.
-        gateway.seedSignature(mapper.findById(admin.id));
+        gateway.seedSignature(repository.findById(admin.id));
         renameFixture(outside, "Test Person");
     }
 
@@ -1088,10 +1085,10 @@ class AccountAuthenticationIntegrationTest {
         long dept = nameDepartment("single17");
         UserAccount u = seed("name17", 1, 1, dept, 2);
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",
-                codec.encrypt("张小明"),
+                "UPDATE sys_user SET real_name=? WHERE id=?",
+                ("张小明"),
                 u.id);
-        gateway.seedSignature(mapper.findById(u.id));
+        gateway.seedSignature(repository.findById(u.id));
         JsonNode result =
                 http(
                         "GET",
@@ -1148,10 +1145,10 @@ class AccountAuthenticationIntegrationTest {
                     UserAccount u = named("张小明", dept, state, source);
                     if (dept == first && state == 2 && source == 1) expected.add(u.id);
                 }
-        // Outside-scope unreadable ciphertext must not affect count/decryption.
+        // Outside-scope invalid identity must not affect counting or results.
         UserAccount corrupt = named("张小明", outsideDept, 2, 1);
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext='unreadable-name17' WHERE id=?",
+                "UPDATE sys_user SET real_name='unreadable-name17' WHERE id=?",
                 corrupt.id);
         String base = "/users?keyword=" + encoded("张") + "&status=2&source=1";
         Set<String> seen = new HashSet<>();
@@ -1172,7 +1169,7 @@ class AccountAuthenticationIntegrationTest {
         gateway.denyFunction = false;
         db.update("UPDATE sys_user SET session_version=session_version+1 WHERE id=?", admin.id);
         http("GET", base, null, adminToken, 401);
-        gateway.seedSignature(mapper.findById(admin.id));
+        gateway.seedSignature(repository.findById(admin.id));
         renameFixture(corrupt, "张小明");
     }
 
@@ -1181,16 +1178,16 @@ class AccountAuthenticationIntegrationTest {
         long dept = nameDepartment("bad18");
         UserAccount good = named("张三", dept, 1, 2), bad = named("李四", dept, 1, 2);
         String path = "/users?deptId=" + dept + "&pageSize=1&keyword=" + good.username;
-        db.update("UPDATE sys_user SET real_name_ciphertext='invalid-gcm-name' WHERE id=?", bad.id);
+        db.update("UPDATE sys_user SET real_name='unsigned-demo-name' WHERE id=?", bad.id);
         try {
             http("GET", path, null, adminToken, 503); // Bad identity may not be silently skipped.
-            gateway.seedSignature(mapper.findById(bad.id));
+            gateway.seedSignature(repository.findById(bad.id));
             http(
                     "GET",
                     path,
                     null,
                     adminToken,
-                    503); // Valid signature over undecryptable name also fails.
+                    200); // A newly signed plain name is valid; no decryption step remains.
             JsonNode empty =
                     http("GET", "/users?deptId=" + dept + "&pageSize=1", null, adminToken, 200);
             assertEquals(2, empty.at("/data/total").asInt());
@@ -1230,12 +1227,12 @@ class AccountAuthenticationIntegrationTest {
             new org.springframework.transaction.support.TransactionTemplate(manager)
                     .executeWithoutResult(
                             status -> {
-                                mapper.lockById(last.id);
+                                repository.lockById(last.id);
                                 db.update(
-                                        "UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",
-                                        codec.encrypt("李四"),
+                                        "UPDATE sys_user SET real_name=? WHERE id=?",
+                                        ("李四"),
                                         last.id);
-                                gateway.seedSignature(mapper.findById(last.id));
+                                gateway.seedSignature(repository.findById(last.id));
                             });
             gateway.pauseId = 0;
             gateway.release.countDown();
@@ -1282,7 +1279,7 @@ class AccountAuthenticationIntegrationTest {
                         200);
         long id = r.at("/data/userId").asLong();
         fixtureIds.add(id);
-        fixturePhones.add(codec.phoneHash(phone));
+        fixturePhones.add((phone));
         assertNameIds(dept, "小明", Set.of(id));
         for (String fault : List.of("sign", "audit")) {
             String fresh = nextPhone();
@@ -1306,9 +1303,9 @@ class AccountAuthenticationIntegrationTest {
                 assertEquals(
                         0,
                         db.queryForObject(
-                                "SELECT COUNT(*) FROM sys_user WHERE phone_hash=?",
+                                "SELECT COUNT(*) FROM sys_user WHERE phone=?",
                                 Integer.class,
-                                codec.phoneHash(fresh)));
+                                (fresh)));
             } finally {
                 gateway.failSign = false;
                 gateway.failAudit = false;
@@ -1363,13 +1360,13 @@ class AccountAuthenticationIntegrationTest {
     private UserAccount named(String name, long dept, int state, int source) {
         UserAccount u = seed("name17", 1, state, dept, source);
         renameFixture(u, name);
-        return mapper.findById(u.id);
+        return repository.findById(u.id);
     }
 
     private void renameFixture(UserAccount u, String name) {
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext=? WHERE id=?", codec.encrypt(name), u.id);
-        gateway.seedSignature(mapper.findById(u.id));
+                "UPDATE sys_user SET real_name=? WHERE id=?", (name), u.id);
+        gateway.seedSignature(repository.findById(u.id));
     }
 
     private static String encoded(String term) {
@@ -1481,7 +1478,7 @@ class AccountAuthenticationIntegrationTest {
                     Map.of("status", 2, "reason", PREFIX + "retry"),
                     adminToken,
                     200);
-            assertEquals(2, mapper.findById(u.id).sessionVersion);
+            assertEquals(2, repository.findById(u.id).sessionVersion);
             expect(ErrorCode.INVALID_CREDENTIALS, () -> login(u, ORIGINAL));
             expect(ErrorCode.INVALID_TOKEN, () -> users.detail(old, u.id.toString()));
             http("POST", "/auth/logout", null, old, 200);
@@ -1491,7 +1488,7 @@ class AccountAuthenticationIntegrationTest {
                     Map.of("status", 1, "reason", PREFIX + "resume"),
                     adminToken,
                     200);
-            assertEquals(2, mapper.findById(u.id).sessionVersion);
+            assertEquals(2, repository.findById(u.id).sessionVersion);
             expect(ErrorCode.INVALID_TOKEN, () -> users.detail(old, u.id.toString()));
             assertNotNull(login(u, ORIGINAL));
             assertEquals(
@@ -1552,7 +1549,7 @@ class AccountAuthenticationIntegrationTest {
         db.update(
                 "UPDATE sys_user SET status=3,session_version=session_version+1 WHERE id=?", u.id);
         // Model a legitimate state transition: its identity signature commits before logout.
-        gateway.seedSignature(mapper.findById(u.id));
+        gateway.seedSignature(repository.findById(u.id));
         http("POST", "/auth/logout", null, b, 200);
         assertEquals(
                 2,
@@ -1581,8 +1578,8 @@ class AccountAuthenticationIntegrationTest {
                 Map.of("status", 2, "reason", PREFIX + "fault"),
                 adminToken,
                 503);
-        assertEquals(1, mapper.findById(u.id).status);
-        assertEquals(1, mapper.findById(u.id).sessionVersion);
+        assertEquals(1, repository.findById(u.id).status);
+        assertEquals(1, repository.findById(u.id).sessionVersion);
         assertEquals(before, fakeSignature(u.id));
         String token = "Bearer " + jwt.issue(u.id, 1);
         http("POST", "/auth/logout", null, token, 503);
@@ -1632,7 +1629,7 @@ class AccountAuthenticationIntegrationTest {
                         "SELECT * FROM sys_password_history WHERE user_id=? ORDER BY id", u.id));
         facts.addAll(
                 db.queryForList(
-                        "SELECT * FROM sys_sms_code WHERE phone_hash=? ORDER BY id", u.phoneHash));
+                        "SELECT * FROM sys_sms_code WHERE phone=? ORDER BY id", u.phone));
         facts.addAll(
                 db.queryForList(
                         "SELECT * FROM sys_data_signature WHERE data_type='ACCT_USER' AND"
@@ -1657,12 +1654,12 @@ class AccountAuthenticationIntegrationTest {
     }
 
     private String phone(UserAccount u) {
-        return codec.decrypt(u.phone);
+        return (u.phone);
     }
 
     private int smsCount(UserAccount u) {
         return db.queryForObject(
-                "SELECT COUNT(*) FROM sys_sms_code WHERE phone_hash=?", Integer.class, u.phoneHash);
+                "SELECT COUNT(*) FROM sys_sms_code WHERE phone=?", Integer.class, u.phone);
     }
 
     @Test
@@ -1675,27 +1672,26 @@ class AccountAuthenticationIntegrationTest {
     }
 
     @Test
-    @DisplayName("有合法签名但电话密文与检索摘要不一致时拒绝读取")
-    void signedPhoneMismatchIsRejected() {
+    @DisplayName("手机号被直接篡改且未重新签名时拒绝读取")
+    void unsignedPhoneTamperingIsRejected() {
         UserAccount user = seed("phoneMismatch", 1, 1, allowedDept, 2);
         String originalPhone = user.phone;
         try {
             db.update(
                     "UPDATE sys_user SET phone=? WHERE id=?",
-                    codec.encrypt("13900000000"),
+                    ("13900000000"),
                     user.id);
-            gateway.seedSignature(mapper.findById(user.id));
             expect(ErrorCode.INTEGRITY_FAILURE, () -> users.detail(adminToken, user.id.toString()));
         } finally {
             db.update("UPDATE sys_user SET phone=? WHERE id=?", originalPhone, user.id);
-            gateway.seedSignature(mapper.findById(user.id));
+            gateway.seedSignature(repository.findById(user.id));
         }
     }
 
     @Test
     @DisplayName("无效 Unicode 搜索词返回输入错误，不改变账号状态")
     void malformedSearchDoesNotChangeAccount() {
-        long version = mapper.findById(admin.id).sessionVersion;
+        long version = repository.findById(admin.id).sessionVersion;
         expect(
                 ErrorCode.INVALID_ARGUMENT,
                 () ->
@@ -1707,14 +1703,14 @@ class AccountAuthenticationIntegrationTest {
                                 null,
                                 1,
                                 20));
-        assertEquals(version, mapper.findById(admin.id).sessionVersion);
+        assertEquals(version, repository.findById(admin.id).sessionVersion);
     }
 
     private void ageSms(UserAccount u, Purpose purpose) {
         db.update(
                 "UPDATE sys_sms_code SET created_at=DATE_SUB(NOW(),INTERVAL 61 SECOND) WHERE"
-                        + " phone_hash=? AND purpose=?",
-                u.phoneHash,
+                        + " phone=? AND purpose=?",
+                u.phone,
                 purpose.name());
     }
 
@@ -1736,8 +1732,8 @@ class AccountAuthenticationIntegrationTest {
 
     private void assertUnchangedPassword(
             UserAccount u, String proof, String signature, int audits) {
-        assertEquals(u.passwordHash, mapper.findById(u.id).passwordHash);
-        assertEquals(1, mapper.findById(u.id).sessionVersion);
+        assertEquals(u.passwordHash, repository.findById(u.id).passwordHash);
+        assertEquals(1, repository.findById(u.id).sessionVersion);
         assertEquals(
                 1,
                 db.queryForObject(
@@ -1746,10 +1742,10 @@ class AccountAuthenticationIntegrationTest {
                         u.id));
         assertNull(
                 db.queryForObject(
-                        "SELECT consumed_at FROM sys_sms_code WHERE phone_hash=? ORDER BY id DESC"
+                        "SELECT consumed_at FROM sys_sms_code WHERE phone=? ORDER BY id DESC"
                                 + " LIMIT 1",
                         java.sql.Timestamp.class,
-                        u.phoneHash));
+                        u.phone));
         assertEquals(signature, fakeSignature(u.id));
         assertEquals(audits, auditCount(u.id));
     }
@@ -1757,7 +1753,7 @@ class AccountAuthenticationIntegrationTest {
     private UserAccount seed(String suffix, int initialized, int state, long dept, int source) {
         String phone = nextPhone(),
                 username = PREFIX + suffix + sequence.incrementAndGet(),
-                hash = codec.phoneHash(phone);
+                hash = (phone);
         fixturePhones.add(hash);
         var key = new GeneratedKeyHolder();
         db.update(
@@ -1765,13 +1761,12 @@ class AccountAuthenticationIntegrationTest {
                     PreparedStatement s =
                             connection.prepareStatement(
                                     "INSERT INTO"
-                                        + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,status,source,employee_no,employment_type,password_initialized,created_by,temp_reason)"
-                                        + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                        + " sys_user(username,real_name,phone,password_hash,dept_id,status,source,employee_no,employment_type,password_initialized,created_by,temp_reason)"
+                                        + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                                     new String[] {"id"});
                     Object[] values = {
                         username,
-                        codec.encrypt("Test Person"),
-                        codec.encrypt(phone),
+                        ("Test Person"),
                         hash,
                         initialized == 1 ? originalHash : placeholder,
                         dept,
@@ -1789,7 +1784,7 @@ class AccountAuthenticationIntegrationTest {
                 key);
         long id = Objects.requireNonNull(key.getKey()).longValue();
         fixtureIds.add(id);
-        UserAccount u = mapper.findById(id);
+        UserAccount u = repository.findById(id);
         if (initialized == 1)
             db.update(
                     "INSERT INTO sys_password_history(user_id,password_hash) VALUES(?,?)",
@@ -2007,9 +2002,8 @@ class AccountAuthenticationIntegrationTest {
                         Arrays.asList(
                                         u.id,
                                         u.username,
-                                        u.realNameCiphertext,
+                                        u.realName,
                                         u.phone,
-                                        u.phoneHash,
                                         u.passwordHash,
                                         u.employeeNo,
                                         u.deptId,

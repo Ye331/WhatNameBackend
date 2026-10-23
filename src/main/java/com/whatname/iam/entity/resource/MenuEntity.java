@@ -1,6 +1,10 @@
 package com.whatname.iam.entity.resource;
 
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "sys_menu")
 public class MenuEntity {
+    @jakarta.persistence.Id
+    @jakarta.persistence.GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
     private Long id;
     private Long appId;
     private Long parentId;

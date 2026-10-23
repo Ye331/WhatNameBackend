@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.web.RequestIdFilter;
-import com.whatname.iam.mapper.audit.AuditMapper;
+import com.whatname.iam.repository.audit.AuditRepository;
 import com.whatname.iam.service.permission.CanonicalEvidence;
 import com.whatname.iam.service.permission.DataSignatureService;
 
@@ -20,11 +20,11 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class AuditService {
-    private final AuditMapper mapper;
+    private final AuditRepository repository;
     private final DataSignatureService signatures;
 
-    public AuditService(AuditMapper mapper, DataSignatureService signatures) {
-        this.mapper = mapper;
+    public AuditService(AuditRepository repository, DataSignatureService signatures) {
+        this.repository = repository;
         this.signatures = signatures;
     }
 
@@ -102,7 +102,7 @@ public class AuditService {
                 || (reasonCode != null && !reasonCode.matches("[A-Z0-9_]{1,64}")))
             throw new BusinessException(INVALID_ARGUMENT);
         try {
-            mapper.login(userId, type, success ? 1 : 0, reasonCode);
+            repository.login(userId, type, success ? 1 : 0, reasonCode);
         } catch (RuntimeException failure) {
             throw new BusinessException(AUDIT_UNAVAILABLE);
         }
@@ -136,7 +136,7 @@ public class AuditService {
             String encoded = CanonicalEvidence.json(retained);
             if (encoded.length() > 1_000_000) throw new BusinessException(AUDIT_UNAVAILABLE);
             entry.put("evidence", encoded);
-            mapper.insert(entry);
+            repository.insert(entry);
         } catch (RuntimeException failure) {
             throw new BusinessException(AUDIT_UNAVAILABLE, failure);
         }
@@ -149,6 +149,7 @@ public class AuditService {
                 if (key.contains("password")
                         || key.contains("ciphertext")
                         || key.contains("phone")
+                        || key.contains("realname")
                         || key.contains("credential")
                         || key.contains("privatekey")
                         || key.contains("token")

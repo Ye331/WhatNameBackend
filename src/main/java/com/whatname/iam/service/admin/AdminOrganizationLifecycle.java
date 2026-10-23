@@ -3,7 +3,7 @@ package com.whatname.iam.service.admin;
 import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.event.TrustedEventContext;
 
@@ -19,19 +19,19 @@ import java.util.*;
 @Transactional(propagation = Propagation.MANDATORY)
 public class AdminOrganizationLifecycle {
     private final Object key = new Object();
-    private final AdminMapper mapper;
+    private final AdminRepository repository;
     private final AdminStateLoader loader;
     private final AdminRules rules;
     private final AdminIntegrity integrity;
     private final ObjectProvider<AuditService> audit;
 
     public AdminOrganizationLifecycle(
-            AdminMapper mapper,
+            AdminRepository repository,
             AdminRules rules,
             AdminIntegrity integrity,
             ObjectProvider<AuditService> audit) {
-        this.mapper = mapper;
-        this.loader = new AdminStateLoader(mapper);
+        this.repository = repository;
+        this.loader = new AdminStateLoader(repository);
         this.rules = rules;
         this.integrity = integrity;
         this.audit = audit;
@@ -133,40 +133,20 @@ public class AdminOrganizationLifecycle {
         for (long id : revoked) {
             var appointment = before.appointments().get(id);
             if (appointment != null && appointment.status() == 1) {
-                expectOne(mapper.revoke(id));
+                expectOne(repository.revoke(id));
                 changed.add(id);
             }
         }
 
-        // 只收缩任命需重审或原范围已失效的委派，按“管理员、角色”递归处理。
-        // 保留其他上级独立配置的角色，以及全部历史授权来源。
-        record Removed(long adminId, long roleId) {}
-        Set<Removed> removed = new HashSet<>();
-        Deque<Removed> queue = new ArrayDeque<>();
-        for (var d : before.delegations()) {
-            var provider = before.appointments().get(d.configuredBy());
-            var owner = before.appointments().get(d.adminUserId());
-            if (provider == null || owner == null) fail(AUTH_STATE_UNAVAILABLE);
-            boolean lostScope =
-                    rules.contains(before, provider, owner.deptId())
-                            && !rules.contains(current, provider, owner.deptId());
-            if (revoked.contains(d.adminUserId())
-                    || revoked.contains(d.configuredBy())
-                    || lostScope) queue.add(new Removed(d.adminUserId(), d.roleId()));
-        }
-        while (!queue.isEmpty()) {
-            var item = queue.removeFirst();
-            if (!removed.add(item)) continue;
-            expectOne(mapper.deleteDelegation(item.adminId(), item.roleId()));
-            changed.add(item.adminId());
-            for (var d : before.delegations())
-                if (Objects.equals(d.configuredBy(), item.adminId()) && d.roleId() == item.roleId())
-                    queue.add(new Removed(d.adminUserId(), d.roleId()));
+        // Lists are configured directly by level-one administrators; there is no delegation chain.
+        for (long id : revoked) {
+            if (before.appointments().containsKey(id) && repository.deleteDelegations(id) > 0)
+                changed.add(id);
         }
         for (long id : changed) {
             int revision = before.appointments().get(id).delegableRevision();
             if (revision < 1 || revision == Integer.MAX_VALUE) fail(AUTH_STATE_UNAVAILABLE);
-            expectOne(mapper.advanceRevision(id, revision));
+            expectOne(repository.advanceRevision(id, revision));
         }
         var after = loader.loadOrganization();
         integrity.sign(after, changed);

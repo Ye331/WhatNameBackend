@@ -13,12 +13,10 @@ import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.*;
 import com.whatname.iam.support.TestDatabase;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.*;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
@@ -39,10 +37,11 @@ import java.util.concurrent.atomic.AtomicLong;
 class PermissionAuditIntegrationTest {
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({
-        "com.whatname.iam.mapper.permission",
-        "com.whatname.iam.mapper.audit",
-        "com.whatname.iam.mapper.admin"
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({
+        "com.whatname.iam.repository.permission",
+        "com.whatname.iam.repository.audit",
+        "com.whatname.iam.repository.admin"
     })
     @Import({
         DataSigningKeys.class,
@@ -100,19 +99,14 @@ class PermissionAuditIntegrationTest {
         }
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class AuditFailure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class AuditFailure extends com.whatname.iam.support.RepositoryProbe {
         volatile boolean fail;
 
         public Object intercept(Invocation call) throws Throwable {
             if (fail
-                    && ((MappedStatement) call.getArgs()[0])
-                            .getId()
-                            .equals("com.whatname.iam.mapper.audit.AuditMapper.insert"))
+                    && call.id()
+                            .equals("com.whatname.iam.repository.audit.AuditRepository.insert"))
                 throw new org.springframework.dao.DataAccessResourceFailureException(
                         "test-only audit outage");
             return call.proceed();
@@ -596,7 +590,9 @@ class PermissionAuditIntegrationTest {
         var historical =
                 http("GET", "/audit/evidence/" + event, null, adminToken, false, 200).path("data");
         assertTrue(historical.path("integrityVerified").asBoolean());
-        assertEquals(decision.path("permissionVersion"), historical.path("permissionVersion"));
+        assertEquals(decision.path("decisionId"), historical.at("/evidence/decisionId"));
+        assertFalse(historical.path("evidence").has("user_role"));
+        assertFalse(historical.path("evidence").has("signatures"));
         var list =
                 http("GET", "/audit/authorizations?userId=" + user, null, limitedToken, false, 200)
                         .at("/data/items");
@@ -700,10 +696,10 @@ class PermissionAuditIntegrationTest {
     private long account(long department, String code) {
         return insert(
                 "INSERT INTO"
-                    + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,password_initialized)"
-                    + " VALUES(?,'fixture-cipher','fixture-cipher',?,'fixture-hash',?,3,1)",
+                    + " sys_user(username,real_name,phone,password_hash,dept_id,source,password_initialized)"
+                    + " VALUES(?,'fixture-cipher',?,'fixture-hash',?,3,1)",
                 prefix + code,
-                String.format("%064x", UUID.randomUUID().getMostSignificantBits() & Long.MAX_VALUE),
+                String.format("138%08d", Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 100_000_000L)),
                 department);
     }
 

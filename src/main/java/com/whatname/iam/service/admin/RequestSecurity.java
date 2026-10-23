@@ -45,29 +45,14 @@ public class RequestSecurity {
 
     public void require(long actorId, String permission) {
         var context = AuthorizationContext.current();
-        Map<String, Object> origin;
-        if (context.batchActor() != null) {
-            if (context.batchActor() != actorId) throw new BusinessException(INVALID_TOKEN);
-            origin = context.origin();
-        } else {
-            // 等待锁后重新检查有效期、当前状态、sv 和注销记录，不能只复用 actorId。
-            String authorization = authorization();
-            var principal = jwt.verifyBearer(authorization);
-            if (principal.userId() != actorId || permissions.currentUser(authorization) != actorId)
-                throw new BusinessException(INVALID_TOKEN);
-            origin =
-                    Map.of(
-                            "kind",
-                            "HTTP_SESSION",
-                            "userId",
-                            actorId,
-                            "sessionVersion",
-                            principal.sessionVersion(),
-                            "expiresAt",
-                            principal.expiresAt().toString(),
-                            "jtiDigest",
-                            CanonicalEvidence.digest(principal.jti()));
-        }
+        // Every synchronous item retains the HTTP caller; recheck it after acquiring locks.
+        String authorization = authorization();
+        var principal = jwt.verifyBearer(authorization);
+        if (principal.userId() != actorId || permissions.currentUser(authorization) != actorId)
+            throw new BusinessException(INVALID_TOKEN);
+        var origin = Map.<String, Object>of("kind", "HTTP_SESSION", "userId", actorId,
+                "sessionVersion", principal.sessionVersion(), "expiresAt", principal.expiresAt().toString(),
+                "jtiDigest", CanonicalEvidence.digest(principal.jti()));
         permissions.requireFunction(actorId, permission);
         var evidence = new LinkedHashMap<String, Object>();
         evidence.put("permission", permission);

@@ -38,23 +38,15 @@ public final class BatchDtos {
         }
     }
 
-    public record Accepted(String batchId, String processingStatus, int total) {}
-
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Item(String userId, String status, String grantSourceId, String code) {}
 
     public record Result(
-            String batchId,
             String processingStatus,
             int succeeded,
             int failed,
-            int pending,
-            List<Item> items,
-            int page,
-            int pageSize,
-            int total) {}
-
-    public record Submission(boolean created, Object data) {}
+            int total,
+            List<Item> items) {}
 
     public static final class StrictBoolean extends JsonDeserializer<Boolean> {
         @Override

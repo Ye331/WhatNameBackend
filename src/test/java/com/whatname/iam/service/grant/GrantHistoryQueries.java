@@ -27,11 +27,11 @@ public final class GrantHistoryQueries {
         long role = base + 80, app = base + 81, menu = base + 82, reader = base + 90;
         db.update(
                 "INSERT INTO"
-                    + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                    + " VALUES(?,?,'fixture','fixture',?,'fixture',?,3,1,1)",
+                    + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                    + " VALUES(?,?,'fixture',?,'fixture',?,3,1,1)",
                 reader,
                 "HISTORY" + reader,
-                String.format("%064x", reader),
+                String.format("138%08d", reader),
                 department);
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status) VALUES(?,1,?,1)",

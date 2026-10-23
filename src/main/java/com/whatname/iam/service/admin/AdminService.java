@@ -8,7 +8,7 @@ import com.whatname.iam.common.util.IdUtils;
 import com.whatname.iam.dto.admin.AdminDtos.*;
 import com.whatname.iam.dto.common.PageResponse;
 import com.whatname.iam.entity.admin.AdminData.*;
-import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +18,7 @@ import java.util.*;
 @Service
 @Transactional(readOnly = true)
 public class AdminService {
-    private final AdminMapper mapper;
+    private final AdminRepository repository;
     private final AdminStateLoader loader;
     private final AdminRules rules;
     private final RequestSecurity security;
@@ -26,13 +26,13 @@ public class AdminService {
     private final AdminAudit audit;
 
     public AdminService(
-            AdminMapper mapper,
+            AdminRepository repository,
             AdminRules rules,
             RequestSecurity security,
             AdminIntegrity integrity,
             AdminAudit audit) {
-        this.mapper = mapper;
-        this.loader = new AdminStateLoader(mapper);
+        this.repository = repository;
+        this.loader = new AdminStateLoader(repository);
         this.rules = rules;
         this.security = security;
         this.integrity = integrity;
@@ -90,12 +90,12 @@ public class AdminService {
         Set<Long> changed = new TreeSet<>();
         if (existing == null) {
             expectOne(
-                    mapper.insertAppointment(
+                    repository.insertAppointment(
                             targetId, request.adminLevel(), deptId, context.actorId()));
             changed.add(targetId);
         } else {
             changed.addAll(replaceList(state, targetId, Set.of(), context.actorId()));
-            expectOne(mapper.reactivate(targetId, request.adminLevel(), deptId, context.actorId()));
+            expectOne(repository.reactivate(targetId, request.adminLevel(), deptId, context.actorId()));
         }
         var after = finish("ADMIN_APPOINT", context, targetId, request.reason(), changed);
         return summary(after.appointments().get(targetId));
@@ -111,7 +111,7 @@ public class AdminService {
         var target = visibleAppointment(context.state(), actor, targetId);
         rules.checkRevocation(context.state(), context.actorId(), targetId);
         if (target.status() == 1) {
-            expectOne(mapper.revoke(targetId));
+            expectOne(repository.revoke(targetId));
             finish("ADMIN_REVOKE", context, targetId, request.reason(), Set.of(targetId));
         }
         return new Revocation(Long.toString(targetId), 0, true);
@@ -209,36 +209,12 @@ public class AdminService {
 
     private Set<Long> replaceList(
             AdminState before, long targetId, Set<Long> newRoles, long actorId) {
-        record Removed(long adminId, long roleId) {}
-        Deque<Removed> queue = new ArrayDeque<>();
-        before.delegations().stream()
-                .filter(d -> d.adminUserId() == targetId && !newRoles.contains(d.roleId()))
-                .forEach(d -> queue.add(new Removed(targetId, d.roleId())));
-        mapper.deleteDelegations(targetId);
-        for (long roleId : newRoles) expectOne(mapper.insertDelegation(targetId, roleId, actorId));
-        Set<Removed> visited = new HashSet<>();
-        Set<Long> changed = new TreeSet<>(Set.of(targetId));
-        while (!queue.isEmpty()) {
-            var removed = queue.removeFirst();
-            if (!visited.add(removed)) continue;
-            for (var item : before.delegations()) {
-                if (Objects.equals(item.configuredBy(), removed.adminId())
-                        && item.roleId() == removed.roleId()
-                        && !visited.contains(new Removed(item.adminUserId(), item.roleId()))) {
-                    if (!before.appointments().containsKey(item.adminUserId()))
-                        fail(AUTH_STATE_UNAVAILABLE);
-                    expectOne(mapper.deleteDelegation(item.adminUserId(), item.roleId()));
-                    changed.add(item.adminUserId());
-                    queue.addLast(new Removed(item.adminUserId(), item.roleId()));
-                }
-            }
-        }
-        for (long adminId : changed) {
-            int old = before.appointments().get(adminId).delegableRevision();
-            if (old < 1 || old == Integer.MAX_VALUE) fail(AUTH_STATE_UNAVAILABLE);
-            if (mapper.advanceRevision(adminId, old) != 1) fail(VERSION_CONFLICT);
-        }
-        return changed;
+        repository.deleteDelegations(targetId);
+        for (long roleId : newRoles) expectOne(repository.insertDelegation(targetId, roleId, actorId));
+        int old = before.appointments().get(targetId).delegableRevision();
+        if (old < 1 || old == Integer.MAX_VALUE) fail(AUTH_STATE_UNAVAILABLE);
+        if (repository.advanceRevision(targetId, old) != 1) fail(VERSION_CONFLICT);
+        return Set.of(targetId);
     }
 
     private Appointment visibleAppointment(AdminState state, Appointment actor, long targetId) {
@@ -264,7 +240,9 @@ public class AdminService {
                                 .map(String::valueOf)
                                 .toList()
                         : state.delegations().stream()
-                                .filter(d -> d.adminUserId() == targetId)
+                                .filter(d -> d.adminUserId() == targetId
+                                        && state.appointments().containsKey(d.configuredBy())
+                                        && state.appointments().get(d.configuredBy()).adminLevel() == 1)
                                 .map(Delegation::roleId)
                                 .sorted()
                                 .map(String::valueOf)

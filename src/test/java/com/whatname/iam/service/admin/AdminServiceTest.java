@@ -93,7 +93,7 @@ class AdminServiceTest {
     void readDelegationsAllowsSelfAndSuperiorButNotPeersOrOutsiders() {
         db.actorId = 2;
         assertThat(service.delegableRoles("2").roleIds()).containsExactly("100", "101");
-        assertThat(service.delegableRoles("3").roleIds()).containsExactly("100", "101");
+        assertThat(service.delegableRoles("3").roleIds()).containsExactly("101");
         rejects(RESOURCE_NOT_FOUND, () -> service.delegableRoles("5"));
         rejects(RESOURCE_NOT_FOUND, () -> service.delegableRoles("999"));
         db.actorId = 3;
@@ -101,7 +101,7 @@ class AdminServiceTest {
     }
 
     @Test
-    void shrinkingRecursivelyRemovesOnlyMatchingConfiguredSources() {
+    void replacementChangesOnlyTheTargetAndKeepsDirectLists() {
         var result =
                 service.replaceDelegableRoles(
                         "2", new DelegationRequest(List.of("101"), "v1", "缩减"));
@@ -114,9 +114,9 @@ class AdminServiceTest {
                 .satisfies(
                         event ->
                                 assertThat(event.changedAdminIds())
-                                        .containsExactlyInAnyOrder(2L, 3L, 4L));
-        assertThat(db.appointments.get(3L).delegableRevision()).isEqualTo(2);
-        assertThat(db.appointments.get(4L).delegableRevision()).isEqualTo(2);
+                                        .containsExactly(2L));
+        assertThat(db.appointments.get(3L).delegableRevision()).isEqualTo(1);
+        assertThat(db.appointments.get(4L).delegableRevision()).isEqualTo(1);
         assertThat(db.appointments.get(5L).delegableRevision()).isEqualTo(1);
     }
 
@@ -133,7 +133,7 @@ class AdminServiceTest {
     }
 
     @Test
-    void reappointmentClearsOldDelegationsAndAlsoShrinksDescendants() {
+    void reappointmentClearsOnlyTheTargetsOldList() {
         db.revoke(2);
         service.appoint(new AppointmentRequest("2", 2, "20", "重新任命"));
         assertThat(service.delegableRoles("2").roleIds()).isEmpty();
@@ -209,28 +209,14 @@ class AdminServiceTest {
     }
 
     @Test
-    void managementRolesFollowExplicitDelegationWithoutCreatingAppointments() {
-        service.replaceDelegableRoles("2", new DelegationRequest(List.of("200"), "v1", "委派管理角色"));
+    void managementRolesRequireDirectLevelOneConfiguration() {
+        service.replaceDelegableRoles("2", new DelegationRequest(List.of("200"), "v1", "direct"));
         db.actorId = 2;
-        service.replaceDelegableRoles(
-                "3",
-                new DelegationRequest(
-                        List.of("200"), "v" + db.appointments.get(3L).delegableRevision(), "向下委派"));
-        assertThat(db.delegations).anyMatch(d -> d.adminUserId() == 3 && d.roleId() == 200);
+        rejects(DELEGATION_OUT_OF_SCOPE, () -> service.replaceDelegableRoles(
+                "3", new DelegationRequest(List.of("200"), "v1", "not allowed")));
+        db.actorId = 1;
+        service.replaceDelegableRoles("3", new DelegationRequest(List.of("200"), "v1", "direct"));
+        assertThat(service.delegableRoles("3").roleIds()).containsExactly("200");
         assertThat(db.appointments).doesNotContainKey(6L);
-        db.actorId = 5;
-        rejects(
-                ROLE_NOT_DELEGABLE,
-                () ->
-                        new AdminRules()
-                                .checkRole(
-                                        new AdminState(
-                                                db.appointments,
-                                                db.departments,
-                                                db.users,
-                                                db.roles,
-                                                db.delegations),
-                                        5,
-                                        200));
     }
 }

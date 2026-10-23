@@ -6,10 +6,10 @@ import static com.whatname.iam.service.permission.SignedDataType.*;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.entity.grant.GrantData.Source;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.admin.AdminMapper;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.mapper.grant.GrantMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
+import com.whatname.iam.repository.event.ExternalEventRepository;
+import com.whatname.iam.repository.grant.GrantRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.admin.AdminOrganizationLifecycle;
 import com.whatname.iam.service.admin.ChangeEvidence;
 import com.whatname.iam.service.audit.AuditService;
@@ -27,19 +27,19 @@ import java.util.*;
 @Transactional(propagation = Propagation.MANDATORY)
 public class HrGrantCollaboration {
     private final Object key = new Object();
-    private final GrantMapper grants;
-    private final AdminMapper admins;
-    private final UserAccountMapper users;
-    private final ExternalEventMapper events;
+    private final GrantRepository grants;
+    private final AdminRepository admins;
+    private final UserAccountRepository users;
+    private final ExternalEventRepository events;
     private final AdminOrganizationLifecycle lifecycle;
     private final DataSignatureService signatures;
     private final AuditService audit;
 
     public HrGrantCollaboration(
-            GrantMapper grants,
-            AdminMapper admins,
-            UserAccountMapper users,
-            ExternalEventMapper events,
+            GrantRepository grants,
+            AdminRepository admins,
+            UserAccountRepository users,
+            ExternalEventRepository events,
             AdminOrganizationLifecycle lifecycle,
             DataSignatureService signatures,
             AuditService audit) {
@@ -200,10 +200,7 @@ public class HrGrantCollaboration {
                 || admins.selectAppointments(false).stream()
                         .anyMatch(a -> a.userId() == userId && a.status() == 1)
                 || admins.selectDelegations(false).stream()
-                        .anyMatch(
-                                d ->
-                                        d.adminUserId() == userId
-                                                || Objects.equals(d.configuredBy(), userId)))
+                        .anyMatch(d -> d.adminUserId() == userId))
             fail(BUSINESS_RULE_VIOLATION);
         p.rehireChecked = true;
     }

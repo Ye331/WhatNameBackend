@@ -59,6 +59,7 @@ public final class TestDatabase implements BeforeAllCallback, AfterAllCallback {
 
     public static String[] arguments(String... applicationArguments) {
         var arguments = new ArrayList<>(List.of(applicationArguments));
+        arguments.add("--spring.config.location=classpath:/isolated-database-test.yml");
         arguments.add("--spring.config.import=");
         arguments.add("--spring.datasource.url=" + url());
         arguments.add("--spring.datasource.username=" + username());

@@ -99,13 +99,12 @@ class AdminIT {
         for (var user : data.users.values()) {
             jdbc.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status)"
-                        + " VALUES(?,?,?,?,?,?,?,?,?)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status)"
+                        + " VALUES(?,?,?,?,?,?,?,?)",
                     id(user.id()),
                     "test_user_" + id(user.id()),
                     "test-only-ciphertext",
-                    "test-only-ciphertext",
-                    String.format("%064x", id(user.id())),
+                    String.format("138%08d", id(user.id())),
                     "test-only-unusable-hash",
                     id(user.deptId()),
                     3,
@@ -217,15 +216,15 @@ class AdminIT {
     }
 
     @Test
-    void recursiveShrinkUpdatesRevisionsAndPreservesExistingUserGrant() {
+    void directReplacementChangesOnlyTargetAndPreservesExistingUserGrant() {
         var result = service.replaceDelegableRoles(sid(2), request(List.of(sid(101)), "v1"));
         assertThat(result.delegationVersion()).isEqualTo("v2");
         assertThat(service.delegableRoles(sid(3)).roleIds()).containsExactly(sid(101));
         assertThat(service.delegableRoles(sid(4)).roleIds()).isEmpty();
         assertThat(service.delegableRoles(sid(5)).roleIds()).containsExactly(sid(100));
         assertThat(revision(2)).isEqualTo(2);
-        assertThat(revision(3)).isEqualTo(2);
-        assertThat(revision(4)).isEqualTo(2);
+        assertThat(revision(3)).isEqualTo(1);
+        assertThat(revision(4)).isEqualTo(1);
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT COUNT(*) FROM sys_user_role WHERE user_id=? AND role_id=?",
@@ -246,7 +245,7 @@ class AdminIT {
         assertThat(revision(3)).isEqualTo(1);
         assertThat(revision(4)).isEqualTo(1);
         assertThat(service.delegableRoles(sid(2)).roleIds()).containsExactly(sid(100), sid(101));
-        assertThat(service.delegableRoles(sid(4)).roleIds()).containsExactly(sid(100));
+        assertThat(service.delegableRoles(sid(4)).roleIds()).isEmpty();
         assertThat(auditCount(2)).isZero();
     }
 
@@ -270,7 +269,7 @@ class AdminIT {
     }
 
     @Test
-    void reappointmentClearsAndCascadesInTheSameTransaction() {
+    void reappointmentClearsOnlyTheTargetList() {
         service.revoke(sid(2), new RevokeRequest("test"));
         service.appoint(new AppointmentRequest(sid(2), 2, sid(20), "test reappoint"));
         assertThat(service.delegableRoles(sid(2)).roleIds()).isEmpty();

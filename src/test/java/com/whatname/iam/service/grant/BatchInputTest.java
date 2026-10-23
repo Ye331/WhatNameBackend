@@ -21,31 +21,17 @@ class BatchInputTest {
     }
 
     @Test
-    void orderingAndExactDuplicatesDoNotChangeIdempotencyDigest() {
+    void validatesSmallSynchronousBatchWithoutARequestKey() {
         var second = new Target("3", "MANUAL", "form-2", null, null);
-        var first = BatchInput.parse("key-1", request("GRANT", List.of(second, MANUAL, MANUAL)));
-        var reordered = BatchInput.parse("key-2", request("GRANT", List.of(MANUAL, second)));
-        assertEquals(List.of(MANUAL, second), first.targets());
-        assertEquals(first.digest(), reordered.digest());
-        var changedReason = new Request("GRANT", "2", reordered.targets(), "另一原因", false);
-        assertNotEquals(first.digest(), BatchInput.parse("key-1", changedReason).digest());
-        assertNotEquals(
-                first.digest(),
-                BatchInput.parse(
-                                "key-1",
-                                new Request("GRANT", "4", reordered.targets(), "调整权限", false))
-                        .digest());
-    }
-
-    @Test
-    void departmentGrantAndSourceSpecificRevokeHaveDifferentDigests() {
-        var position = new Target("1", "DEPT_POSITION", "position-1", "8", null);
-        var revoke = new Target("1", null, null, null, "9");
-        var grantInput = BatchInput.parse("key", request("GRANT", List.of(position)));
-        var revokeInput = BatchInput.parse("key", request("REVOKE", List.of(revoke)));
-        assertEquals(List.of(position), grantInput.targets());
-        assertEquals(List.of(revoke), revokeInput.targets());
-        assertNotEquals(grantInput.digest(), revokeInput.digest());
+        var input = BatchInput.parse(null, request("GRANT", List.of(second, MANUAL)));
+        assertEquals(List.of(MANUAL, second), input.targets());
+        assertThrows(BusinessException.class, () -> BatchInput.parse(null, request("GRANT", List.of(MANUAL, MANUAL))));
+        var hundred = java.util.stream.LongStream.rangeClosed(1, 100)
+                .mapToObj(id -> new Target(Long.toString(id), "MANUAL", "ref", null, null)).toList();
+        assertEquals(100, BatchInput.parse(null, request("GRANT", hundred)).targets().size());
+        var tooMany = new ArrayList<>(hundred);
+        tooMany.add(new Target("101", "MANUAL", "ref", null, null));
+        assertThrows(BusinessException.class, () -> BatchInput.parse(null, request("GRANT", tooMany)));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -60,7 +46,6 @@ class BatchInputTest {
     static Stream<Arguments> invalidRequests() {
         var valid = request("GRANT", List.of(MANUAL));
         return Stream.of(
-                Arguments.of("缺少幂等键", null, valid),
                 Arguments.of("空幂等键", "", valid),
                 Arguments.of("幂等键包含空格", "bad key", valid),
                 Arguments.of("幂等键超长", "k".repeat(129), valid),

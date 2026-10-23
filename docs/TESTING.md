@@ -1,3 +1,18 @@
+## 课程作业范围简化验证（2026-10-23）
+
+本轮先留档后缩减需求，历史提交为后端 a18d128、前端 00ad125；当前行为见 [课程范围](COURSEWORK_SCOPE.md)。下方旧记录属于旧版验证，不代表本轮范围。
+
+- 后端分轮执行规则、HTTP、真实 MySQL 与集成测试；按 classname + testcase name 去重后 **740 项通过，0失败、0错误、0跳过**。报告位于 target/surefire-reports 与 target/failsafe-reports；重复执行的 GrantIT 不重复计数。
+- 前端浏览器测试 **37项通过**，包含同步批量、100人上限、仅重试明确失败项、未知结果不自动重发、无任务恢复及管理员操作。前端生产构建通过；本轮修改文件的格式检查通过。
+- 04–09学习手册 **49个接口**与实际Controller一致，无遗漏、无重复；示例JSON和代码链接检查通过。OpenAPI共55个操作，JSON/YAML可解析，GR06已移除。
+- 数据库 ck_auth_allowed_path 已改为验证基础日志的 decisionId、metadata、seal，不再要求五类完整权限事实。现有演示库先做完整备份，再应用课程范围迁移；未删除历史数据。
+- 已删除后台批量执行器、线程池配置和恢复扫描，以及只服务于已取消需求的测试；保留授权历史、签名、会话、范围及基础安全边界验证。
+- 专门验证离职时任命已撤销但本人仍有残留清单的情况：清理后更新版本与签名；旧版下级委派记录不再阻止再入职。
+
+复核命令：Maven wrapper test；启用 integration-tests 的 verify；前端 npm test -- --workers=2 与 npm run build。由于真实MySQL与历史签名测试耗时较长，本轮失败项按新规则修正后定向复测，以上汇总来自每个用例的最新报告。
+
+> 当前验收按 [2026-10-23 课程作业简化范围](COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
+
 # 测试与验证
 
 ## 统一入口
@@ -137,3 +152,44 @@ BatchGrantIT、BatchRecoveryIT（大批量与恢复）本轮未运行。
 结果：**195 项通过，0 失败、0 错误、0 跳过**（默认测试 154 项 + 集成测试 41 项）。Python 数据脚本 4 项测试通过，PowerShell 入口语法检查通过，当前文档链接和提交差异空白检查通过。
 
 本次没有重新执行 754 项整套测试，也没有重新收集覆盖率；前面的完整覆盖率属于其注明的历史运行。前端本次仅删除归档资料、更新 README，没有修改页面代码。运行日志位于本地 target/precommit-review.log，不提交。
+
+
+## Spring Data JPA 迁移验证（2026-10-22）
+
+持久层测试已切换到 Spring Data Repository。`DepartmentRepositoryTest` 新增两项迁移专用检查：空 Map 查询与列别名契约，以及原生 JPA 更新清理受管状态、与 JDBC 共享回滚。原故障注入与并发测试使用测试专用 `RepositoryProbe`，仍在真实 MySQL 上运行。
+
+完整验证命令：
+
+```powershell
+.\mvnw.cmd clean verify -Pintegration-tests
+```
+
+另外，使用打包后的 JAR 与不可达的隔离数据库地址进行独立启动检查：`/api/v1/system/ping` 返回 200 / OK，`/api/v1/system/database` 返回 503 / AUTH_STATE_UNAVAILABLE。该检查不加载个人配置，不连接开发数据库。JPA 与 Hibernate 来自正式依赖，测试专用 AOP 故障注入不参与发布。
+
+最终复核（2026-10-23）：上述完整验证共 **814 项通过，0 失败、0 错误、0 跳过**，其中 Surefire 40 个测试类、498 项，Failsafe 11 个测试类、316 项。包含真实 MySQL 事务回滚、并发锁、重复键、2001 个目标批量授权，以及进程中断后的恢复测试。本次未启用覆盖率配置，历史覆盖率不代表迁移后的覆盖率。
+
+本地完整运行日志保留于 `target/jpa-migration-verify.log`，测试明细位于 `target/surefire-reports` 和 `target/failsafe-reports`。清除旧 Mapper 空目录占位文件后，仅强制重新打包，不重复执行测试；正式代码与本次完整验证一致。
+
+## 演示身份与本地签名简化（2026-10-23）
+
+本轮移除姓名/手机号 AES-GCM 加解密和手机号 HMAC 查询索引，改用 `real_name`、规范化 `phone` 及唯一约束；短信记录按 `phone` 查询，外部事件内容改为 `payload_json`。用户接口返回 `phone`，前端与模拟数据同步更新。手机号仍参与身份签名，篡改后拒绝读取的断言保留；旧的密文解密测试改为明文存储与响应测试。
+
+数据签名和审计证据共用签名实现。本地配置可自动生成一对 Ed25519 密钥并持续复用，新增首次生成、重启复用、损坏文件拒绝、显式密钥优先及未启用时不生成的测试。JWT 与短信验证码密钥仍使用原配置。
+
+修复迁移过程发现的问题后，执行完整后端验证：
+
+```powershell
+.\mvnw.cmd verify -Pintegration-tests
+```
+
+结果：**818 项通过，0 失败、0 错误、0 跳过**（Surefire 41 个类 / 502 项，Failsafe 11 个类 / 316 项），命令退出码为 0。包括账号、HR/OA、超级用户初始化及恢复、权限篡改拒绝、事务回滚、并发锁、2001 人批量授权和进程中断恢复。真实签名的 2001 个目标全部成功，每项执行一次，重复运行不增加授权事实；这不代表完成正式性能验收。本轮未重新收集覆盖率。
+
+其他验证：
+
+- 前端 `npm run build` 成功；`npm test -- --workers=2` 的 37 项浏览器测试通过，使用模拟 API。
+- 数据脚本 `python -m unittest discover -s scripts -p 'test_*.py' -q` 的 4 项测试通过。
+- 使用打包 JAR 和实际本地配置连续启动两次，`/api/v1/system/ping` 与 `/api/v1/system/database` 均返回 200 / OK；两次启动后的本地签名密钥文件保持一致，检查过程不输出密钥。
+- JAR 不包含旧 `SensitiveDataCodec`、MyBatis 或本地密钥文件；OpenAPI YAML 解析、276 个本地文档链接及差异空白检查通过。
+- 当前 Docker 库的账号、短信、外部事件均为空后，执行空库字段升级；保留数据库和其他表，没有导入账号或初始化业务数据。有加密业务数据的库需要另行解密并重新签名，升级脚本会拒绝直接处理。
+
+本地日志：`target/privacy-migration-verify.log`，启动检查结果：`target/privacy-smoke-result.json`。报告分别在 `target/surefire-reports`、`target/failsafe-reports`；日志和生成密钥不提交。

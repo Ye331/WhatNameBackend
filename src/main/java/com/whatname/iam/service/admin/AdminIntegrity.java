@@ -2,7 +2,7 @@ package com.whatname.iam.service.admin;
 
 import static com.whatname.iam.service.permission.SignedDataType.*;
 
-import com.whatname.iam.mapper.admin.ResourceLockMapper;
+import com.whatname.iam.repository.admin.ResourceLockRepository;
 import com.whatname.iam.service.permission.DataSignatureService;
 
 import org.springframework.stereotype.Service;
@@ -14,9 +14,9 @@ import java.util.*;
 @Service
 public class AdminIntegrity {
     private final DataSignatureService signatures;
-    private final ResourceLockMapper locks;
+    private final ResourceLockRepository locks;
 
-    public AdminIntegrity(DataSignatureService signatures, ResourceLockMapper locks) {
+    public AdminIntegrity(DataSignatureService signatures, ResourceLockRepository locks) {
         this.signatures = signatures;
         this.locks = locks;
     }

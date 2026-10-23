@@ -6,7 +6,7 @@ import static com.whatname.iam.service.permission.SignedDataType.*;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.common.util.RouteTemplateUtils;
-import com.whatname.iam.mapper.permission.*;
+import com.whatname.iam.repository.permission.*;
 import com.whatname.iam.service.audit.AuditService;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -20,8 +20,8 @@ import java.util.*;
 
 @Service
 public class PermissionService {
-    private final SignatureMapper facts;
-    private final PermissionMapper mapper;
+    private final SignatureRepository facts;
+    private final PermissionRepository repository;
     private final DataSignatureService signatures;
     private final JwtTokenService jwt;
     private final AuditService audit;
@@ -29,15 +29,15 @@ public class PermissionService {
     private final TransactionTemplate decisions;
 
     public PermissionService(
-            SignatureMapper facts,
-            PermissionMapper mapper,
+            SignatureRepository facts,
+            PermissionRepository repository,
             DataSignatureService signatures,
             JwtTokenService jwt,
             AuditService audit,
             @Value("${iam.permission.management-app-code:IAM}") String managementApplication,
             PlatformTransactionManager transactions) {
         this.facts = facts;
-        this.mapper = mapper;
+        this.repository = repository;
         this.signatures = signatures;
         this.jwt = jwt;
         this.audit = audit;
@@ -62,7 +62,7 @@ public class PermissionService {
     /** 仅返回本人已验签的任命摘要，页面无需额外取得管理员列表权限。 */
     private Map<String, Object> ownManagement(long userId) {
         var appointment = facts.record(ADMIN, userId);
-        if (appointment == null) return Map.of("appointed", false);
+        if (appointment == null || appointment.isEmpty()) return Map.of("appointed", false);
         signatures.verify(ADMIN, userId);
         if (number(appointment, "status") != 1) return Map.of("appointed", false);
         return Map.of(
@@ -76,11 +76,11 @@ public class PermissionService {
     public long currentUser(String authorization) {
         var principal = jwt.verifyBearer(authorization);
         var user = facts.record(USER_IDENTITY, principal.userId());
-        if (user == null
+        if ((user == null || user.isEmpty())
                 || number(user, "status") != 1
                 || number(user, "password_initialized") != 1
                 || number(user, "session_version") != principal.sessionVersion()
-                || mapper.invalidated(principal.jti()) != 0)
+                || repository.invalidated(principal.jti()) != 0)
             throw new BusinessException(INVALID_TOKEN);
         signatures.verify(USER_IDENTITY, principal.userId());
         return principal.userId();
@@ -126,16 +126,14 @@ public class PermissionService {
                 RouteTemplateUtils.canonicalTemplate(RouteTemplateUtils.normalizeTemplate(route));
         String decisionId = UUID.randomUUID().toString();
         Long userId = null, apiId = null;
-        var evidence = new LinkedHashMap<String, Object>();
         String reason = "NO_PERMISSION";
         boolean allowed = false;
         BusinessException fault = null;
         try {
             userId = currentUser(authorization);
             var view = calculate(userId, applicationId);
-            evidence.putAll(view.evidence());
             var candidates =
-                    mapper.apis(applicationId).stream()
+                    repository.apis(applicationId).stream()
                             .filter(
                                     api ->
                                             method.equals(api.get("http_method"))
@@ -152,8 +150,7 @@ public class PermissionService {
             else {
                 var api = candidates.getFirst();
                 apiId = number(api, "id");
-                view.signatureEvidence().add(signatures.verify(RESOURCE_API, apiId));
-                evidence.put("api", api);
+                signatures.verify(RESOURCE_API, apiId);
                 if (number(api, "status") != 1) reason = "API_DISABLED";
                 else {
                     allowed = view.apiIds().contains(apiId);
@@ -165,44 +162,28 @@ public class PermissionService {
             reason = error.errorCode().name();
             allowed = false;
         }
-        evidence.put("method", method);
-        evidence.put("routeTemplate", route);
-        String version = CanonicalEvidence.digest(evidence);
-        evidence.put("decisionId", decisionId);
-        evidence.put("permissionVersion", version);
-        audit.decision(userId, applicationId, apiId, allowed, reason, method, route, evidence);
-        return new Outcome(
-                Map.of(
-                        "allowed",
-                        allowed,
-                        "reasonCode",
-                        reason,
-                        "decisionId",
-                        decisionId,
-                        "permissionVersion",
-                        version),
-                fault);
+        audit.decision(userId, applicationId, apiId, allowed, reason, method, route,
+                Map.of("decisionId", decisionId));
+        return new Outcome(Map.of("allowed", allowed, "reasonCode", reason,
+                "decisionId", decisionId), fault);
     }
 
     private long application(String appCode) {
         if (appCode == null || !appCode.matches("[A-Za-z0-9_-]{1,64}"))
             throw new BusinessException(INVALID_ARGUMENT);
-        Long id = mapper.applicationId(appCode);
+        Long id = repository.applicationId(appCode);
         if (id == null) throw new BusinessException(RESOURCE_NOT_FOUND);
         return id;
     }
 
     private View calculate(long userId, long applicationId) {
-        var signatureEvidence = new ArrayList<Map<String, Object>>();
-        var evidence = new LinkedHashMap<String, Object>();
-        evidence.put("signatures", signatureEvidence);
         var user = facts.record(USER_IDENTITY, userId);
-        if (user == null) throw new BusinessException(RESOURCE_NOT_FOUND);
-        signatureEvidence.add(signatures.verify(USER_IDENTITY, userId));
+        if ((user == null || user.isEmpty())) throw new BusinessException(RESOURCE_NOT_FOUND);
+        signatures.verify(USER_IDENTITY, userId);
         var app = facts.record(RESOURCE_APPLICATION, applicationId);
-        if (app == null) throw new BusinessException(INVALID_SERVICE);
-        signatureEvidence.add(signatures.verify(RESOURCE_APPLICATION, applicationId));
-        signatureEvidence.add(signatures.verify(ORGANIZATION, 0));
+        if ((app == null || app.isEmpty())) throw new BusinessException(INVALID_SERVICE);
+        signatures.verify(RESOURCE_APPLICATION, applicationId);
+        signatures.verify(ORGANIZATION, 0);
         var departments = new HashMap<Long, Map<String, Object>>();
         facts.organization().forEach(row -> departments.put(number(row, "id"), row));
         var ancestors = chain(departments, number(user, "dept_id"), "parent_id");
@@ -212,24 +193,8 @@ public class PermissionService {
                                 row ->
                                         number(row, "status") != 1
                                                 || row.get("merged_into_dept_id") != null);
-        evidence.put(
-                "state",
-                Map.of(
-                        "userId",
-                        Long.toString(userId),
-                        "status",
-                        number(user, "status"),
-                        "sessionVersion",
-                        number(user, "session_version"),
-                        "departments",
-                        ancestors,
-                        "application",
-                        app));
-        evidence.put("user_role", Map.of("roles", List.of(), "sources", List.of()));
-        evidence.put("role_permission", new ArrayList<>());
-        evidence.put("menu_api", new ArrayList<>());
         var menus = new LinkedHashMap<Long, Map<String, Object>>();
-        mapper.menus(applicationId).forEach(menu -> menus.put(number(menu, "id"), menu));
+        repository.menus(applicationId).forEach(menu -> menus.put(number(menu, "id"), menu));
         var granted = new LinkedHashSet<Long>();
         if (number(user, "status") != 1
                 || number(user, "password_initialized") != 1
@@ -240,30 +205,20 @@ public class PermissionService {
                     granted,
                     Set.of(),
                     List.of(),
-                    evidence,
-                    signatureEvidence,
                     frozen ? "DEPARTMENT_FROZEN" : "STATE_DISABLED");
-        List<Long> roles = verifiedRoles(userId, signatureEvidence, evidence);
+        List<Long> roles = verifiedRoles(userId);
         Set<Long> verifiedMenus =
-                collectRoleMenus(roles, applicationId, menus, granted, signatureEvidence, evidence);
-        var mappingEvidence = new ArrayList<Map<String, Object>>();
-        signatureEvidence.addAll(signatures.verifyMany(RESOURCE_MENU, verifiedMenus).values());
-        signatureEvidence.addAll(signatures.verifyMany(MENU_APIS, granted).values());
+                collectRoleMenus(roles, applicationId, menus, granted);
+        signatures.verifyMany(RESOURCE_MENU, verifiedMenus);
+        signatures.verifyMany(MENU_APIS, granted);
         var apiIds = new HashSet<Long>();
-        var mappings = new LinkedHashMap<Long, List<Long>>();
-        granted.forEach(id -> mappings.put(id, new ArrayList<>()));
         if (!granted.isEmpty())
             facts.menuApiMembers(new ArrayList<>(granted))
                     .forEach(
                             row -> {
                                 long apiId = number(row, "api_id");
                                 apiIds.add(apiId);
-                                mappings.get(number(row, "menu_id")).add(apiId);
                             });
-        mappings.forEach(
-                (id, apis) ->
-                        mappingEvidence.add(Map.of("menuId", Long.toString(id), "apis", apis)));
-        evidence.put("menu_api", mappingEvidence);
         var displayed = new HashSet<Long>();
         for (long id : granted)
             chain(menus, id, "parent_id").forEach(menu -> displayed.add(number(menu, "id")));
@@ -272,13 +227,8 @@ public class PermissionService {
                         .filter(menu -> displayed.contains(number(menu, "id")))
                         .map(menu -> menuView(menu, granted.contains(number(menu, "id"))))
                         .toList();
-        evidence.put(
-                "menus",
-                menus.values().stream()
-                        .filter(menu -> displayed.contains(number(menu, "id")))
-                        .toList());
         return new View(
-                menus, granted, apiIds, display, evidence, signatureEvidence, "NO_PERMISSION");
+                menus, granted, apiIds, display, "NO_PERMISSION");
     }
 
     /** 多角色权限取并集；目录用于导航，只有启用的权限菜单可以授予。 */
@@ -286,21 +236,17 @@ public class PermissionService {
             List<Long> roles,
             long applicationId,
             Map<Long, Map<String, Object>> menus,
-            Set<Long> granted,
-            List<Map<String, Object>> signatureEvidence,
-            Map<String, Object> evidence) {
-        var roleEvidence = new ArrayList<Map<String, Object>>();
+            Set<Long> granted) {
         var verifiedMenus = new HashSet<Long>();
         for (long roleId : roles) {
-            signatureEvidence.add(signatures.verify(ROLE_MENUS, roleId));
+            signatures.verify(ROLE_MENUS, roleId);
             var role = facts.record(ROLE_MENUS, roleId);
             var menuIds = facts.roleMenus(roleId);
-            roleEvidence.add(Map.of("role", role, "menus", menuIds));
             if (number(role, "status") != 1) continue;
             for (long menuId : menuIds) {
                 var menu = menus.get(menuId);
-                if (menu == null) menu = facts.record(RESOURCE_MENU, menuId);
-                if (menu == null) throw new BusinessException(INTEGRITY_FAILURE);
+                if ((menu == null || menu.isEmpty())) menu = facts.record(RESOURCE_MENU, menuId);
+                if ((menu == null || menu.isEmpty())) throw new BusinessException(INTEGRITY_FAILURE);
                 if (number(menu, "app_id") != applicationId) continue;
                 if (number(menu, "menu_type") != 2) throw new BusinessException(INTEGRITY_FAILURE);
                 var menuChain = chain(menus, menuId, "parent_id");
@@ -312,16 +258,12 @@ public class PermissionService {
                 granted.add(menuId);
             }
         }
-        evidence.put("role_permission", roleEvidence);
         return verifiedMenus;
     }
 
     /** 有效用户角色必须与有效授权来源一致，避免直接改关系表绕过授权。 */
-    private List<Long> verifiedRoles(
-            long userId,
-            List<Map<String, Object>> signatureEvidence,
-            Map<String, Object> evidence) {
-        signatureEvidence.add(signatures.verify(USER_GRANTS, userId));
+    private List<Long> verifiedRoles(long userId) {
+        signatures.verify(USER_GRANTS, userId);
         var roles = facts.userRoles(userId);
         var sources = facts.sources(userId);
         var sourcedRoles = new TreeSet<Long>();
@@ -337,7 +279,6 @@ public class PermissionService {
         }
         if (!new TreeSet<>(roles).equals(sourcedRoles))
             throw new BusinessException(INTEGRITY_FAILURE);
-        evidence.put("user_role", Map.of("roles", roles, "sources", sources));
         return roles;
     }
 
@@ -360,7 +301,7 @@ public class PermissionService {
         if (id <= 0) throw new BusinessException(INTEGRITY_FAILURE);
         while (id != 0) {
             var row = records.get(id);
-            if (row == null || !seen.add(id)) throw new BusinessException(INTEGRITY_FAILURE);
+            if ((row == null || row.isEmpty()) || !seen.add(id)) throw new BusinessException(INTEGRITY_FAILURE);
             result.add(row);
             id = number(row, parentField);
         }
@@ -378,8 +319,6 @@ public class PermissionService {
             Set<Long> granted,
             Set<Long> apiIds,
             List<Map<String, Object>> display,
-            Map<String, Object> evidence,
-            List<Map<String, Object>> signatureEvidence,
             String reason) {}
 
     private record Outcome(Map<String, Object> result, BusinessException fault) {}

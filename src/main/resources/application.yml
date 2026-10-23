@@ -21,6 +21,16 @@ spring:
       connection-timeout: 3000
       initialization-fail-timeout: -1
       transaction-isolation: TRANSACTION_REPEATABLE_READ
+  jpa:
+    open-in-view: false
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        boot.allow_jdbc_metadata_access: false
+        cache.use_second_level_cache: false
+        cache.use_query_cache: false
   sql:
     init:
       mode: never
@@ -29,18 +39,13 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
-mybatis:
-  mapper-locations: classpath*:mapper/**/*.xml
-  type-aliases-package: com.whatname.iam.entity
-  configuration:
-    map-underscore-to-camel-case: true
-    cache-enabled: false
-    local-cache-scope: STATEMENT
-
 app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
 
 logging:
+  level:
+    # Driver errors may contain identity values; the application logs only error categories.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
   pattern:
     level: '%5p [requestId=%X{requestId:-}]'

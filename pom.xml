@@ -15,7 +15,6 @@
     <description>统一权限管理系统：面向功能的三层后端</description>
     <properties>
         <java.version>21</java.version>
-        <mybatis-spring-boot.version>3.0.5</mybatis-spring-boot.version>
     </properties>
     <dependencies>
         <dependency>
@@ -27,9 +26,8 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>${mybatis-spring-boot.version}</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
             <groupId>com.mysql</groupId>
@@ -72,6 +70,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

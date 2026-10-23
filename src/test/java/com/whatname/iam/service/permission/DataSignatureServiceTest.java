@@ -7,7 +7,7 @@ import static org.mockito.Mockito.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.DataSigningKeys;
-import com.whatname.iam.mapper.permission.SignatureMapper;
+import com.whatname.iam.repository.permission.SignatureRepository;
 
 import org.junit.jupiter.api.*;
 
@@ -15,20 +15,20 @@ import java.security.*;
 import java.util.*;
 
 class DataSignatureServiceTest {
-    SignatureMapper mapper;
+    SignatureRepository repository;
     DataSigningKeys keys;
     DataSignatureService service;
     Map<String, Object> stored;
 
     @BeforeEach
     void fixture() throws Exception {
-        mapper = mock(SignatureMapper.class);
+        repository = mock(SignatureRepository.class);
         keys = new DataSigningKeys();
         rotate("first");
-        service = new DataSignatureService(mapper, keys);
-        when(mapper.record(USER_GRANTS, 7)).thenReturn(Map.of("id", 7L, "grant_revision", 1L));
-        when(mapper.userRoles(7)).thenReturn(List.of());
-        when(mapper.sources(7)).thenReturn(List.of());
+        service = new DataSignatureService(repository, keys);
+        when(repository.record(USER_GRANTS, 7)).thenReturn(Map.of("id", 7L, "grant_revision", 1L));
+        when(repository.userRoles(7)).thenReturn(List.of());
+        when(repository.sources(7)).thenReturn(List.of());
         doAnswer(
                         call -> {
                             stored =
@@ -41,9 +41,9 @@ class DataSignatureServiceTest {
                                             call.getArgument(3));
                             return null;
                         })
-                .when(mapper)
+                .when(repository)
                 .save(anyString(), anyLong(), anyString(), anyString());
-        when(mapper.signature("USER_GRANTS", 7)).thenAnswer(call -> stored);
+        when(repository.signature("USER_GRANTS", 7)).thenAnswer(call -> stored);
     }
 
     @Test
@@ -68,11 +68,11 @@ class DataSignatureServiceTest {
     void emptyGrantsHaveARealSignatureAndIllegalInsertionOrDeletionCannotPass() {
         service.sign(USER_GRANTS, 7);
         assertNotNull(service.verify(USER_GRANTS, 7));
-        when(mapper.userRoles(7)).thenReturn(List.of(42L));
+        when(repository.userRoles(7)).thenReturn(List.of(42L));
         assertThrows(BusinessException.class, () -> service.verify(USER_GRANTS, 7));
         service.sign(USER_GRANTS, 7);
         assertNotNull(service.verify(USER_GRANTS, 7));
-        when(mapper.userRoles(7)).thenReturn(List.of());
+        when(repository.userRoles(7)).thenReturn(List.of());
         assertThrows(BusinessException.class, () -> service.verify(USER_GRANTS, 7));
     }
 
@@ -102,7 +102,7 @@ class DataSignatureServiceTest {
         assertTrue(service.verifySeal(evidence, seal));
         assertFalse(service.verifySeal(Map.of("decisionId", "d1", "allowed", false), seal));
         assertThrows(BusinessException.class, () -> service.verify(USER_GRANTS, 7));
-        verify(mapper, never()).save(anyString(), anyLong(), anyString(), anyString());
+        verify(repository, never()).save(anyString(), anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -110,7 +110,7 @@ class DataSignatureServiceTest {
         var unrelated = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         keys.setPrivateKey(Base64.getEncoder().encodeToString(unrelated.getPrivate().getEncoded()));
         assertThrows(BusinessException.class, () -> service.sign(USER_GRANTS, 7));
-        verify(mapper, never()).save(anyString(), anyLong(), anyString(), anyString());
+        verify(repository, never()).save(anyString(), anyLong(), anyString(), anyString());
     }
 
     private void rotate(String name) throws Exception {

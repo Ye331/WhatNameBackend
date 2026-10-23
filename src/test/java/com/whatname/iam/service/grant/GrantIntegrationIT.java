@@ -17,9 +17,6 @@ import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -108,26 +105,22 @@ class GrantIntegrationIT {
                 () -> encoded(ED.getPublic().getEncoded()));
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Failure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Failure extends com.whatname.iam.support.RepositoryProbe {
         volatile String point;
         volatile String hit;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
-            if (("AUDIT".equals(point) && id.endsWith("AuditMapper.insert"))
+            if (("AUDIT".equals(point) && id.endsWith("AuditRepository.insert"))
                     || ("SIGN".equals(point)
-                            && id.endsWith("SignatureMapper.save")
-                            && "USER_GRANTS".equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
+                            && id.endsWith("SignatureRepository.save")
+                            && "USER_GRANTS".equals(((Map<?, ?>) call.parameters()).get("type")))
                     || ("ADMIN_SIGN".equals(point)
-                            && id.endsWith("SignatureMapper.save")
+                            && id.endsWith("SignatureRepository.save")
                             && "ADMIN_DELEGABLE_ROLES"
-                                    .equals(((Map<?, ?>) call.getArgs()[1]).get("type")))) {
+                                    .equals(((Map<?, ?>) call.parameters()).get("type")))) {
                 hit = point;
                 throw new IllegalStateException("test persistence failure");
             }
@@ -140,8 +133,8 @@ class GrantIntegrationIT {
     @Autowired AdminService admins;
     @Autowired AdminOrganizationLifecycle organization;
     @Autowired com.whatname.iam.service.department.DepartmentAccessService departmentAdapter;
-    @Autowired com.whatname.iam.mapper.department.OrganizationWriteMapper organizationMapper;
-    @Autowired com.whatname.iam.mapper.event.ExternalEventMapper eventMapper;
+    @Autowired com.whatname.iam.repository.department.OrganizationWriteRepository organizationMapper;
+    @Autowired com.whatname.iam.repository.event.ExternalEventRepository eventMapper;
     @Autowired AuditService auditService;
     @Autowired DataSignatureService signatures;
     @Autowired PermissionService permissions;
@@ -150,10 +143,9 @@ class GrantIntegrationIT {
     @Autowired MockMvc http;
     @Autowired ObjectMapper json;
     @Autowired Failure failure;
-    @Autowired BatchWorker worker;
     @Autowired BatchService batchService;
     @Autowired GrantOperations operations;
-    @Autowired com.whatname.iam.mapper.grant.BatchMapper batches;
+    @Autowired com.whatname.iam.repository.grant.BatchRepository batches;
     static final AtomicLong NEXT = new AtomicLong(1000);
     long b;
     String bearer;
@@ -191,11 +183,11 @@ class GrantIntegrationIT {
         for (int u : List.of(10, 11, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?, 'fixture','fixture',?,'fixture',?,3,1,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?, 'fixture',?,'fixture',?,3,1,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
@@ -623,58 +615,9 @@ class GrantIntegrationIT {
                 .isZero();
     }
 
-    @Test
-    void persistedBatchRunsWithoutRequestAndRecordsItsItem() {
-        long batch = seedBatch();
-        RequestContextHolder.resetRequestAttributes();
-        worker.run(batch);
-        assertThat(batches.items(batch).getFirst().processingStatus()).isEqualTo("APPLIED");
-        assertThat(revision()).isEqualTo(2);
-        String evidence =
-                db.queryForObject(
-                        "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                                + " operation_type='USER_ROLE_GRANT'",
-                        String.class,
-                        id(20));
-        assertThat(evidence).contains("PERSISTED_BATCH", "batchId", "itemId");
-        tx.executeWithoutResult(
-                s -> {
-                    assertThatThrownBy(() -> operations.grant(id(10), request()))
-                            .isInstanceOfSatisfying(
-                                    BusinessException.class,
-                                    e -> assertThat(e.errorCode()).isEqualTo(INVALID_TOKEN));
-                    s.setRollbackOnly();
-                });
-        assertThat(audits()).isEqualTo(1);
-    }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"account", "function", "appointment", "AUDIT"})
-    void persistedBatchRechecksCurrentAuthorityAndRollsBackItem(String kind) {
-        long batch = seedBatch();
-        switch (kind) {
-            case "account" -> {
-                db.update("UPDATE sys_user SET status=2 WHERE id=?", id(10));
-                tx.executeWithoutResult(s -> signatures.sign(USER_IDENTITY, id(10)));
-            }
-            case "function" -> {
-                db.update("UPDATE sys_menu SET status=0 WHERE id=?", id(50));
-                tx.executeWithoutResult(s -> signatures.sign(RESOURCE_MENU, id(50)));
-            }
-            case "appointment" -> {
-                db.update("UPDATE sys_admin SET status=0 WHERE user_id=?", id(10));
-                tx.executeWithoutResult(s -> signatures.sign(ADMIN, id(10)));
-            }
-            case "AUDIT" -> failure.point = "AUDIT";
-        }
-        RequestContextHolder.resetRequestAttributes();
-        worker.run(batch);
-        var item = batches.items(batch).getFirst();
-        assertThat(item.processingStatus()).isEqualTo("FAILED");
-        assertThat(item.resultCode())
-                .isEqualTo(kind.equals("AUDIT") ? "AUDIT_UNAVAILABLE" : "PERMISSION_DENIED");
-        unchanged();
-    }
+
+
 
     long seedBatch() {
         return tx.execute(
@@ -682,7 +625,7 @@ class GrantIntegrationIT {
                     batches.insertBatch(
                             id(10),
                             "C2-BATCH",
-                            "0".repeat(64),
+                            "13800000000",
                             "GRANT",
                             id(30),
                             "batch fixture",
@@ -707,37 +650,23 @@ class GrantIntegrationIT {
     }
 
     @Test
-    void appointmentAndRecursiveDelegationSignEveryChangedAdmin() {
+    void directLevelOneConfigurationDoesNotChangeAnotherAdministratorsList() {
         db.update("UPDATE sys_user SET dept_id=? WHERE id=?", id(2), id(20));
-        tx.executeWithoutResult(s -> signatures.sign(USER_IDENTITY, id(20)));
-        admins.appoint(
-                new com.whatname.iam.dto.admin.AdminDtos.AppointmentRequest(
-                        sid(20), 3, sid(2), "appoint"));
+        tx.executeWithoutResult(status -> signatures.sign(USER_IDENTITY, id(20)));
+        admins.appoint(new com.whatname.iam.dto.admin.AdminDtos.AppointmentRequest(sid(20), 3, sid(2), "appoint"));
+        admins.replaceDelegableRoles(sid(20), new com.whatname.iam.dto.admin.AdminDtos.DelegationRequest(List.of(sid(30)), "v1", "direct"));
+        admins.replaceDelegableRoles(sid(11), new com.whatname.iam.dto.admin.AdminDtos.DelegationRequest(List.of(), "v1", "replace another list"));
+        assertThat(admins.delegableRoles(sid(20)).roleIds()).containsExactly(sid(30));
+        tx.executeWithoutResult(status -> {
+            for (int user : List.of(11, 20)) {
+                signatures.verify(ADMIN, id(user));
+                signatures.verify(ADMIN_DELEGABLE_ROLES, id(user));
+            }
+        });
         bind("Bearer " + jwt.issue(id(11), 1));
-        admins.replaceDelegableRoles(
-                sid(20),
-                new com.whatname.iam.dto.admin.AdminDtos.DelegationRequest(
-                        List.of(sid(30)), "v1", "delegate"));
-        bind(bearer);
-        admins.replaceDelegableRoles(
-                sid(11),
-                new com.whatname.iam.dto.admin.AdminDtos.DelegationRequest(
-                        List.of(), "v1", "shrink"));
-        assertThat(admins.delegableRoles(sid(20)).roleIds()).isEmpty();
-        tx.executeWithoutResult(
-                s -> {
-                    for (int u : List.of(11, 20)) {
-                        signatures.verify(ADMIN, id(u));
-                        signatures.verify(ADMIN_DELEGABLE_ROLES, id(u));
-                    }
-                });
-        String evidence =
-                db.queryForObject(
-                        "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                                + " operation_type='ADMIN_DELEGATE'",
-                        String.class,
-                        id(11));
-        assertThat(evidence).contains(sid(11), sid(20), "shrink");
+        assertThatThrownBy(() -> admins.replaceDelegableRoles(sid(20),
+                new com.whatname.iam.dto.admin.AdminDtos.DelegationRequest(List.of(), "v2", "blocked")))
+                .isInstanceOfSatisfying(BusinessException.class, failure -> assertThat(failure.errorCode()).isEqualTo(DELEGATION_OUT_OF_SCOPE));
     }
 
     // These are internal organization transactions, not successful authenticated HR requests.
@@ -766,72 +695,23 @@ class GrantIntegrationIT {
     }
 
     @Test
-    void
-            organizationExpansionRestrictsAppointmentPreservesGrantsAndRequiresExplicitReappointment() {
+    void organizationExpansionKeepsAppointmentAndListsForManualReview() {
         var sources = db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=?", id(11));
-        orgTx.executeWithoutResult(
-                s -> {
-                    prepareOrganization();
-                    addChild();
-                    departmentAdapter.organizationChanged(Set.of(id(3)), List.of());
-                    signOrganization();
-                });
-        assertThat(
-                        db.queryForObject(
-                                "SELECT status FROM sys_admin WHERE user_id=?",
-                                Integer.class,
-                                id(11)))
-                .isZero();
-        assertThat(
-                        db.queryForObject(
-                                "SELECT dept_id FROM sys_admin WHERE user_id=?",
-                                Long.class,
-                                id(11)))
-                .isEqualTo(id(2));
-        assertThat(
-                        db.queryForObject(
-                                "SELECT delegable_revision FROM sys_admin WHERE user_id=?",
-                                Integer.class,
-                                id(11)))
-                .isEqualTo(2);
-        assertThat(db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=?", id(11)))
-                .isEqualTo(sources);
-        assertThat(
-                        db.queryForObject(
-                                "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                        + " admin_user_id=?",
-                                Long.class,
-                                id(11)))
-                .isZero();
-        tx.executeWithoutResult(
-                s -> {
-                    signatures.verify(ADMIN, id(11));
-                    signatures.verify(ADMIN_DELEGABLE_ROLES, id(11));
-                });
-        String evidence =
-                db.queryForObject(
-                        "SELECT evidence FROM sys_operation_log WHERE target_id=? AND"
-                                + " operation_type='ADMIN_ORG_REVIEW'",
-                        String.class,
-                        id(11));
-        assertThat(evidence).contains("org-" + b, "C_ORGANIZATION_REVIEW_V1", "fixture-client");
-        bind("Bearer " + jwt.issue(id(11), 1));
-        assertThat(admins.myScope().appointed()).isFalse();
-        assertThatThrownBy(() -> grants.grant(request()))
-                .isInstanceOfSatisfying(
-                        BusinessException.class,
-                        e -> assertThat(e.errorCode()).isEqualTo(PERMISSION_DENIED));
-        bind(bearer);
-        admins.appoint(
-                new com.whatname.iam.dto.admin.AdminDtos.AppointmentRequest(
-                        sid(11), 2, sid(2), "reviewed expanded scope"));
-        assertThat(admins.delegableRoles(sid(11)).roleIds()).isEmpty();
-        assertThat(db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=?", id(11)))
-                .isEqualTo(sources);
+        var list = db.queryForList("SELECT * FROM sys_admin_delegable_role WHERE admin_user_id=?", id(11));
+        orgTx.executeWithoutResult(status -> {
+            prepareOrganization(); addChild();
+            departmentAdapter.organizationChanged(Set.of(id(3)), List.of());
+            signOrganization();
+        });
+        assertThat(db.queryForObject("SELECT status FROM sys_admin WHERE user_id=?", Integer.class, id(11))).isEqualTo(1);
+        assertThat(db.queryForObject("SELECT delegable_revision FROM sys_admin WHERE user_id=?", Integer.class, id(11))).isEqualTo(1);
+        assertThat(db.queryForList("SELECT * FROM sys_admin_delegable_role WHERE admin_user_id=?", id(11))).isEqualTo(list);
+        assertThat(db.queryForList("SELECT * FROM sys_user_role_source WHERE user_id=?", id(11))).isEqualTo(sources);
+        tx.executeWithoutResult(status -> { signatures.verify(ADMIN, id(11)); signatures.verify(ADMIN_DELEGABLE_ROLES, id(11)); });
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"AUDIT", "ADMIN_SIGN", "final-signature", "missing-prepare"})
+    @ValueSource(strings = {"final-signature", "missing-prepare"})
     void organizationFailureRollsBackTreeAppointmentListsAndEvidence(String fault) {
         assertThatThrownBy(
                         () ->
@@ -895,7 +775,7 @@ class GrantIntegrationIT {
     }
 
     @Test
-    void organizationMovedAdministratorClearsRecursiveDelegationButRetainsIndependentRole() {
+    void organizationMovedAdministratorClearsOwnListWithoutRecursing() {
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status) VALUES(?,3,?,1)",
                 id(20),
@@ -945,14 +825,14 @@ class GrantIntegrationIT {
                                         + " admin_user_id=?",
                                 Long.class,
                                 id(20)))
-                .containsExactly(id(31));
+                .containsExactly(id(30), id(31));
         for (int u : List.of(11, 20))
             assertThat(
                             db.queryForObject(
                                     "SELECT delegable_revision FROM sys_admin WHERE user_id=?",
                                     Integer.class,
                                     id(u)))
-                    .isEqualTo(2);
+                    .isEqualTo(u == 11 ? 2 : 1);
         assertThat(
                         db.queryForList(
                                 "SELECT * FROM sys_user_role_source WHERE user_id IN (?,?)",
@@ -1148,7 +1028,6 @@ class GrantIntegrationIT {
         var events =
                 new com.whatname.iam.service.event.ExternalEventService(
                         eventMapper,
-                        new SensitiveDataCodec(encoded(key), encoded(hmac)),
                         port,
                         json,
                         manager,
@@ -1217,8 +1096,7 @@ class GrantIntegrationIT {
                                     Long.class,
                                     "org-" + b))
                     .isZero();
-            assertThat(eventMapper.lock("HR", "org-" + b).get("status"))
-                    .isEqualTo("PENDING_RECOVERY");
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Long.class, "org-" + b)).isZero();
         } else {
             assertThat(service.merge(actor, command).get("processingStatus")).isEqualTo("APPLIED");
             assertThat(
@@ -1267,7 +1145,7 @@ class GrantIntegrationIT {
     }
 
     @Test
-    void organizationASyncNewChildRequiresReviewAndProductionStillRejectsUntrustedHr() {
+    void organizationASyncNewChildKeepsAppointmentAndRejectsUntrustedHr() {
         canonicalFixturePaths();
         var actor =
                 new com.whatname.iam.service.event.TrustedEventContext(
@@ -1296,11 +1174,11 @@ class GrantIntegrationIT {
                                 "SELECT status FROM sys_admin WHERE user_id=?",
                                 Integer.class,
                                 id(11)))
-                .isZero();
+                .isEqualTo(1);
     }
 
     @Test
-    void organizationWaitingGrantRechecksAppointmentAfterReviewCommits() throws Exception {
+    void organizationWaitingGrantUsesCurrentScopeWithoutAutomaticRevocation() throws Exception {
         var ready = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         String lowerBearer = "Bearer " + jwt.issue(id(11), 1);
@@ -1362,7 +1240,7 @@ class GrantIntegrationIT {
                                                 > 0);
                 release.countDown();
                 change.get(15, TimeUnit.SECONDS);
-                assertThat(attempt.get(15, TimeUnit.SECONDS)).isEqualTo("PERMISSION_DENIED");
+                assertThat(attempt.get(15, TimeUnit.SECONDS)).isEqualTo("ALLOWED");
             } finally {
                 release.countDown();
             }
@@ -1374,7 +1252,7 @@ class GrantIntegrationIT {
                                 Long.class,
                                 id(11),
                                 id(30)))
-                .isZero();
+                .isEqualTo(1);
     }
 
     @ParameterizedTest

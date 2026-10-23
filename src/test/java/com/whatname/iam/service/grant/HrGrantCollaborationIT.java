@@ -12,9 +12,9 @@ import com.whatname.iam.common.security.*;
 import com.whatname.iam.dto.hr.HrRequests.*;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
+import com.whatname.iam.repository.event.ExternalEventRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.auth.PasswordHasher;
@@ -23,9 +23,6 @@ import com.whatname.iam.service.event.*;
 import com.whatname.iam.service.hr.*;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -83,35 +80,23 @@ class HrGrantCollaborationIT {
         r.add("spring.datasource.url", MYSQL::getJdbcUrl);
         r.add("spring.datasource.username", MYSQL::getUsername);
         r.add("spring.datasource.password", MYSQL::getPassword);
-        r.add("iam.security.data-key", () -> Base64.getEncoder().encodeToString(new byte[32]));
-        r.add(
-                "iam.security.phone-hmac-key",
-                () ->
-                        Base64.getEncoder()
-                                .encodeToString(
-                                        "12345678901234567890123456789012"
-                                                .getBytes(
-                                                        java.nio.charset.StandardCharsets.UTF_8)));
+
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Fault implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Fault extends com.whatname.iam.support.RepositoryProbe {
         volatile String point, hit;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
             if (point != null
-                    && ((point.equals("APPLIED") && id.endsWith("ExternalEventMapper.applied"))
-                            || (id.endsWith("SignatureMapper.save")
-                                    && point.equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
-                            || (id.endsWith("AuditMapper.insert")
+                    && ((point.equals("APPLIED") && id.endsWith("ExternalEventRepository.applied"))
+                            || (id.endsWith("SignatureRepository.save")
+                                    && point.equals(((Map<?, ?>) call.parameters()).get("type")))
+                            || (id.endsWith("AuditRepository.insert")
                                     && point.equals(
-                                            ((Map<?, ?>) call.getArgs()[1]).get("operation"))))) {
+                                            ((Map<?, ?>) call.parameters()).get("operation"))))) {
                 hit = point;
                 throw new IllegalStateException("fixture persistence failure");
             }
@@ -124,10 +109,9 @@ class HrGrantCollaborationIT {
     @Autowired AdminOrganizationLifecycle lifecycle;
     @Autowired AdminPolicyService policy;
     @Autowired DepartmentAccessService productionTrust;
-    @Autowired OrganizationWriteMapper org;
-    @Autowired UserAccountMapper users;
-    @Autowired ExternalEventMapper eventMapper;
-    @Autowired SensitiveDataCodec codec;
+    @Autowired OrganizationWriteRepository org;
+    @Autowired UserAccountRepository users;
+    @Autowired ExternalEventRepository eventMapper;
     @Autowired PasswordHasher passwords;
     @Autowired ObjectMapper json;
     @Autowired PlatformTransactionManager manager;
@@ -188,12 +172,12 @@ class HrGrantCollaborationIT {
         for (int u : List.of(10, 20, 21, 22))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,employee_no,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,employment_type,status,password_initialized,hr_version)"
-                        + " VALUES(?,?,?,'fixture','fixture',?,'fixture',?,1,1,1,1,1)",
+                        + " sys_user(id,username,employee_no,real_name,phone,password_hash,dept_id,source,employment_type,status,password_initialized,hr_version)"
+                        + " VALUES(?,?,?,'fixture',?,'fixture',?,1,1,1,1,1)",
                     id(u),
                     "U" + id(u),
                     "SG" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 10 ? 1 : u == 20 ? 2 : u == 21 ? 4 : 3));
         for (int u : List.of(10, 20, 21, 22))
             db.update(
@@ -373,7 +357,7 @@ class HrGrantCollaborationIT {
                         prepareManagement(actorId);
                     }
                 };
-        var events = new ExternalEventService(eventMapper, codec, port, json, manager, null);
+        var events = new ExternalEventService(eventMapper, port, json, manager, null);
         return new HrService(
                 events,
                 org,
@@ -382,7 +366,7 @@ class HrGrantCollaborationIT {
                 users,
                 identity,
                 new Participant(),
-                codec,
+
                 passwords,
                 Clock.systemUTC());
     }
@@ -582,14 +566,14 @@ class HrGrantCollaborationIT {
                                 event()))
                 .isEqualTo(logs);
         assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(20))).isZero();
-        assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(22))).isZero();
+        assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(22))).isEqualTo(1);
         assertThat(
                         db.queryForList(
                                 "SELECT role_id FROM sys_admin_delegable_role WHERE"
                                         + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
-                .containsExactly(id(32));
+                .containsExactly(id(30), id(32));
         verifiable();
     }
 
@@ -636,7 +620,7 @@ class HrGrantCollaborationIT {
                                         + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
-                .containsExactly(id(32));
+                .containsExactly(id(30), id(32));
         assertThatThrownBy(
                         () ->
                                 tx.execute(
@@ -719,7 +703,7 @@ class HrGrantCollaborationIT {
                                         + " BY data_type,data_id"))
                 .isEqualTo(before);
         assertThat(facts()).isEqualTo(beforeFacts);
-        assertThat(state(event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
     }
 
     @Test
@@ -738,7 +722,7 @@ class HrGrantCollaborationIT {
 
     @ParameterizedTest
     @ValueSource(strings = {"source", "relation", "appointment", "owned-list", "provided-list"})
-    void rehireRejectsEveryResidualQualification(String residual) {
+    void rehireRejectsOwnResidualQualificationsButIgnoresLegacyOutgoingLists(String residual) {
         db.update("UPDATE sys_user SET status=3 WHERE id=?", id(20));
         db.update(
                 "UPDATE sys_user_role_source SET status=0,revoked_at=NOW() WHERE user_id=?",
@@ -788,6 +772,13 @@ class HrGrantCollaborationIT {
                         signatures.sign(ADMIN_DELEGABLE_ROLES, id(u));
                     }
                 });
+        if (residual.equals("provided-list")) {
+            service().employee(ACTOR, employee(), employee(Action.REHIRE, event(), 2, 2));
+            assertThat(scalar("SELECT status FROM sys_user WHERE id=?", id(20))).isEqualTo(1);
+            assertThat(state(event())).isEqualTo("APPLIED");
+            verifiable();
+            return;
+        }
         assertThatThrownBy(
                         () ->
                                 service()
@@ -798,11 +789,7 @@ class HrGrantCollaborationIT {
                 .isInstanceOf(BusinessException.class);
         assertThat(scalar("SELECT status FROM sys_user WHERE id=?", id(20))).isEqualTo(3);
         assertThat(scalar("SELECT session_version FROM sys_user WHERE id=?", id(20))).isEqualTo(1);
-        assertThat(state(event()))
-                .isEqualTo(
-                        Set.of("source", "relation").contains(residual)
-                                ? "PENDING_RECOVERY"
-                                : "REJECTED");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?",
@@ -852,7 +839,7 @@ class HrGrantCollaborationIT {
                 .isEqualTo(before);
         assertThat(scalar("SELECT status FROM sys_user WHERE id=?", id(20))).isEqualTo(1);
         assertThat(scalar("SELECT grant_revision FROM sys_user WHERE id=?", id(20))).isEqualTo(1);
-        assertThat(state(event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
         if (faultKind.equals("missing-signature"))
             assertThat(
                             scalar(
@@ -893,7 +880,7 @@ class HrGrantCollaborationIT {
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?",
                                 event()))
                 .isZero();
-        assertThat(state(event())).isIn("PENDING_RECOVERY", "REJECTED");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
         assertThat(facts()).isEqualTo(before);
     }
 
@@ -962,7 +949,7 @@ class HrGrantCollaborationIT {
     }
 
     @Test
-    void newEmployeeGetsSignedEmptyGrantsAndReceivingScopeRequiresReappointment() {
+    void newEmployeeGetsSignedEmptyGrantsAndKeepsReceivingAdministrator() {
         var request =
                 new Employee(
                         "HR",
@@ -985,7 +972,7 @@ class HrGrantCollaborationIT {
                     signatures.verify(USER_IDENTITY, user);
                     signatures.verify(USER_GRANTS, user);
                 });
-        assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(22))).isZero();
+        assertThat(scalar("SELECT status FROM sys_admin WHERE user_id=?", id(22))).isEqualTo(1);
         assertThat(state(event())).isEqualTo("APPLIED");
     }
 
@@ -1112,7 +1099,7 @@ class HrGrantCollaborationIT {
                         BusinessException.class,
                         e -> assertThat(e.errorCode()).isEqualTo(INVALID_HR_ORDER));
         assertThat(state(event())).isEqualTo("APPLIED");
-        assertThat(state(event() + "-stale")).isEqualTo("REJECTED");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event() + "-stale")).isZero();
         assertThat(scalar("SELECT grant_revision FROM sys_user WHERE id=?", id(20))).isEqualTo(2);
         assertThat(scalar("SELECT status FROM sys_user WHERE id=?", id(20))).isEqualTo(1);
         verifiable();
@@ -1126,8 +1113,7 @@ class HrGrantCollaborationIT {
         assertThat(
                         scalar(
                                 "SELECT COUNT(*) FROM sys_admin_delegable_role WHERE"
-                                        + " admin_user_id=? OR configured_by=?",
-                                id(20),
+                                        + " admin_user_id=?",
                                 id(20)))
                 .isZero();
         assertThat(scalar("SELECT delegable_revision FROM sys_admin WHERE user_id=?", id(20)))
@@ -1138,7 +1124,7 @@ class HrGrantCollaborationIT {
                                         + " admin_user_id=?",
                                 Long.class,
                                 id(21)))
-                .containsExactly(id(32));
+                .containsExactly(id(30), id(32));
         verifiable();
     }
 
@@ -1193,6 +1179,6 @@ class HrGrantCollaborationIT {
                                 "SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?",
                                 event()))
                 .isZero();
-        assertThat(state(event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(scalar("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
     }
 }

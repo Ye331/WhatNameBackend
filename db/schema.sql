@@ -1,7 +1,7 @@
 -- ============================================================
 -- 统一权限管理系统 数据库建表脚本
 -- 数据库：MySQL 8.0.16 及以上（已在Docker MySQL 8.0.46执行建表验证）
--- v3.1：23张表（13张业务表 + 10张支撑表），Controller-Service-Mapper三层，当前不使用Redis。
+-- v3.1：23张表（13张业务表 + 10张支撑表），Controller-Service-Repository三层，当前不使用Redis。
 -- 权限直接读MySQL，移除权限发布版本/拒绝栅栏表；补齐会话版本、事件、批量任务和请求nonce。
 -- 仅首次空库建表；不是旧库迁移脚本，不删除现有数据。
 -- 现有表时 CREATE TABLE 将报错，必须停止，不要使用 mysql --force。
@@ -102,9 +102,8 @@ CREATE TABLE `sys_menu_api` (
 CREATE TABLE `sys_user` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '用户ID',
   `username` VARCHAR(64) NOT NULL COMMENT '用户名',
-  `real_name_ciphertext` VARCHAR(512) NOT NULL COMMENT '姓名AES-GCM密文，界面授权解密展示',
-  `phone` VARCHAR(256) NOT NULL COMMENT '规范化手机号AES-GCM密文，界面脱敏',
-  `phone_hash` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '规范化手机号HMAC-SHA256查询索引',
+  `real_name` VARCHAR(64) NOT NULL COMMENT '演示姓名，明文保存',
+  `phone` VARCHAR(11) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '演示手机号，规范化明文',
   `password_hash` VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '带盐scrypt密码哈希编码，不可逆',
   `employee_no` VARCHAR(64) DEFAULT NULL COMMENT '工号',
   `dept_id` BIGINT NOT NULL COMMENT '所属部门ID',
@@ -125,7 +124,7 @@ CREATE TABLE `sys_user` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`),
   UNIQUE KEY `uk_employee_no` (`employee_no`),
-  UNIQUE KEY `uk_phone_hash` (`phone_hash`),
+  UNIQUE KEY `uk_phone` (`phone`),
   KEY `idx_dept_id` (`dept_id`),
   KEY `idx_status` (`status`),
   CONSTRAINT `ck_user_status` CHECK (`status` IN (1,2,3)),
@@ -266,7 +265,7 @@ CREATE TABLE `sys_operation_log` (
   CONSTRAINT `ck_log_request_id` CHECK (CHAR_LENGTH(TRIM(`request_id`))>0),
   CONSTRAINT `ck_log_evidence_object` CHECK (`evidence` IS NULL OR JSON_TYPE(`evidence`)='OBJECT'),
   CONSTRAINT `ck_auth_evidence` CHECK (`operation_type` <> 'AUTH_CHECK' OR (`auth_at` IS NOT NULL AND `auth_decision` IS NOT NULL AND `auth_reason` IS NOT NULL AND CHAR_LENGTH(TRIM(`auth_reason`))>0 AND `request_method` IS NOT NULL AND `request_url` IS NOT NULL AND `evidence` IS NOT NULL AND `status` IS NULL)),
-  CONSTRAINT `ck_auth_allowed_path` CHECK (`operation_type` <> 'AUTH_CHECK' OR `auth_decision`=0 OR (`user_id` IS NOT NULL AND `app_id` IS NOT NULL AND `api_id` IS NOT NULL AND JSON_CONTAINS_PATH(`evidence`,'all','$.user_role','$.role_permission','$.menu_api','$.state','$.signatures')=1))
+  CONSTRAINT `ck_auth_allowed_path` CHECK (`operation_type` <> 'AUTH_CHECK' OR `auth_decision`=0 OR (`user_id` IS NOT NULL AND `app_id` IS NOT NULL AND `api_id` IS NOT NULL AND JSON_CONTAINS_PATH(`evidence`,'all','$.decisionId','$.metadata','$.seal')=1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志表';
 
 -- ============================================================
@@ -363,7 +362,7 @@ CREATE TABLE `sys_external_event` (
   `target_ref` VARCHAR(64) DEFAULT NULL COMMENT '目标外部标识：SG号或部门编码',
   `processing_status` VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '处理阶段：APPLIED/PROCESSING/PENDING_RECOVERY/REJECTED',
   `processing_stage` VARCHAR(32) NOT NULL DEFAULT 'RECEIVED' COMMENT 'RECEIVED/APPLYING/COMPLETED，业务事实在单个事务应用',
-  `payload_ciphertext` MEDIUMTEXT NOT NULL COMMENT '规范化输入加密保存，恢复重放使用，禁止保存明文手机号',
+  `payload_json` MEDIUMTEXT NOT NULL COMMENT '规范化输入JSON，供重复请求核对，演示数据明文保存',
   `result_data` JSON DEFAULT NULL COMMENT '可重放的业务结果；脱敏，不含密码、验证码或完整JWT',
   `result_summary` VARCHAR(512) DEFAULT NULL COMMENT '执行结果或失败原因摘要',
   `occurred_at` DATETIME DEFAULT NULL COMMENT '业务事件时间',
@@ -383,7 +382,7 @@ CREATE TABLE `sys_external_event` (
 -- ============================================================
 CREATE TABLE `sys_sms_code` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `phone_hash` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '手机号HMAC-SHA256索引',
+  `phone` VARCHAR(11) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '规范化演示手机号',
   `purpose` VARCHAR(32) NOT NULL COMMENT '用途：SET_PASSWORD首次设密 / RESET_PASSWORD重置；不设LOGIN',
   `code_hash` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '验证码HMAC-SHA256，不保存明文',
   `expires_at` DATETIME NOT NULL COMMENT '过期时间',
@@ -391,7 +390,7 @@ CREATE TABLE `sys_sms_code` (
   `consumed_at` DATETIME DEFAULT NULL COMMENT '一次性核销时间；NULL未使用',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
   PRIMARY KEY (`id`),
-  KEY `idx_phone_purpose` (`phone_hash`, `purpose`),
+  KEY `idx_phone_purpose` (`phone`, `purpose`),
   CONSTRAINT `ck_sms_purpose` CHECK (`purpose` IN ('SET_PASSWORD','RESET_PASSWORD')),
   CONSTRAINT `ck_sms_attempts` CHECK (`attempts` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信验证码表（仅身份验证用途，非登录方式）';

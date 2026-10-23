@@ -11,8 +11,6 @@ import java.util.Map;
 /** 仅在当前事务中保留执行依据；挂起/恢复与事务一致，完成后清除，不能作为跨请求允许缓存。 */
 public final class AuthorizationContext {
     private static final Object KEY = new Object();
-    private Long batchActor;
-    private Map<String, Object> origin;
     private long authorizedActor;
     private Map<String, Object> authorization;
 
@@ -41,26 +39,6 @@ public final class AuthorizationContext {
                     }
                 });
         return context;
-    }
-
-    /** 只由 BatchWorker 在锁定持久任务项后调用；HTTP 请求字段不能建立此上下文。 */
-    public static void batch(long actorId, long batchId, long itemId) {
-        var context = current();
-        if (actorId <= 0
-                || batchId <= 0
-                || itemId <= 0
-                || context.authorization != null
-                || context.origin != null) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
-        context.batchActor = actorId;
-        context.origin = Map.of("kind", "PERSISTED_BATCH", "batchId", batchId, "itemId", itemId);
-    }
-
-    public Long batchActor() {
-        return batchActor;
-    }
-
-    public Map<String, Object> origin() {
-        return origin;
     }
 
     public void authorized(long actorId, Map<String, Object> evidence) {

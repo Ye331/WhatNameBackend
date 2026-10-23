@@ -9,7 +9,7 @@ import com.whatname.iam.common.security.*;
 import com.whatname.iam.dto.admin.AdminDtos;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.support.Fakes;
 import com.whatname.iam.support.TestDatabase;
@@ -43,8 +43,8 @@ class AccountManagementIntegrationTest {
     final List<String> evidence = new CopyOnWriteArrayList<>();
     ConfigurableApplicationContext app;
     JdbcTemplate db;
-    UserAccountMapper users;
-    SensitiveDataCodec codec;
+    UserAccountRepository users;
+
     JwtTokenService jwt;
     FakeDataSecurity data;
     FakeAdminIntegrity integrity;
@@ -215,9 +215,8 @@ class AccountManagementIntegrationTest {
                         Arrays.asList(
                                         u.id,
                                         u.username,
-                                        u.realNameCiphertext,
+                                        u.realName,
                                         u.phone,
-                                        u.phoneHash,
                                         u.passwordHash,
                                         u.deptId,
                                         u.status,
@@ -248,7 +247,7 @@ class AccountManagementIntegrationTest {
         settings = new HashMap<>();
         settings.put("server.port", 18089);
         settings.put("server.address", "127.0.0.1");
-        for (String key : List.of("data-key", "phone-hmac-key", "sms-hmac-key")) {
+        for (String key : List.of("sms-hmac-key")) {
             byte[] value = new byte[32];
             new SecureRandom().nextBytes(value);
             settings.put("iam.security." + key, Base64.getEncoder().encodeToString(value));
@@ -271,8 +270,7 @@ class AccountManagementIntegrationTest {
                         .properties(settings)
                         .run(TestDatabase.arguments("--server.port=18089"));
         db = app.getBean(JdbcTemplate.class);
-        users = app.getBean(UserAccountMapper.class);
-        codec = app.getBean(SensitiveDataCodec.class);
+        users = app.getBean(UserAccountRepository.class);
         jwt = app.getBean(JwtTokenService.class);
         data =
                 org.springframework.test.util.AopTestUtils.getUltimateTargetObject(
@@ -370,9 +368,9 @@ class AccountManagementIntegrationTest {
                         .at("/data/total")
                         .asInt());
         http("GET", "/users/" + target.id, null, bearer, 200);
-        // Same encrypted name inside/outside the managed subtree; outside must not be decrypted.
+        // Same name inside/outside the managed subtree; outside must not be returned.
         db.update(
-                "UPDATE sys_user SET real_name_ciphertext='scope-outside-unreadable' WHERE id=?",
+                "UPDATE sys_user SET real_name='scope-outside-unreadable' WHERE id=?",
                 other.id);
         try {
             var first = http("GET", "/users?keyword=Twelve&pageSize=1", null, bearer, 200);
@@ -396,8 +394,8 @@ class AccountManagementIntegrationTest {
                             .asInt());
         } finally {
             db.update(
-                    "UPDATE sys_user SET real_name_ciphertext=? WHERE id=?",
-                    other.realNameCiphertext,
+                    "UPDATE sys_user SET real_name=? WHERE id=?",
+                    other.realName,
                     other.id);
         }
     }
@@ -953,14 +951,13 @@ class AccountManagementIntegrationTest {
                     var s =
                             c.prepareStatement(
                                     "INSERT INTO"
-                                        + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized,temp_reason,created_by)"
-                                        + " VALUES(?,?,?,?,?,?,?,1,1,?,?)",
+                                        + " sys_user(username,real_name,phone,password_hash,dept_id,source,status,password_initialized,temp_reason,created_by)"
+                                        + " VALUES(?,?,?,?,?,?,1,1,?,?)",
                                     new String[] {"id"});
                     Object[] values = {
                         prefix + "user" + n,
-                        codec.encrypt("Task Twelve"),
-                        codec.encrypt(phone),
-                        codec.phoneHash(phone),
+                        ("Task Twelve"),
+                        (phone),
                         "test-only-unusable-hash",
                         dept,
                         source,

@@ -12,9 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.service.event.TrustedEventContext;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -45,7 +42,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * ServiceApiCaller / ServiceRequestAuthenticator) through the full HTTP chain into login
  * (JWT/session), admin scope and permission checks (RBAC0, data signatures, audit), against a real
  * MySQL. No request-authentication stub — every trusted-service call verifies an Ed25519 signature
- * over the canonical message and consumes a nonce. The only MyBatis interceptor injects persistence
+ * over the canonical message and consumes a nonce. The only Repository probe injects persistence
  * failures to prove rollback/anti-replay behaviour.
  */
 @SpringBootTest(
@@ -110,23 +107,18 @@ class TrustedServiceE2EIT {
         r.add(
                 "iam.security.data-signing.public-keys.e2e-sign",
                 () -> b64(ED.getPublic().getEncoded()));
-        r.add("iam.security.data-key", () -> b64(new byte[32]));
     }
 
     /**
-     * Injects a persistence failure after a named MyBatis update statement, to prove that a later
+     * Injects a persistence failure after a named repository operation, to prove that a later
      * business rollback cannot resurrect an already-consumed request nonce.
      */
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Fault implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Fault extends com.whatname.iam.support.RepositoryProbe {
         volatile String point, hit;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
             if (point != null && id.endsWith("." + point)) {
                 hit = point;
@@ -202,11 +194,11 @@ class TrustedServiceE2EIT {
         for (int u : List.of(10, 11, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?,'fixture','fixture',?,'fixture',?,3,1,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?,'fixture',?,'fixture',?,3,1,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"

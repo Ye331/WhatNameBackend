@@ -1,6 +1,10 @@
 package com.whatname.iam.entity.role;
 
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "sys_role")
 public class RoleEntity {
+    @jakarta.persistence.Id
+    @jakarta.persistence.GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
     private Long id;
     private String roleCode;
     private String roleName;

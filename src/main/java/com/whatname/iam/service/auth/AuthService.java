@@ -7,8 +7,8 @@ import com.whatname.iam.common.security.JwtTokenService.SessionPrincipal;
 import com.whatname.iam.dto.auth.AuthRequests.*;
 import com.whatname.iam.entity.auth.*;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.auth.CredentialMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.auth.CredentialRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -22,11 +22,11 @@ import java.util.*;
 
 @Service
 public class AuthService {
-    private final UserAccountMapper users;
-    private final CredentialMapper credentials;
+    private final UserAccountRepository users;
+    private final CredentialRepository credentials;
     private final PasswordHasher hasher;
     private final PasswordPolicy policy;
-    private final SensitiveDataCodec codec;
+
     private final SmsCodeHasher codeHasher;
     private final SmsSender sender;
     private final JwtTokenService jwt;
@@ -37,11 +37,11 @@ public class AuthService {
     private final Clock clock = Clock.system(ZoneId.of("Asia/Shanghai"));
 
     public AuthService(
-            UserAccountMapper users,
-            CredentialMapper credentials,
+            UserAccountRepository users,
+            CredentialRepository credentials,
             PasswordHasher hasher,
             PasswordPolicy policy,
-            SensitiveDataCodec codec,
+
             SmsCodeHasher codeHasher,
             SmsSender sender,
             JwtTokenService jwt,
@@ -51,7 +51,6 @@ public class AuthService {
         this.credentials = credentials;
         this.hasher = hasher;
         this.policy = policy;
-        this.codec = codec;
         this.codeHasher = codeHasher;
         this.sender = sender;
         this.jwt = jwt;
@@ -79,22 +78,22 @@ public class AuthService {
 
     public LoginResult login(Login input, String ip, String device) {
         String identifier = input.identifier().strip();
-        String phoneHash =
+        String phoneLookup =
                 input.loginType() == LoginType.PHONE
-                        ? codec.phoneHash(SensitiveDataCodec.normalizePhone(identifier))
+                        ? (PhoneNumbers.normalize(identifier))
                         : null;
         // 错误密码也要提交失败次数；事务结束后再抛出业务错误。
         Outcome<LoginResult> outcome =
-                tx.execute(status -> authenticate(input, identifier, phoneHash, ip, device));
+                tx.execute(status -> authenticate(input, identifier, phoneLookup, ip, device));
         return outcome.unwrap();
     }
 
     private Outcome<LoginResult> authenticate(
-            Login input, String identifier, String phoneHash, String ip, String device) {
+            Login input, String identifier, String phoneLookup, String ip, String device) {
         UserAccount user =
-                phoneHash == null
+                phoneLookup == null
                         ? users.lockByUsername(identifier)
-                        : users.lockByPhoneHash(phoneHash);
+                        : users.lockByPhone(phoneLookup);
         LocalDateTime now = now();
         if (user == null
                 || user.status != 1
@@ -130,13 +129,12 @@ public class AuthService {
     }
 
     public SmsResult sendSms(SendSms input) {
-        String phone = SensitiveDataCodec.normalizePhone(input.phone()),
-                phoneHash = codec.phoneHash(phone);
+        String phone = PhoneNumbers.normalize(input.phone());
         String purpose = input.purpose().name();
         sender.requireAvailable();
         for (int attempt = 0; ; attempt++) {
             try {
-                sendSmsTransaction(input, phone, phoneHash, purpose);
+                sendSmsTransaction(input, phone, purpose);
                 return new SmsResult(true, 60);
             } catch (PessimisticLockingFailureException e) {
                 if (attempt >= 2) throw e;
@@ -144,24 +142,24 @@ public class AuthService {
         }
     }
 
-    private void sendSmsTransaction(SendSms input, String phone, String phoneHash, String purpose) {
+    private void sendSmsTransaction(SendSms input, String phone, String purpose) {
         smsTx.executeWithoutResult(
                 status -> {
-                    UserAccount user = users.lockByPhoneHash(phoneHash);
+                    UserAccount user = users.lockByPhone(phone);
                     LocalDateTime now = now();
-                    SmsCode previous = credentials.lockLatestCode(phoneHash, purpose);
+                    SmsCode previous = credentials.lockLatestCode(phone, purpose);
                     if (previous != null && previous.createdAt.plusSeconds(60).isAfter(now))
                         throw new BusinessException(ErrorCode.RATE_LIMITED);
-                    credentials.invalidateCodes(phoneHash, purpose, now);
+                    credentials.invalidateCodes(phone, purpose, now);
                     String code;
                     do {
                         code = "%06d".formatted(random.nextInt(1_000_000));
                     } while (previous != null
-                            && codeHasher.matches(phoneHash, purpose, code, previous.codeHash));
+                            && codeHasher.matches(phone, purpose, code, previous.codeHash));
                     SmsCode entry = new SmsCode();
-                    entry.phoneHash = phoneHash;
+                    entry.phone = phone;
                     entry.purpose = purpose;
-                    entry.codeHash = codeHasher.hash(phoneHash, purpose, code);
+                    entry.codeHash = codeHasher.hash(phone, purpose, code);
                     entry.createdAt = now;
                     entry.expiresAt = now.plusMinutes(5);
                     credentials.insertCode(entry);
@@ -178,14 +176,13 @@ public class AuthService {
     }
 
     public void changePassword(Password input, boolean initialize) {
-        String phone = SensitiveDataCodec.normalizePhone(input.phone()),
-                phoneHash = codec.phoneHash(phone);
+        String phone = PhoneNumbers.normalize(input.phone());
         String purpose = initialize ? Purpose.SET_PASSWORD.name() : Purpose.RESET_PASSWORD.name();
         Outcome<Void> result =
                 tx.execute(
                         status -> {
-                            UserAccount user = users.lockByPhoneHash(phoneHash);
-                            SmsCode code = credentials.lockLatestCode(phoneHash, purpose);
+                            UserAccount user = users.lockByPhone(phone);
+                            SmsCode code = credentials.lockLatestCode(phone, purpose);
                             LocalDateTime now = now();
                             if (code == null
                                     || code.consumedAt != null
@@ -193,7 +190,7 @@ public class AuthService {
                                     || !code.expiresAt.isAfter(now))
                                 return Outcome.error(ErrorCode.INVALID_CREDENTIALS);
                             if (!codeHasher.matches(
-                                    phoneHash, purpose, input.code(), code.codeHash)) {
+                                    phone, purpose, input.code(), code.codeHash)) {
                                 credentials.failCode(code.id, now);
                                 return Outcome.error(ErrorCode.INVALID_CREDENTIALS);
                             }
@@ -234,14 +231,14 @@ public class AuthService {
 
     /** 先核对身份和历史，再检查新密码，校验失败不消耗验证码。 */
     private void validateNewPassword(UserAccount user, String phone, String newPassword) {
-        String actualPhone = SensitiveDataCodec.normalizePhone(codec.decrypt(user.phone));
+        String actualPhone = PhoneNumbers.normalize(user.phone);
         if (!phone.equals(actualPhone)) throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
         List<String> history =
                 credentials.recentHistory(user.id).stream().map(h -> h.passwordHash).toList();
         if (user.passwordInitialized == 1
                 && (history.isEmpty() || !history.getFirst().equals(user.passwordHash)))
             throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-        List<String> pinyins = NamePinyin.variants(codec.decrypt(user.realNameCiphertext));
+        List<String> pinyins = NamePinyin.variants(user.realName);
         var identity =
                 new PasswordPolicy.IdentityContext(user.username, pinyins.getFirst(), actualPhone);
         var validation = policy.validate(newPassword, identity, history);
