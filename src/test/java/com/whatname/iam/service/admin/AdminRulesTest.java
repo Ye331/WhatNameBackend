@@ -81,7 +81,8 @@ class AdminRulesTest {
 
     @Test
     void delegationRequiresStrictlyLowerLevelEvenForSameRootPeers() {
-        assertThatCode(() -> rules.checkDelegationTarget(state, 2L, 3L)).doesNotThrowAnyException();
+        assertThatCode(() -> rules.checkDelegationTarget(state, 1L, 3L)).doesNotThrowAnyException();
+        rejects(ErrorCode.DELEGATION_OUT_OF_SCOPE, () -> rules.checkDelegationTarget(state, 2L, 3L));
         rejects(
                 ErrorCode.DELEGATION_OUT_OF_SCOPE,
                 () -> rules.checkDelegationTarget(state, 2L, 4L));

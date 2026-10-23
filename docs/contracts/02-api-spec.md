@@ -1,3 +1,5 @@
+> 当前课程作业口径：见 [简化范围](../COURSEWORK_SCOPE.md)。已取消 GR06，批量同步返回；下面各接口按更新后的契约验收。
+
 > 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
 
 # 统一权限管理系统：API 接口设计规范
@@ -9,7 +11,7 @@
 | M1 身份认证与账号管理 | 登录、短信、密码、账号维护 | AU01, AU05, AU07, AU08, AU04, US01, US02, US03, US04 | 9 |
 | M2 组织与人员变动管理 | HR事件、组织查询、部门冻结 | DP01, DP02, HR01, HR02, HR03, HR04, HR05, DP03, DP04 | 9 |
 | M3 应用权限资源管理 | 全局应用/菜单/API/映射管理 | RE01, RE02, RE03, RE04, RE05, RE06, RE07, RE08, RE09, RE11, RE10 | 11 |
-| M4 角色与授权管理 | 全局角色、角色菜单、授权来源、OA | RL01, RL02, RL03, RL04, RL05, RL06, US05, GR05, GR01, GR02, GR03, GR06, GR04, OA01 | 14 |
+| M4 角色与授权管理 | 全局角色、角色菜单、授权来源、OA | RL01, RL02, RL03, RL04, RL05, RL06, US05, GR05, GR01, GR02, GR03, GR04, OA01 | 13 |
 | M5 管理员与管理范围控制 | 管理员任命、范围与可授权清单 | AD01, AD02, AD03, AD04, AD05, AD06 | 6 |
 | M6 在线权限鉴定 | 当前菜单、后端 API 决策 | AU02, AU03, US06 | 3 |
 | PUB 公共支撑：审计查询 | 审计查询 | LG01, LG02, LG03, LG04 | 4 |
@@ -28,10 +30,10 @@
 | 业务服务认证 | HTTPS + Ed25519 服务请求签名；凭据绑定应用、禁止客户端随意声明 `appCode` |
 | HR/OA 认证 | 使用独立可信服务凭据和受控操作范围；示例头 `X-Client-Id`、`X-Request-Timestamp`、`X-Request-Nonce`、`X-Request-Signature`，算法固定 Ed25519，签名内容与时间窗见本节开发基线 |
 | 请求追踪 | `X-Request-Id` 可选；无值由服务端生成，关联业务、鉴权和审计 |
-| 幂等 | HR/OA 必须有 `(sourceSystem,eventId)` 唯一记录；批量请求必须用 `Idempotency-Key`；HR/OA以事件键为业务幂等依据；普通授予以稳定来源键判定重复，全量替换以集合版本保护 |
+| 幂等 | HR/OA 必须有 `(sourceSystem,eventId)` 唯一记录；批量请求不再使用请求级幂等键；HR/OA以事件键为业务幂等依据；普通授予以稳定来源键判定重复，全量替换以集合版本保护 |
 | 并发 | 全量集合替换使用 `expectedVersion`；版本来源为各表修订号（`api_revision`、`menu_revision`、`delegable_revision`）；用户授权使用 `sys_user.grant_revision` |
 | 数据展示 | 姓名、手机号按查看资格返回完整演示值；不返回密码哈希、验证码、完整 JWT（登录时返回 accessToken 是必要例外）或密钥 |
-| 外部服务错误 | 事务未提交不得返回业务已生效；按 `processingStatus` 显示 `APPLIED`、`PROCESSING`、`PENDING_RECOVERY`、`REJECTED` |
+外部事件登记和业务成功结果同事务；失败整体回滚，不提供在线恢复。鉴权返回 allowed、reasonCode、decisionId，不返回权限证据摘要。
 
 **成功响应**（普通查询或已完成业务操作）：
 ```json
@@ -53,7 +55,7 @@
   "requestId": "req-demo"
 }
 ```
-**在途或故障**：批量任务新建使用 HTTP 202、processingStatus=PENDING；外部事件处理中返回 PROCESSING。业务失败回滚本次事务；PENDING_RECOVERY 仅表示事件处理需核查或恢复，不表示缓存发布。重复请求读取数据库实际结果，不能再次应用已完成业务。API鉴权HTTP 200仍仅以data.allowed=true放行。
+外部事件登记和业务成功结果同事务；失败整体回滚，不提供在线恢复。鉴权返回 allowed、reasonCode、decisionId，不返回权限证据摘要。
 
 ### 2.1 统一错误码
 
@@ -101,22 +103,22 @@
 | `expectedVersion` | 当前授权或资源集合期望修订号，冲突返回 409 |
 | `approvalId` | 外部 OA 审批单号，可作为 OA 授权来源业务依据 |
 | `eventVersion` | HR 每人员/部门的顺序版本，不应仅依全局时间戳决定顺序 |
-| `processingStatus` | 外部事件/分批业务真实处理阶段，表示已完成/处理中/待恢复/拒绝 |
+| `processingStatus` | 外部事件成功为 APPLIED；同步批量为 COMPLETED / PARTIAL_SUCCESS / FAILED |
 
 ### 2.4 本期已冻结的开发口径
 
-Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部56项接口纳入本期实现范围；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，原性能目标留待实测。功能权限与M5范围在写入事务中加锁复核。
+Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部55项接口纳入本期实现范围；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，只记录课堂数据规模的实测耗时。功能权限与M5范围在写入事务中加锁复核。
 
 - JWT有效期3600秒，携带sv；注销当前jti，重置/暂停/离职递增session_version。
 - 短信码5分钟、间隔60秒、最多5次；重新发送撤销同用途旧码，验证码与密码更新事务核销。演示通过独立模拟发送通道，正式HTTP响应不返回验证码。
 - 服务签名头固定X-Client-Id、X-Key-Id、X-Request-Timestamp、X-Request-Nonce、X-Request-Signature；时间戳为Unix秒，允许正负300秒。签名UTF-8内容按换行连接clientId、keyId、timestamp、nonce、大写HTTP方法、原始路径及查询串、原始请求体SHA-256十六进制摘要；Ed25519签名Base64。验签及绑定验证后原子插入(clientId,nonce)，保留10分钟，业务重试使用新nonce。代理须保留签名路径并明确路径前缀。
 - 岗位授予sourceType=DEPT_POSITION时sourceDeptId必填且校验为目标用户当前部门；MANUAL是独立于岗位的来源，普通管理入口禁止OA_APPROVAL，OA入口由服务生成该来源。各来源ID为数据库主键十进制字符串。
 - GR01/GR02的expectedVersion来自US05/GR05返回的grantRevision（sys_user.grant_revision），事务内比较并递增；RL05/RE11/AD05分别提供对应集合修订号。
-- GR03异步，Idempotency-Key在发起人范围内唯一；同键同内容返回任务状态，同键不同内容409。dryRun=true只校验不建任务；新任务202，GR06查询汇总和分页项。业务规则失败项保持FAILED；只有可重试数据库故障留PENDING并最多3次重试，APPLIED从不重执行。
-- permissionVersion是当时事实证据的sha256摘要，不是缓存版本；permissionRevision/grantRevision等vN仍是对应数据库集合修订号。
+- GR03 最多100人同步逐项事务执行，HTTP 200 返回全部结果；不创建后台任务，不支持 dryRun=true。
+外部事件登记和业务成功结果同事务；失败整体回滚，不提供在线恢复。鉴权返回 allowed、reasonCode、decisionId，不返回权限证据摘要。
 - HR02部门变化必须调用调岗处理；HR版本比较锁定目标行，OA无顺序版本允许数据库event_version=NULL。OA执行角色、部门和操作按服务身份配置校验。
 
-## 3. 接口目录（56项，全部属于本期功能范围）
+## 3. 接口目录（55项，课程作业范围）
 
 ### M1 身份认证与账号管理
 
@@ -177,7 +179,6 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 | GR01 | `POST` | `/grants/user-roles` | 为用户授予角色并登记来源 | `IAM_GRANTS_WRITE+M5_SCOPE+DELEGABLE_ROLE` |
 | GR02 | `POST` | `/grants/user-roles/revoke` | 按授权依据回收角色 | `IAM_GRANTS_WRITE+M5_SCOPE+DELEGABLE_ROLE` |
 | GR03 | `POST` | `/grants/user-roles/batch` | 批量授予或按依据回收 | `IAM_GRANTS_WRITE+M5_SCOPE+DELEGABLE_ROLE` |
-| GR06 | `GET` | `/grants/batches/{batchId}` | 查询批量执行结果（必做） | `IAM_GRANTS_VIEW+M5_SCOPE` |
 | GR04 | `GET` | `/grants/history` | 查询角色授权变更历史 | `IAM_GRANTS_VIEW+M5_SCOPE` |
 | OA01 | `POST` | `/integrations/oa/decisions` | 执行 OA 已批准角色授权或回收 | `OA_SERVICE_SCOPE` |
 
@@ -209,7 +210,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 | LG03 | `GET` | `/audit/logins` | 查询登录日志 | `IAM_AUDIT_VIEW+M5_SCOPE` |
 | LG04 | `GET` | `/audit/evidence/{eventId}` | 查询授权或变更审计证据 | `IAM_AUDIT_VIEW+M5_SCOPE` |
 
-**新增编号**：AU05、AU07、AU08（验证码与密码）、GR05（授权依据查询）、GR06（批量结果查询，必做）、AD05—AD06（可授权角色清单）。原 AU06（验证码登录）已按需求删除：登录方式仅保留账号密码、手机号密码两种，短信验证码只用于首次设密与密码重置的本人身份验证。旧有49项仍保留编号；HR01 保留外部部门编码并强制映射至 `sys_dept.id`，HR02 路径变量明确为 SG 号。
+**新增编号**：AU05、AU07、AU08（验证码与密码）、GR05（授权依据查询）、AD05—AD06（可授权角色清单）。原 AU06（验证码登录）已按需求删除：登录方式仅保留账号密码、手机号密码两种，短信验证码只用于首次设密与密码重置的本人身份验证。旧有49项仍保留编号；HR01 保留外部部门编码并强制映射至 `sys_dept.id`，HR02 路径变量明确为 SG 号。
 
 ## 4. 逐接口详细契约
 
@@ -818,7 +819,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 **典型错误**：`INVALID_HR_ORDER`/`BUSINESS_RULE_VIOLATION`(422，含未来或已离职状态)、`IDEMPOTENCY_CONFLICT`/`VERSION_CONFLICT`(409)、`RESOURCE_NOT_FOUND`(404)、可信依赖缺失503。
 
-**事件时间及重试**：HR04不新增occurredAt输入，使用带时区的effectiveAt填充事件Command业务时间。边界effectiveAt等于服务Clock当前时间即可执行；未来通知记录REJECTED而不变更人员/授权/会话/版本，生效后用新eventId。三个接口复用06：APPLIED同号同内容200，PROCESSING为409，PENDING_RECOVERY为503，确定拒绝重放原错误，无自动恢复或202接收承诺。生产C/D缺失默认拒绝；07测试替身不代表真实联调。
+外部事件登记和业务成功结果同事务；失败整体回滚，不提供在线恢复。鉴权返回 allowed、reasonCode、decisionId，不返回权限证据摘要。
 
 #### HR05 · `POST /api/v1/integrations/hr/merges` — HR 部门合并事件
 
@@ -1755,119 +1756,19 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 #### GR03 · `POST /api/v1/grants/user-roles/batch` — 批量授予或按依据回收
 
-- **调用方/权限**：管理端；`IAM_GRANTS_WRITE+M5_SCOPE+DELEGABLE_ROLE`。
-- **处理与边界**：支持2000人以上；持久接收后异步逐项事务执行，允许部分成功。撤销每项指定来源ID。新任务返回202，GR06读取进度；同键重试只返回已有状态，纠正业务失败后用新键仅提交失败目标。
-- **主要数据**：sys_user_role、授权来源记录、sys_grant_batch、sys_grant_batch_item。
-- **权限状态影响**：可能扩大或缩减权限，在数据库事务中更新业务事实、签名与审计。
-- **补充**：REVOKE 模式示例：targets 中每个元素须携带 userId 与 grantSourceId；GRANT 模式携带 sourceType/sourceRef，岗位来源另携带 sourceDeptId。Idempotency-Key 必填。
+需 JWT，逐项校验 IAM_GRANTS_WRITE、管理员范围及可授权角色。请求体 operation 为 GRANT / REVOKE，roleId、targets、reason 必填；targets 原始长度为 1–100，每位用户一个目标。GRANT 目标包含 userId、sourceType、sourceRef，岗位来源另有 sourceDeptId；REVOKE 包含 userId、grantSourceId。dryRun=true 不支持，返回 400。
 
-| 字段 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `operation` | body | `string` | 是 | GRANT 或 REVOKE（精确大写枚举） |
-| `roleId` | body | `string` | 是 | 全局角色 ID，字符串 |
-| `targets` | body | `array` | 是 | 业务属性；枚举和字段约束见处理规则 |
-| `reason` | body | `string` | 是 | 操作原因和审计依据 |
-| `dryRun` | body | `boolean` | 否 | 仅预校验，不修改数据（可选增强） |
+同步逐人事务执行，全部结果直接以 HTTP 200 / code=OK 返回。不创建后台任务，没有 batchId、分页、待执行状态、后台自动重试或重启恢复。Idempotency-Key 可省略，若传入仅校验格式，不提供批量请求去重；重复授予仍以稳定授权来源键去重。只有明确业务失败目标可以修正后手工重试，网络或数据库结果不确定时先查询用户角色及来源。
 
-**请求体示例**：
 ```json
-{
-  "operation": "GRANT",
-  "roleId": "5",
-  "targets": [
-    {
-      "userId": "101",
-      "sourceType": "MANUAL",
-      "sourceRef": "BATCH-001-101"
-    },
-    {
-      "userId": "102",
-      "sourceType": "MANUAL",
-      "sourceRef": "BATCH-001-102"
-    }
-  ],
-  "reason": "同岗位批量授权",
-  "dryRun": false
-}
+{"success":true,"code":"OK","requestId":"req-demo","data":{"processingStatus":"PARTIAL_SUCCESS","succeeded":1,"failed":1,"total":2,"items":[{"userId":"101","status":"APPLIED","grantSourceId":"901"},{"userId":"102","status":"FAILED","code":"OUT_OF_SCOPE"}]}}
 ```
 
-**新任务HTTP 202响应示例**：
-```json
-{
-  "success": true,
-  "code": "ACCEPTED",
-  "requestId": "req-demo",
-  "data": {"batchId": "7001", "processingStatus": "PENDING", "total": 2}
-}
-```
+请求格式和人数错误为 400，无有效身份为 401；每项业务拒绝记录在 items；基础设施故障返回 503，先前已提交项不会撤销。
 
-**dryRun的HTTP 200响应**：data包含dryRun=true、succeeded、failed和逐项VALIDATED/FAILED结果，不创建或返回batchId。
+#### 已取消的 GR06（历史编号）
 
-**同键查询已完成任务的HTTP 200响应示例**：
-```json
-{
-  "success": true,
-  "code": "OK",
-  "requestId": "req-demo",
-  "data": {
-    "batchId": "7001",
-    "processingStatus": "PARTIAL_SUCCESS",
-    "succeeded": 1,
-    "failed": 1,
-    "items": [
-      {
-        "userId": "101",
-        "status": "APPLIED",
-        "grantSourceId": "901"
-      },
-      {
-        "userId": "102",
-        "status": "FAILED",
-        "code": "OUT_OF_SCOPE"
-      }
-    ]
-  }
-}
-```
-
-**典型错误**：`OUT_OF_SCOPE`、`ROLE_NOT_DELEGABLE`、`IDEMPOTENCY_CONFLICT`、`VERSION_CONFLICT`。
-
-#### GR06 · `GET /api/v1/grants/batches/{batchId}` — 查询批量执行结果（必做）
-
-- **调用方/权限**：管理端；`IAM_GRANTS_VIEW+M5_SCOPE`。
-- **处理与边界**：必须查询数据库持久保存的已提交、失败及未处理项目；只展示操作者获准查看范围内的结果。任务详情须分页返回逐项结果。
-- **主要数据**：sys_grant_batch、sys_grant_batch_item。
-- **补充**：必做接口，与 GR03 的异步任务模型一致。
-
-| 字段 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `batchId` | path | `string` | 是 | 批量任务 ID，十进制字符串 |
-| `page` | query | `integer` | 否 | 从1开始，默认1 |
-| `pageSize` | query | `integer` | 否 | 默认20，最大500 |
-
-**请求示例**：`GET /api/v1/grants/batches/7001`。
-
-**HTTP 200 响应示例**：
-```json
-{
-  "success": true,
-  "code": "OK",
-  "requestId": "req-demo",
-  "data": {
-    "batchId": "7001",
-    "processingStatus": "PARTIAL_SUCCESS",
-    "succeeded": 1999,
-    "failed": 1,
-    "pending": 0,
-    "items": [{"userId": "101", "status": "APPLIED", "grantSourceId": "901"}],
-    "page": 1,
-    "pageSize": 20,
-    "total": 2000
-  }
-}
-```
-
-**典型错误**：`INVALID_ARGUMENT`、`PERMISSION_DENIED`、`AUTH_STATE_UNAVAILABLE`。
+此接口已移除，访问返回 404。批量结果由 GR03 同步返回。
 
 #### GR04 · `GET /api/v1/grants/history` — 查询角色授权变更历史
 
@@ -2137,7 +2038,9 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 **典型错误**：`INVALID_ARGUMENT`、`PERMISSION_DENIED`、`AUTH_STATE_UNAVAILABLE`。
 
-#### AD06 · `PUT /api/v1/admins/{userId}/delegable-roles` — 上级配置下级可授权角色清单
+#### AD06 · `PUT /api/v1/admins/{userId}/delegable-roles` — 一级管理员直接配置清单
+
+仅一级管理员可以配置；目标为较低等级有效管理员，非一级调用返回 DELEGATION_OUT_OF_SCOPE。替换只更新目标本人，不影响其他管理员清单。
 
 - **调用方/权限**：管理端；`IAM_GRANTS_DELEGATE+M5_SCOPE`。
 - **处理与边界**：仅有委派功能资格的有效上级管理员可配置下级清单；下级须属于上级管理范围，且每个角色在上级自身可合法委派集合内；超级角色禁止。全量替换采用版本比较，清单缩减立即影响后续授权操作，不自动撤销已合法授予其他人的角色。
@@ -2220,6 +2123,8 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 #### AU03 · `POST /api/v1/auth/check` — 业务服务端实时 API 鉴权
 
+当前成功 data 仅含 allowed、reasonCode、decisionId；基础日志不保存完整角色/组织/签名事实快照。
+
 - **调用方/权限**：可信业务服务端；`TRUSTED_SERVICE+USER_JWT`。
 - **处理与边界**：服务端可信凭据绑定 appCode；HTTP 方法和实际路由由业务服务端识别，用户从 JWT 确认。检查账号、部门祖先、有效菜单、API 及集合修订号与签名，并可靠接收审计。仅 data.allowed=true 才能执行；对象级 M5 检查仍在实际业务入口进行。
 - **主要数据**：当前数据库事实、集合修订号及签名、审计。
@@ -2247,9 +2152,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
   "data": {
     "allowed": true,
     "reasonCode": "ALLOW",
-    "decisionId": "AUTH-001",
-    "permissionVersion": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  }
+    "decisionId": "AUTH-001"}
 }
 ```
 
@@ -2356,7 +2259,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
         "userId": "101",
         "apiId": "41",
         "allowed": true,
-        "permissionVersion": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+
         "occurredAt": "2026-10-12T10:00:00+08:00"
       }
     ],
@@ -2429,7 +2332,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
     "eventId": "EV-001",
     "requestId": "req-demo",
     "evidenceType": "GRANT_CHANGE",
-    "permissionVersion": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+
     "integrityVerified": true
   }
 }
@@ -2447,7 +2350,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 | OA 批准授权 | OA01 → 验证 OA 服务及审批范围 → M4 登记授权依据 → 事务提交 | 原申请人现时失权不当然撤销已批准事件 |
 | 角色清单委派 | AD05 读取可委派范围 → AD06 版本检查 → 后续 GR01/GR02 | 下级只能授予上级允许的角色；自身授权同样受控 |
 | 目录停用/移动 | RE06 → M3 更新目录树并计算影响范围 → 事务提交 | 保留已有菜单和授权关系，祖先停用时不再提供有效 API 权限 |
-| 批量授权 | GR03 去重/逐项校验 → 逐项事务提交 → GR06 查询 | 允许部分成功，失败项幂等重试，不能因一项失败隐式回滚全部 |
+| 批量授权 | GR03 校验1–100人 → 逐项事务提交 → 同步返回全部结果 | 允许部分成功，失败项幂等重试，不能因一项失败隐式回滚全部 |
 
 ## 6. 契约测试与验收矩阵
 
@@ -2466,11 +2369,11 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 | T11 | 同根同级互撤与自撤 | AD02、AD03、AD04 | 撤任命立即无管理资格；不追删历史授予角色 |
 | T12 | OA 通过后申请人离职/失权 | OA01 | 仍按 OA 服务受控范围执行，不重验申请人现时任命 |
 | T13 | OA 试授超级角色/超范围目标 | OA01 | 拒绝，记录事件，不能凭服务身份获得无限权限 |
-| T14 | 2000人以上批量授予、部分失败、重复请求 | GR03、GR06 | 保留逐项结果；合法批次不被错回滚 |
+| T14 | 1–100人同步批量、部分失败、超限拒绝 | GR03 | 返回完整逐项结果，成功项不被业务失败项回滚 |
 | T15 | 撤权与鉴权并发/事务回滚/重启 | GR02、AU03 | 撤权成功后新鉴权错误放行数为0 |
 | T16 | 签名失效、数据库中断、审计失败 | AU03、LG04 | 无法读取当前事实时拒绝；不可用不默认允许 |
 | T17 | 审计当时权限及授权来源 | LG01—LG04、GR05 | 可验证历史证据，不以当前授权替代 |
-| T18 | 业务鉴权≤20ms 目标/50ms 上限，集中登录 1万人 | AU01、AU03 | 按原需求记录真实耗时与并发，不虚称已达标 |
+| T18 | 课堂规模数据的完整业务链路与耗时记录 | AU01、AU03 | 正确演示授权、鉴权、回收、拒绝 |
 
 ## 7. 数据库适配与联调基线
 
@@ -2479,13 +2382,3 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 内部Service协作在同一MySQL事务执行；跨功能写表通过负责模块的Service入口。外部HR/OA由测试请求模拟，短信使用可替换发送通道；这些能力均须演示完整成功及失败链路。部署地址、真实短信供应商账号、公私钥和环境密码属于部署配置，不阻塞课程功能开发，也不写入仓库。
 
 组织者负责工程和Git；A负责M1/M2与事件记录，B负责M3及角色配置，C负责授权/OA/批量/M5，D负责M6及签名审计；前端与测试各一人。A/C稍多、B/D稍少，采用两阶段：第一阶段独立完成基础功能及公共入口，第二阶段补齐跨模块规则与联调。阶段中途先联调登录、授权、菜单、API允许和撤权拒绝；最终覆盖本规范全部56项功能及签名审计。阶段划分不改变HTTP字段、鉴权要求或数据库定义；未接入必要校验的入口不默认允许。详见 [两阶段开发计划](../../DEVELOPMENT_PLAN.md)。
-
-### 2026-10-16 A实现补充（不表示真实C/D已联调）
-
-DP01仍使用data.items平铺节点；范围外父ID表示为"0"，不返回dept_path。包含冻结/合并空源；status仅自身标记，effectivelyFrozen表示祖先链作用。merged=true表示已合并；mergedIntoDeptId仅在目标也可见时返回，否则null。DP02对相同范围集合计算items和total；合并空源只显示空人员列表，不自动重定向目标。
-
-组织写（新增/改挂/合并/冻结）在SERIALIZABLE事务中按主键全表FOR UPDATE，包含插入间隙；所有其他写入者必须遵循相同组织保护后检查merged_into_dept_id，不能凭外键存在放行。事件锁先于组织锁，再用户锁及C/D内部锁；避免内部Service用REQUIRES_NEW拆开签名/审计。
-
-事件同号同摘要APPLIED返回原脱敏结果；同号异摘要409；PROCESSING返回409 VERSION_CONFLICT，PENDING_RECOVERY返回503；REJECTED重放原拒绝码，不自动重试。显式受控recover须D授权、核对保留 JSON 载荷并换claim_token隔离旧执行者；无自动超时接管/调度器。payload摘要规范化JSON键顺序，覆盖可信来源、类型、目标、版本、发生时间与业务内容，排除顶层nonce/requestId/signature/clientId/keyId/timestamp。OA可无版本。认领/失败独立事务，业务/签名/审计/APPLIED一次提交。
-
-以上HR02动作与HR04未来时间属于已确认契约修订；本次任务06未实现HR02/03/04人员HTTP。

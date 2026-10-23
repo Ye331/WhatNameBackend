@@ -72,7 +72,7 @@ class GrantDefaultBoundaryTest {
     }
 
     @Test
-    void bothBatchRoutesRejectMissingIdentity() throws Exception {
+    void batchSubmissionRejectsMissingIdentityAndRemovedLookupReturns404() throws Exception {
         mvc.perform(
                         post("/api/v1/grants/user-roles/batch")
                                 .header("Idempotency-Key", "default-deny")
@@ -84,7 +84,6 @@ class GrantDefaultBoundaryTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
         mvc.perform(get("/api/v1/grants/batches/1"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
+                .andExpect(status().isNotFound());
     }
 }

@@ -129,7 +129,6 @@ class GrantHistoryIT {
     @Autowired MockMvc http;
     @Autowired ObjectMapper json;
     @Autowired Failure failure;
-    @Autowired BatchWorker worker;
     @Autowired GrantHistoryService historyService;
     @Autowired com.whatname.iam.service.audit.AuditQueryService auditQueries;
     @Autowired BatchService batchService;
@@ -840,80 +839,7 @@ class GrantHistoryIT {
                 });
     }
 
-    @Test
-    void actualBatchChangesLinkRetainedItemsAndFailedOrRepeatedWorkAddsNoEvent() throws Exception {
-        var submission =
-                batchService.submit(
-                        "HISTORY" + b,
-                        new com.whatname.iam.dto.grant.BatchDtos.Request(
-                                "GRANT",
-                                sid(30),
-                                List.of(
-                                        new com.whatname.iam.dto.grant.BatchDtos.Target(
-                                                sid(20), "MANUAL", "BATCH", null, null),
-                                        new com.whatname.iam.dto.grant.BatchDtos.Target(
-                                                sid(999), "MANUAL", "MISSING", null, null)),
-                                "batch history",
-                                false));
-        long batch =
-                Long.parseLong(
-                        ((com.whatname.iam.dto.grant.BatchDtos.Accepted) submission.data())
-                                .batchId());
-        await().atMost(Duration.ofSeconds(30))
-                .untilAsserted(
-                        () ->
-                                assertThat(batches.batch(batch).processingStatus())
-                                        .isEqualTo("PARTIAL_SUCCESS"));
-        worker.run(batch);
-        String source = batches.items(batch).getFirst().grantSourceId().toString();
-        var first = history("userId", sid(20));
-        assertThat(first.get("total").asInt()).isEqualTo(1);
-        assertThat(history("userId", sid(999)).get("total").asInt()).isZero();
-        String evidence =
-                db.queryForObject(
-                        "SELECT evidence FROM sys_operation_log WHERE id=?",
-                        String.class,
-                        first.at("/items/0/eventId").asText());
-        assertThat(json.readTree(evidence).at("/authorization/origin/kind").asText())
-                .isEqualTo("PERSISTED_BATCH");
-        assertThat(json.readTree(evidence).at("/authorization/origin/batchId").asText())
-                .isEqualTo(Long.toString(batch));
-        bind(bearer);
-        var revocation =
-                batchService.submit(
-                        "HISTORY-REVOKE" + b,
-                        new com.whatname.iam.dto.grant.BatchDtos.Request(
-                                "REVOKE",
-                                sid(30),
-                                List.of(
-                                        new com.whatname.iam.dto.grant.BatchDtos.Target(
-                                                sid(20), null, null, null, source)),
-                                "batch revoke history",
-                                false));
-        long revokeBatch =
-                Long.parseLong(
-                        ((com.whatname.iam.dto.grant.BatchDtos.Accepted) revocation.data())
-                                .batchId());
-        await().atMost(Duration.ofSeconds(30))
-                .untilAsserted(
-                        () ->
-                                assertThat(batches.batch(revokeBatch).processingStatus())
-                                        .isEqualTo("COMPLETED"));
-        worker.run(revokeBatch);
-        var after = history("userId", sid(20));
-        assertThat(after.get("total").asInt()).isEqualTo(2);
-        assertThat(after.at("/items/0/operation").asText()).isEqualTo("REVOKE");
-        assertThat(after.at("/items/0/grantSourceId").asText()).isEqualTo(source);
-        String revokeEvidence =
-                db.queryForObject(
-                        "SELECT evidence FROM sys_operation_log WHERE id=?",
-                        String.class,
-                        after.at("/items/0/eventId").asText());
-        assertThat(json.readTree(revokeEvidence).at("/authorization/origin/batchId").asText())
-                .isEqualTo(Long.toString(revokeBatch));
-        assertThat(json.readTree(revokeEvidence).at("/authorization/origin/itemId").asText())
-                .isEqualTo(batches.items(revokeBatch).getFirst().id().toString());
-    }
+
 
     @ParameterizedTest
     @ValueSource(

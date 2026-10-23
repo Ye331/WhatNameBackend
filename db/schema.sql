@@ -265,7 +265,7 @@ CREATE TABLE `sys_operation_log` (
   CONSTRAINT `ck_log_request_id` CHECK (CHAR_LENGTH(TRIM(`request_id`))>0),
   CONSTRAINT `ck_log_evidence_object` CHECK (`evidence` IS NULL OR JSON_TYPE(`evidence`)='OBJECT'),
   CONSTRAINT `ck_auth_evidence` CHECK (`operation_type` <> 'AUTH_CHECK' OR (`auth_at` IS NOT NULL AND `auth_decision` IS NOT NULL AND `auth_reason` IS NOT NULL AND CHAR_LENGTH(TRIM(`auth_reason`))>0 AND `request_method` IS NOT NULL AND `request_url` IS NOT NULL AND `evidence` IS NOT NULL AND `status` IS NULL)),
-  CONSTRAINT `ck_auth_allowed_path` CHECK (`operation_type` <> 'AUTH_CHECK' OR `auth_decision`=0 OR (`user_id` IS NOT NULL AND `app_id` IS NOT NULL AND `api_id` IS NOT NULL AND JSON_CONTAINS_PATH(`evidence`,'all','$.user_role','$.role_permission','$.menu_api','$.state','$.signatures')=1))
+  CONSTRAINT `ck_auth_allowed_path` CHECK (`operation_type` <> 'AUTH_CHECK' OR `auth_decision`=0 OR (`user_id` IS NOT NULL AND `app_id` IS NOT NULL AND `api_id` IS NOT NULL AND JSON_CONTAINS_PATH(`evidence`,'all','$.decisionId','$.metadata','$.seal')=1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志表';
 
 -- ============================================================

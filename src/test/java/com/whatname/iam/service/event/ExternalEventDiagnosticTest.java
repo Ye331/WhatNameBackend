@@ -3,160 +3,48 @@ package com.whatname.iam.service.event;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.PhoneNumbers;
 import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.department.DepartmentAccessService;
-
+import com.whatname.iam.service.permission.ServiceOaCaller;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.AbstractPlatformTransactionManager;
-import org.springframework.transaction.support.DefaultTransactionStatus;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.transaction.support.*;
+import java.util.*;
 
 class ExternalEventDiagnosticTest {
     @Test
-    void unknownAndFailureRecordErrorsRemainDiagnosableWithoutLoggingInput() {
-        var logger = (Logger) LoggerFactory.getLogger(ExternalEventService.class);
-        var previousLevel = logger.getLevel();
-        // 前面的局部应用可能关闭根日志；本测试自行设置并恢复捕获级别。
-        logger.setLevel(ch.qos.logback.classic.Level.WARN);
-        var captured = new ListAppender<ILoggingEvent>();
-        captured.start();
-        logger.addAppender(captured);
-        try {
-            Fixture persisted = new Fixture(false);
-            BusinessException first =
-                    assertThrows(
-                            BusinessException.class,
-                            () -> persisted.execute("private-event-one", "private-payload-marker"));
-            assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE, first.errorCode());
-            assertEquals("PENDING_RECOVERY", persisted.row.get().get("status"));
-
-            Fixture unavailable = new Fixture(true);
-            BusinessException second =
-                    assertThrows(
-                            BusinessException.class,
-                            () ->
-                                    unavailable.execute(
-                                            "private-event-two", "private-payload-marker"));
-            assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE, second.errorCode());
-            assertEquals("PROCESSING", unavailable.row.get().get("status"));
-
-            String diagnostics =
-                    captured.list.stream()
-                            .map(ILoggingEvent::getFormattedMessage)
-                            .filter(message -> message.startsWith("External event "))
-                            .reduce("", (a, b) -> a + "\n" + b);
-            assertTrue(
-                    diagnostics.contains(
-                            "failure=IllegalArgumentException state=PENDING_RECOVERY"));
-            assertTrue(
-                    diagnostics.contains(
-                            "failure=IllegalArgumentException"
-                                    + " recordFailure=IllegalStateException"));
-            assertFalse(diagnostics.contains("private-event-one"));
-            assertFalse(diagnostics.contains("private-event-two"));
-            assertFalse(diagnostics.contains("private-payload-marker"));
-            assertFalse(diagnostics.contains("private-record-marker"));
-        } finally {
-            logger.setLevel(previousLevel);
-            logger.detachAppender(captured);
-            captured.stop();
-        }
+    void businessFailureRollsBackReceiptAndNeverCreatesARecoveryState() {
+        var repository = mock(ExternalEventRepository.class);
+        var transactions = new MemoryTransactions();
+        when(repository.lock(anyString(), anyString())).thenAnswer(call -> transactions.row);
+        when(repository.insert(anyString(), anyString(), anyString(), nullable(Long.class),
+                anyString(), anyString(), anyString(), anyString(), any())).thenAnswer(call -> {
+            transactions.row = new HashMap<>(Map.of("id", 1L, "status", "PROCESSING", "digest", call.getArgument(6)));
+            return 1;
+        });
+        var service = new ExternalEventService(repository, mock(DepartmentAccessService.class),
+                new ObjectMapper(), transactions, mock(ServiceOaCaller.class));
+        var command = new ExternalEventService.Command("example", "OA_DECISION", null,
+                "USER", "1", null, Map.of("action", "APPROVE"));
+        var failure = assertThrows(BusinessException.class, () -> service.execute(
+                new TrustedEventContext("OA", "client", "request"), command,
+                () -> { throw new IllegalStateException("business failure"); }));
+        assertEquals(ErrorCode.AUTH_STATE_UNAVAILABLE, failure.errorCode());
+        assertTrue(transactions.rolledBack);
+        assertNull(transactions.row);
+        verify(repository, never()).failed(anyLong(), anyString(), anyString());
+        verify(repository, never()).applied(anyLong(), anyString());
     }
 
-    private static final class Fixture {
-        private final AtomicReference<Map<String, Object>> row = new AtomicReference<>();
-        private final ExternalEventService service;
-
-        Fixture(boolean failRecord) {
-            var repository = mock(ExternalEventRepository.class);
-            when(repository.lock(anyString(), anyString())).thenAnswer(call -> row.get());
-            when(repository.insert(
-                            anyString(),
-                            anyString(),
-                            anyString(),
-                            nullable(Long.class),
-                            anyString(),
-                            anyString(),
-                            anyString(),
-                            anyString(),
-                            nullable(java.time.LocalDateTime.class)))
-                    .thenAnswer(
-                            call -> {
-                                Map<String, Object> inserted = new HashMap<>();
-                                inserted.put("id", 17L);
-                                inserted.put("digest", call.getArgument(6));
-                                inserted.put("status", "PROCESSING");
-                                row.set(inserted);
-                                return 1;
-                            });
-            if (failRecord) {
-                when(repository.failed(anyLong(), anyString(), anyString()))
-                        .thenThrow(new IllegalStateException("private-record-marker"));
-            } else {
-                when(repository.failed(anyLong(), anyString(), anyString()))
-                        .thenAnswer(
-                                call -> {
-                                    row.get().put("status", call.getArgument(1));
-                                    return 1;
-                                });
-            }
-            service =
-                    new ExternalEventService(
-                            repository,
-
-                            mock(DepartmentAccessService.class),
-                            new ObjectMapper(),
-                            new MemoryTransactionManager(),
-                            mock(com.whatname.iam.service.permission.ServiceOaCaller.class));
-        }
-
-        Map<String, Object> execute(String eventId, String privateMessage) {
-            var context = new TrustedEventContext("OA", "test-client", "test-request");
-            var command =
-                    new ExternalEventService.Command(
-                            eventId,
-                            "OA_DECISION",
-                            null,
-                            "USER",
-                            "private-target",
-                            null,
-                            Map.of("decision", "APPROVE"));
-            return service.execute(
-                    context,
-                    command,
-                    () -> {
-                        throw new IllegalArgumentException(privateMessage);
-                    });
-        }
-    }
-
-    private static final class MemoryTransactionManager extends AbstractPlatformTransactionManager {
-        @Override
-        protected Object doGetTransaction() {
-            return new Object();
-        }
-
-        @Override
-        protected void doBegin(Object transaction, TransactionDefinition definition) {}
-
-        @Override
+    static class MemoryTransactions extends AbstractPlatformTransactionManager {
+        Map<String, Object> row;
+        boolean rolledBack;
+        protected Object doGetTransaction() { return new Object(); }
+        protected void doBegin(Object tx, TransactionDefinition definition) {}
         protected void doCommit(DefaultTransactionStatus status) {}
-
-        @Override
-        protected void doRollback(DefaultTransactionStatus status) {}
+        protected void doRollback(DefaultTransactionStatus status) { rolledBack = true; row = null; }
     }
 }

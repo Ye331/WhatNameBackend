@@ -590,7 +590,9 @@ class PermissionAuditIntegrationTest {
         var historical =
                 http("GET", "/audit/evidence/" + event, null, adminToken, false, 200).path("data");
         assertTrue(historical.path("integrityVerified").asBoolean());
-        assertEquals(decision.path("permissionVersion"), historical.path("permissionVersion"));
+        assertEquals(decision.path("decisionId"), historical.at("/evidence/decisionId"));
+        assertFalse(historical.path("evidence").has("user_role"));
+        assertFalse(historical.path("evidence").has("signatures"));
         var list =
                 http("GET", "/audit/authorizations?userId=" + user, null, limitedToken, false, 200)
                         .at("/data/items");

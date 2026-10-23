@@ -666,7 +666,7 @@ class HrIntegrityIntegrationTest {
         assertTrue(port.transientDepartment > 0);
         assertEquals(before, count("SELECT COUNT(*) FROM sys_dept"));
         assertEquals(0, count("SELECT COUNT(*) FROM sys_dept WHERE dept_code=?", code));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
     }
 
     @Test
@@ -727,7 +727,7 @@ class HrIntegrityIntegrationTest {
         assertEquals(userBefore, signature(USER_IDENTITY, person.id));
         assertEquals(orgBefore, signature(ORGANIZATION, 0));
         assertNull(department(source).get("merged_into_dept_id"));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
         assertEquals(
                 0,
                 count("SELECT COUNT(*) FROM sys_operation_log WHERE external_event_id=?", event));
@@ -747,7 +747,7 @@ class HrIntegrityIntegrationTest {
                                 employee(event, 2, Action.UPSERT, sourceCode)));
         assertEquals(before, db.queryForMap("SELECT * FROM sys_user WHERE id=?", person.id));
         assertEquals(old, signature(USER_IDENTITY, person.id));
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
     }
 
     @Test
@@ -804,7 +804,7 @@ class HrIntegrityIntegrationTest {
                                 person.employeeNo,
                                 employee(event, 2, Action.UPSERT, sourceCode)));
         assertEquals(before.hrVersion, users.findById(person.id).hrVersion);
-        assertEquals("PENDING_RECOVERY", eventStatus(event));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", Integer.class, event));
         assertNull(ExternalEventService.applying(actor, "HR_EMPLOYEE", event));
     }
 

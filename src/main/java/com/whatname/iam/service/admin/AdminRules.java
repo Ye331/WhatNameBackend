@@ -14,38 +14,17 @@ import java.util.Set;
 @Component
 public class AdminRules {
     public Set<Long> organizationReview(AdminState before, AdminState after) {
-        Set<Long> review = new java.util.TreeSet<>();
-        for (var a : before.appointments().values()) {
-            if (a.status() != 1) continue;
-            var oldUser = before.users().get(a.userId());
-            var user = after.users().get(a.userId());
+        Set<Long> revoked = new java.util.TreeSet<>();
+        for (var appointment : before.appointments().values()) {
+            if (appointment.status() != 1) continue;
+            var oldUser = before.users().get(appointment.userId());
+            var user = after.users().get(appointment.userId());
             if (oldUser == null || user == null) fail(AUTH_STATE_UNAVAILABLE);
-            boolean invalid =
-                    mergedChain(after, a.deptId())
-                            || mergedChain(after, user.deptId())
-                            || !oldUser.deptId().equals(user.deptId());
-            if (!invalid && a.adminLevel() > 1) {
-                for (long departmentId : after.departments().keySet()) {
-                    if (contains(after, a, departmentId)
-                            && (!before.departments().containsKey(departmentId)
-                                    || !contains(before, a, departmentId))) {
-                        invalid = true;
-                        break;
-                    }
-                }
-            }
-            if (!invalid && a.adminLevel() > 1)
-                for (var member : after.users().values()) {
-                    var oldMember = before.users().get(member.id());
-                    if (contains(after, a, member.deptId())
-                            && (oldMember == null || !contains(before, a, oldMember.deptId()))) {
-                        invalid = true;
-                        break;
-                    }
-                }
-            if (invalid) review.add(a.userId());
+            // Only termination and the administrator's own department move revoke automatically.
+            if (user.status() == 3 || !oldUser.deptId().equals(user.deptId()))
+                revoked.add(appointment.userId());
         }
-        return review;
+        return revoked;
     }
 
     private boolean mergedChain(AdminState state, long departmentId) {
@@ -96,7 +75,8 @@ public class AdminRules {
         var actor = requireActive(state, actorId);
         var target = state.appointments().get(targetId);
         if (target == null || target.status() != 1) fail(RESOURCE_NOT_FOUND);
-        if (actor.adminLevel() >= target.adminLevel() || !contains(state, actor, target.deptId())) {
+        if (actor.adminLevel() != 1 || target.adminLevel() <= 1
+                || !contains(state, actor, target.deptId())) {
             fail(DELEGATION_OUT_OF_SCOPE);
         }
         requireActive(state, targetId);
@@ -110,8 +90,9 @@ public class AdminRules {
             fail(ROLE_NOT_DELEGABLE);
         if (actor.adminLevel() > 1
                 && state.delegations().stream()
-                        .noneMatch(
-                                item -> item.adminUserId() == actorId && item.roleId() == roleId))
+                        .noneMatch(item -> item.adminUserId() == actorId && item.roleId() == roleId
+                                && state.appointments().containsKey(item.configuredBy())
+                                && state.appointments().get(item.configuredBy()).adminLevel() == 1))
             fail(ROLE_NOT_DELEGABLE);
     }
 

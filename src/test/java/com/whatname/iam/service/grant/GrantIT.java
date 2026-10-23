@@ -64,6 +64,7 @@ class GrantIT {
     }
 
     @Autowired GrantService service;
+    @Autowired BatchService batchService;
     @Autowired AdminService admins;
     @Autowired AdminPolicyService policy;
     @Autowired JdbcTemplate jdbc;
@@ -78,6 +79,24 @@ class GrantIT {
 
     private String sid(long offset) {
         return Long.toString(id(offset));
+    }
+
+    @Test
+    void synchronousBatchCommitsValidUserAndReportsUnknownUserWithoutCreatingTask() {
+        var request = new com.whatname.iam.dto.grant.BatchDtos.Request("GRANT", sid(100),
+                List.of(new com.whatname.iam.dto.grant.BatchDtos.Target(sid(6), "MANUAL", "sync-demo", null, null),
+                        new com.whatname.iam.dto.grant.BatchDtos.Target(sid(999), "MANUAL", "sync-demo", null, null)),
+                "class demo", false);
+        long tasks = jdbc.queryForObject("SELECT COUNT(*) FROM sys_grant_batch", Long.class);
+        var result = batchService.submit(null, request);
+        assertThat(result.processingStatus()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.succeeded()).isEqualTo(1);
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user_role WHERE user_id=? AND role_id=?", Integer.class, id(6), id(100))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_grant_batch", Long.class)).isEqualTo(tasks);
+        var replay = batchService.submit(null, request);
+        assertThat(replay.succeeded()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=? AND role_id=? AND source_ref='sync-demo'", Integer.class, id(6), id(100))).isEqualTo(1);
     }
 
     @BeforeEach

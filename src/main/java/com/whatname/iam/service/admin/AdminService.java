@@ -209,36 +209,12 @@ public class AdminService {
 
     private Set<Long> replaceList(
             AdminState before, long targetId, Set<Long> newRoles, long actorId) {
-        record Removed(long adminId, long roleId) {}
-        Deque<Removed> queue = new ArrayDeque<>();
-        before.delegations().stream()
-                .filter(d -> d.adminUserId() == targetId && !newRoles.contains(d.roleId()))
-                .forEach(d -> queue.add(new Removed(targetId, d.roleId())));
         repository.deleteDelegations(targetId);
         for (long roleId : newRoles) expectOne(repository.insertDelegation(targetId, roleId, actorId));
-        Set<Removed> visited = new HashSet<>();
-        Set<Long> changed = new TreeSet<>(Set.of(targetId));
-        while (!queue.isEmpty()) {
-            var removed = queue.removeFirst();
-            if (!visited.add(removed)) continue;
-            for (var item : before.delegations()) {
-                if (Objects.equals(item.configuredBy(), removed.adminId())
-                        && item.roleId() == removed.roleId()
-                        && !visited.contains(new Removed(item.adminUserId(), item.roleId()))) {
-                    if (!before.appointments().containsKey(item.adminUserId()))
-                        fail(AUTH_STATE_UNAVAILABLE);
-                    expectOne(repository.deleteDelegation(item.adminUserId(), item.roleId()));
-                    changed.add(item.adminUserId());
-                    queue.addLast(new Removed(item.adminUserId(), item.roleId()));
-                }
-            }
-        }
-        for (long adminId : changed) {
-            int old = before.appointments().get(adminId).delegableRevision();
-            if (old < 1 || old == Integer.MAX_VALUE) fail(AUTH_STATE_UNAVAILABLE);
-            if (repository.advanceRevision(adminId, old) != 1) fail(VERSION_CONFLICT);
-        }
-        return changed;
+        int old = before.appointments().get(targetId).delegableRevision();
+        if (old < 1 || old == Integer.MAX_VALUE) fail(AUTH_STATE_UNAVAILABLE);
+        if (repository.advanceRevision(targetId, old) != 1) fail(VERSION_CONFLICT);
+        return Set.of(targetId);
     }
 
     private Appointment visibleAppointment(AdminState state, Appointment actor, long targetId) {
@@ -264,7 +240,9 @@ public class AdminService {
                                 .map(String::valueOf)
                                 .toList()
                         : state.delegations().stream()
-                                .filter(d -> d.adminUserId() == targetId)
+                                .filter(d -> d.adminUserId() == targetId
+                                        && state.appointments().containsKey(d.configuredBy())
+                                        && state.appointments().get(d.configuredBy()).adminLevel() == 1)
                                 .map(Delegation::roleId)
                                 .sorted()
                                 .map(String::valueOf)

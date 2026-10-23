@@ -6,13 +6,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.PhoneNumbers;
 import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.department.DepartmentAccessService;
 import com.whatname.iam.service.permission.ServiceOaCaller;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -28,14 +25,9 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.function.Supplier;
 
-/**
- * No proxy self-invocation: every boundary is an explicit TransactionTemplate. Call outside a
- * caller transaction: receive/failure are independent short transactions; callback,
- * signatures/audit and APPLIED are one SERIALIZABLE transaction.
- */
+/** Event ID deduplication and business changes commit together; failures roll back together. */
 @Service
 public class ExternalEventService {
-    private static final Logger log = LoggerFactory.getLogger(ExternalEventService.class);
 
     public record Command(
             String eventId,
@@ -50,22 +42,15 @@ public class ExternalEventService {
             return "ExternalEventCommand[redacted]";
         }
     }
-
-    private record Claim(long id, Map<String, Object> replay) {}
-
-    private record FailureDisposition(Map<String, Object> replay, String state) {}
-
     private final ExternalEventRepository repository;
 
     private final DepartmentAccessService integration;
     private final ServiceOaCaller oa;
     private final ObjectMapper json;
-    private final TransactionTemplate shortTx;
     private final TransactionTemplate businessTx;
 
     public ExternalEventService(
             ExternalEventRepository repository,
-
             DepartmentAccessService integration,
             ObjectMapper json,
             PlatformTransactionManager tm,
@@ -74,160 +59,57 @@ public class ExternalEventService {
         this.integration = integration;
         this.json = json;
         this.oa = oa;
-        shortTx = new TransactionTemplate(tm);
-        shortTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        shortTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        shortTx.setTimeout(15);
         businessTx = new TransactionTemplate(tm);
         businessTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         businessTx.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         businessTx.setTimeout(30);
     }
 
-    public Map<String, Object> execute(
-            TrustedEventContext context,
-            Command command,
-            Supplier<Map<String, Object>> applyAndAudit) {
-        return run(context, command, applyAndAudit, false);
+    public synchronized Map<String, Object> execute(
+            TrustedEventContext context, Command command,
+            Supplier<Map<String, Object>> work) {
+        if (TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("Call event processing outside a caller transaction");
+        validate(context, command);
+        verifyTrustedEvent(context, command.eventType());
+        String canonical = canonical(context, command);
+        String fingerprint = digest(canonical);
+        try {
+            return businessTx.execute(tx -> apply(context, command, work, canonical, fingerprint));
+        } catch (DuplicateKeyException concurrentInsert) {
+            // Retry only receipt insertion races, after the first transaction has rolled back.
+            return businessTx.execute(tx -> apply(context, command, work, canonical, fingerprint));
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (RuntimeException unavailable) {
+            throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE, unavailable);
+        }
     }
 
-    /**
-     * Existing terminal results may be replayed after recovery authorization. Nonterminal events
-     * are refused: authorization and a row lock cannot prove that an earlier worker has stopped.
-     * Offline recovery requires operators to stop event processing and verify that all former
-     * workers and database transactions have ended; this method does not perform that procedure.
-     */
-    public Map<String, Object> recover(
-            TrustedEventContext context,
-            Command command,
-            Supplier<Map<String, Object>> applyAndAudit) {
-        return run(context, command, applyAndAudit, true);
-    }
-
-    private Map<String, Object> run(
-            TrustedEventContext ctx,
-            Command c,
-            Supplier<Map<String, Object>> work,
-            boolean recovery) {
-        if (org.springframework.transaction.support.TransactionSynchronizationManager
-                .isActualTransactionActive())
-            throw new IllegalStateException(
-                    "Event orchestration must be called outside a caller transaction");
-        validate(ctx, c);
-        verifyTrustedEvent(ctx, c.eventType());
-        if (recovery) {
-            if ("OA".equals(ctx.sourceSystem())) oa.authorizeRecovery(ctx, c.eventType());
-            else integration.authorizeRecovery(ctx, c.eventType());
-        }
-        String canonical = canonical(ctx, c);
-        String digest = digest(canonical);
-        Claim claim;
-        try {
-            try {
-                claim = claim(ctx, c, digest, canonical, recovery);
-            } catch (DuplicateKeyException raced) {
-                claim = claim(ctx, c, digest, canonical, recovery);
-            }
-        } catch (RuntimeException receiptUnavailable) {
-            if (receiptUnavailable instanceof BusinessException) throw receiptUnavailable;
-            // An unknown receipt commit never grants permission to execute or to take over.
-            log.warn(
-                    "External event receipt unavailable source={} type={} failure={}",
-                    ctx.sourceSystem(),
-                    c.eventType(),
-                    receiptUnavailable.getClass().getSimpleName());
+    private Map<String, Object> apply(TrustedEventContext context, Command command,
+            Supplier<Map<String, Object>> work, String canonical, String fingerprint) {
+        verifyTrustedEvent(context, command.eventType());
+        var row = repository.lock(context.sourceSystem(), command.eventId());
+        if (row != null && !row.isEmpty()) {
+            if (!fingerprint.equals(row.get("digest")))
+                throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
+            if ("APPLIED".equals(row.get("status"))) return decode((String) row.get("result"));
+            // Old checkpoint data is never taken over automatically. Inspect it manually.
             throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
         }
-        if (claim.replay() != null) return claim.replay();
-        Claim owned = claim;
-        try {
-            return businessTx.execute(
-                    tx -> {
-                        // Event row first. Organization callbacks prepare the admin
-                        // admin/department/role/list/user
-                        // and resource locks before organization/person facts are read or changed.
-                        Map<String, Object> row = repository.lock(ctx.sourceSystem(), c.eventId());
-                        if ((row == null || row.isEmpty())
-                                || owned.id() != id(row)
-                                || !digest.equals(row.get("digest"))
-                                || !"PROCESSING".equals(row.get("status")))
-                            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
-                        // Recheck the same source-specific authority in the actual write
-                        // transaction.
-                        // Only this private path can register the transaction-local execution
-                        // evidence.
-                        verifyTrustedEvent(ctx, c.eventType());
-                        TransactionSynchronizationManager.registerSynchronization(
-                                new Applying(ctx, c));
-                        Map<String, Object> result = Objects.requireNonNull(work.get());
-                        assertSafeResult(json.valueToTree(result));
-                        String encoded = encode(result);
-                        if (encoded.length() > 65536)
-                            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
-                        if (repository.applied(owned.id(), encoded) != 1)
-                            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
-                        return result;
-                    });
-        } catch (RuntimeException error) {
-            ErrorCode code =
-                    error instanceof BusinessException b
-                            ? b.errorCode()
-                            : ErrorCode.AUTH_STATE_UNAVAILABLE;
-            boolean definitive = code.status().is4xxClientError();
-            try {
-                FailureDisposition disposition =
-                        shortTx.execute(
-                                tx -> {
-                                    // A commit acknowledgement can be lost. Inspect the real locked
-                                    // state before
-                                    // recording a failure, and never replace an already committed
-                                    // result.
-                                    Map<String, Object> row =
-                                            repository.lock(ctx.sourceSystem(), c.eventId());
-                                    if ((row == null || row.isEmpty())
-                                            || owned.id() != id(row)
-                                            || !digest.equals(row.get("digest")))
-                                        return new FailureDisposition(null, "UNMATCHED");
-                                    String state = (String) row.get("status");
-                                    if ("APPLIED".equals(state))
-                                        return new FailureDisposition(
-                                                decode((String) row.get("result")), state);
-                                    if ("PROCESSING".equals(state)) {
-                                        state = definitive ? "REJECTED" : "PENDING_RECOVERY";
-                                        if (repository.failed(owned.id(), state, code.name()) != 1)
-                                            throw new IllegalStateException(
-                                                    "External event failure state was not saved");
-                                    }
-                                    return new FailureDisposition(null, state);
-                                });
-                if (disposition.replay() != null) return disposition.replay();
-                if (!(error instanceof BusinessException)
-                        || "UNMATCHED".equals(disposition.state()))
-                    log.warn(
-                            "External event failed rowId={} source={} type={} code={} failure={}"
-                                    + " state={}",
-                            owned.id(),
-                            ctx.sourceSystem(),
-                            c.eventType(),
-                            code.name(),
-                            error.getClass().getSimpleName(),
-                            disposition.state());
-            } catch (RuntimeException failureRecordUnavailable) {
-                // Preserve the retained state. Ordinary retries and online recovery never take
-                // over.
-                log.warn(
-                        "External event failure record unavailable rowId={} source={} type={}"
-                                + " code={} failure={} recordFailure={}",
-                        owned.id(),
-                        ctx.sourceSystem(),
-                        c.eventType(),
-                        code.name(),
-                        error.getClass().getSimpleName(),
-                        failureRecordUnavailable.getClass().getSimpleName());
-            }
-            if (error instanceof BusinessException) throw error;
-            throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
-        }
+        repository.insert(context.sourceSystem(), command.eventId(), command.eventType(),
+                command.eventVersion(), command.targetType(), command.targetRef(), fingerprint,
+                canonical, command.occurredAt() == null ? null
+                        : command.occurredAt().withOffsetSameInstant(ZoneOffset.ofHours(8)).toLocalDateTime());
+        row = repository.lock(context.sourceSystem(), command.eventId());
+        TransactionSynchronizationManager.registerSynchronization(new Applying(context, command));
+        Map<String, Object> result = Objects.requireNonNull(work.get());
+        assertSafeResult(json.valueToTree(result));
+        String encoded = encode(result);
+        if (encoded.length() > 65536) throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        if (repository.applied(id(row), encoded) != 1)
+            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+        return result;
     }
 
     private void verifyTrustedEvent(TrustedEventContext context, String eventType) {
@@ -261,56 +143,6 @@ public class ExternalEventService {
 
     private record Applying(TrustedEventContext context, Command command)
             implements TransactionSynchronization {}
-
-    private Claim claim(
-            TrustedEventContext ctx, Command c, String digest, String plaintext, boolean recovery) {
-        return shortTx.execute(
-                tx -> {
-                    Map<String, Object> row = repository.lock(ctx.sourceSystem(), c.eventId());
-                    if (row != null && !row.isEmpty()) {
-                        if (!digest.equals(row.get("digest")))
-                            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
-                        String status = (String) row.get("status");
-                        if ("APPLIED".equals(status))
-                            return new Claim(id(row), decode((String) row.get("result")));
-                        if ("REJECTED".equals(status)) {
-                            ErrorCode code;
-                            try {
-                                code = ErrorCode.valueOf((String) row.get("summary"));
-                            } catch (RuntimeException e) {
-                                code = ErrorCode.BUSINESS_RULE_VIOLATION;
-                            }
-                            throw new BusinessException(code);
-                        }
-                        if (!recovery)
-                            throw new BusinessException(
-                                    "PROCESSING".equals(status)
-                                            ? ErrorCode.VERSION_CONFLICT
-                                            : ErrorCode.AUTH_STATE_UNAVAILABLE);
-                        // Verify retained evidence, but do not confuse authorization with proof of
-                        // quiescence.
-                        if (!plaintext.equals((String) row.get("payloadJson")))
-                            throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
-                        throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
-                    }
-                    if (recovery) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
-                    repository.insert(
-                            ctx.sourceSystem(),
-                            c.eventId(),
-                            c.eventType(),
-                            c.eventVersion(),
-                            c.targetType(),
-                            c.targetRef(),
-                            digest,
-                            (plaintext),
-                            c.occurredAt() == null
-                                    ? null
-                                    : c.occurredAt()
-                                            .withOffsetSameInstant(ZoneOffset.ofHours(8))
-                                            .toLocalDateTime());
-                    return new Claim(id(repository.lock(ctx.sourceSystem(), c.eventId())), null);
-                });
-    }
 
     private static long id(Map<String, Object> row) {
         return ((Number) row.get("id")).longValue();

@@ -200,10 +200,7 @@ public class HrGrantCollaboration {
                 || admins.selectAppointments(false).stream()
                         .anyMatch(a -> a.userId() == userId && a.status() == 1)
                 || admins.selectDelegations(false).stream()
-                        .anyMatch(
-                                d ->
-                                        d.adminUserId() == userId
-                                                || Objects.equals(d.configuredBy(), userId)))
+                        .anyMatch(d -> d.adminUserId() == userId))
             fail(BUSINESS_RULE_VIOLATION);
         p.rehireChecked = true;
     }

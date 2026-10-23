@@ -118,7 +118,6 @@ public class AuditQueryService {
         result.put("eventId", eventId);
         result.put("requestId", row.get("request_id"));
         result.put("evidenceType", row.get("operation_type"));
-        result.put("permissionVersion", retained.get("permissionVersion"));
         result.put("integrityVerified", true);
         result.put("evidence", retained);
         return result;
@@ -134,7 +133,6 @@ public class AuditQueryService {
             result.put("userId", string(row.get("user_id")));
             result.put("apiId", string(row.get("api_id")));
             result.put("allowed", Objects.equals(integer(row.get("auth_decision")), 1));
-            result.put("permissionVersion", retained.get("permissionVersion"));
         } else {
             result.put("operationType", row.get("operation_type"));
             result.put("actorUserId", string(row.get("user_id")));

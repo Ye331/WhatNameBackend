@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: 统一权限管理系统：三层功能开发 RBAC0 API 契约
-  version: 0.6.0
-  description: 与详细设计和数据库v3.1一致。Controller-Service-Repository三层，Spring Data JPA+MySQL，当前无Redis/DAO/缓存发布/消息队列；56项接口全部纳入实现范围，GR06必做。权限直读当前数据库事实，审计同步提交。SG重名规则保持；原性能指标待实测。外部系统用测试请求模拟，短信发送通道可替换。
+  version: 0.7.0-coursework
+  description: 课程作业简化版；55项接口。批量1–100人同步执行，无后台任务/恢复/查询；仅一级配置可授权清单，无递归委派；简单鉴权日志，无事实快照摘要；性能及备份按课堂演示。保留数据签名、服务签名、RBAC0及事务一致性。
 servers:
 - url: https://iam.example.test/api/v1
   description: 占位地址（非真实部署地址）
@@ -489,7 +489,8 @@ paths:
       description: 'M6 检查功能权限、M5 将搜索限定至当前部门根及子树；关键字段经范围授权和验签后返回明文演示值。
 
         协议按API规范2.4节执行；真实部署地址由配置确定。'
-      x-implementation-notes: status与source分别为可选整数1/2/3，省略不限制该维度；所有条件与M5范围取交集，items/total 使用相同范围和匹配规则。page为1至1000000，pageSize为1至500。keyword 支持用户名/SG 号子串、规范化手机号精确匹配和 Unicode NFC 姓名包含搜索；姓名搜索在范围内分批验签、匹配和计数。
+      x-implementation-notes: status与source分别为可选整数1/2/3，省略不限制该维度；所有条件与M5范围取交集，items/total 使用相同范围和匹配规则。page为1至1000000，pageSize为1至500。keyword
+        支持用户名/SG 号子串、规范化手机号精确匹配和 Unicode NFC 姓名包含搜索；姓名搜索在范围内分批验签、匹配和计数。
       security:
       - UserBearer: []
       parameters:
@@ -509,14 +510,20 @@ paths:
         required: false
         schema:
           type: integer
-          enum: [1, 2, 3]
+          enum:
+          - 1
+          - 2
+          - 3
         description: 账号状态：1可用、2暂停、3离职
       - name: source
         in: query
         required: false
         schema:
           type: integer
-          enum: [1, 2, 3]
+          enum:
+          - 1
+          - 2
+          - 3
         description: 账号来源：1 HR同步、2管理员手动创建、3受控初始化
       - name: page
         in: query
@@ -577,7 +584,10 @@ paths:
                               type: boolean
                             source:
                               type: integer
-                              enum: [1, 2, 3]
+                              enum:
+                              - 1
+                              - 2
+                              - 3
                           additionalProperties: false
                           required:
                           - passwordInitialized
@@ -706,7 +716,10 @@ paths:
                         type: boolean
                       source:
                         type: integer
-                        enum: [1, 2, 3]
+                        enum:
+                        - 1
+                        - 2
+                        - 3
                     additionalProperties: false
                     required:
                     - userId
@@ -1288,7 +1301,7 @@ paths:
       - M2 组织与人员变动管理
       operationId: HR01
       summary: HR 部门增量同步
-      x-processing-response: PROCESSING返回409 VERSION_CONFLICT；PENDING_RECOVERY返回503；APPLIED返回200原脱敏结果
+      x-processing-response: 成功事件返回原结果；失败同事务回滚，不提供在线恢复。
       description: '事件按 (sourceSystem,eventId) 幂等，以可信 HR 部门编码查找或建立与 sys_dept.id 的确定映射，校验父部门、顺序版本与无环；部门名称不能用于关联，首次新建时由数据库生成内部部门
         ID。
 
@@ -1401,7 +1414,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -1584,7 +1597,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -1767,7 +1780,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -1930,7 +1943,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -1976,7 +1989,7 @@ paths:
       operationId: HR05
       summary: HR 部门合并事件
       x-a-confirmed-merge-rules: 保留空源merged_into_dept_id；源及祖先冻结须先显式解冻，子冻结保留；直属人员和子部门迁目标；只推进源hr_version；C限制失效管理根再重审；签名审计APPLIED同事务
-      x-processing-response: PROCESSING返回409 VERSION_CONFLICT；PENDING_RECOVERY返回503；APPLIED返回200原脱敏结果
+      x-processing-response: 成功事件返回原结果；失败同事务回滚，不提供在线恢复。
       description: '组织树/员工归属变更；既有合法角色暂时保留，不自动回收或重新授权；重新计算冻结链和 M5 管理根。
 
         可信状态：可能扩大或缩减权限，同事务保存事实、签名和审计。
@@ -2082,7 +2095,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -4848,151 +4861,78 @@ paths:
       - M4 角色与授权管理
       operationId: GR03
       summary: 批量授予或按依据回收
-      description: 必须实现异步批量授权/精确来源回收，数据库持久任务和逐项结果；新任务202，GR06查询进度。每项事务复核当前操作资格，事实/来源/签名/审计/APPLIED同事务；暂时数据库故障最多重试3次，业务失败保留FAILED。纠正业务失败后使用新键仅提交失败目标；原键重试不重执行FAILED。Idempotency-Key按发起人唯一，同键不同内容409。dryRun只检查，不创建任务。
+      description: 最多100人，同步逐人事务执行，直接返回全部结果。无持久任务及轮询。Idempotency-Key可省略，不用于请求去重；稳定授权来源键仍防止重复授予。dryRun=true不支持。
       security:
       - UserBearer: []
-      parameters:
-      - name: Idempotency-Key
-        in: header
-        required: true
-        schema:
-          type: string
-          maxLength: 128
-        description: 整个批次的幂等标识；重试时返回已知状态
+      parameters: []
       responses:
         '200':
-          description: 操作已完成或查询成功；鉴权接口还须检查 data.allowed
+          description: 同步执行完成，包含每个人的结果
           content:
             application/json:
               schema:
-                oneOf:
-                - type: object
-                  properties:
-                    success:
-                      type: boolean
-                    code:
-                      type: string
-                    requestId:
-                      type: string
-                    data:
-                      type: object
-                      properties:
-                        batchId:
-                          type: string
-                        processingStatus:
-                          type: string
-                        succeeded:
-                          type: integer
-                        failed:
-                          type: integer
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              userId:
-                                type: string
-                              status:
-                                type: string
-                              grantSourceId:
-                                type: string
-                              code:
-                                type: string
-                            additionalProperties: false
-                            required:
-                            - status
-                            - userId
-                      additionalProperties: false
-                      required:
-                      - batchId
-                      - processingStatus
-                      - succeeded
-                      - failed
-                      - items
-                  additionalProperties: false
-                  required:
-                  - success
-                  - code
-                  - requestId
-                  - data
-                - type: object
-                  properties:
-                    success:
-                      type: boolean
-                    code:
-                      type: string
-                    requestId:
-                      type: string
-                    data:
-                      type: object
-                      additionalProperties: false
-                      required:
-                      - dryRun
-                      - succeeded
-                      - failed
-                      - items
-                      properties:
-                        dryRun:
-                          type: boolean
-                          enum:
-                          - true
-                        succeeded:
-                          type: integer
-                        failed:
-                          type: integer
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            required:
-                            - userId
-                            - status
-                            properties:
-                              userId:
-                                type: string
-                              status:
-                                type: string
-                                enum:
-                                - VALIDATED
-                                - FAILED
-                              code:
-                                type: string
-                  additionalProperties: false
-                  required:
-                  - success
-                  - code
-                  - requestId
-                  - data
-              examples:
-                completedReplay:
-                  value:
-                    success: true
-                    code: OK
-                    requestId: req-demo
-                    data:
-                      batchId: '7001'
-                      processingStatus: PARTIAL_SUCCESS
-                      succeeded: 1
-                      failed: 1
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  code:
+                    type: string
+                  requestId:
+                    type: string
+                  data:
+                    type: object
+                    required:
+                    - processingStatus
+                    - succeeded
+                    - failed
+                    - total
+                    - items
+                    properties:
+                      processingStatus:
+                        type: string
+                        enum:
+                        - COMPLETED
+                        - PARTIAL_SUCCESS
+                        - FAILED
+                      succeeded:
+                        type: integer
+                      failed:
+                        type: integer
+                      total:
+                        type: integer
                       items:
-                      - userId: '101'
-                        status: APPLIED
-                        grantSourceId: '901'
-                      - userId: '102'
-                        status: FAILED
-                        code: OUT_OF_SCOPE
-                dryRun:
-                  value:
-                    success: true
-                    code: OK
-                    requestId: req-demo
-                    data:
-                      dryRun: true
-                      succeeded: 1
-                      failed: 0
-                      items:
-                      - userId: '101'
-                        status: VALIDATED
+                        type: array
+                        items:
+                          type: object
+                          required:
+                          - userId
+                          - status
+                          properties:
+                            userId:
+                              type: string
+                            status:
+                              type: string
+                              enum:
+                              - APPLIED
+                              - FAILED
+                            grantSourceId:
+                              type: string
+                            code:
+                              type: string
+                    additionalProperties: false
+              example:
+                success: true
+                code: OK
+                requestId: req-demo
+                data:
+                  processingStatus: COMPLETED
+                  succeeded: 1
+                  failed: 0
+                  total: 1
+                  items:
+                  - userId: '101'
+                    status: APPLIED
+                    grantSourceId: '901'
         '400':
           description: 参数无效
           content:
@@ -5018,53 +4958,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '202':
-          description: 任务已持久接收，业务尚未全部完成
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - success
-                - code
-                - requestId
-                - data
-                properties:
-                  success:
-                    type: boolean
-                  code:
-                    type: string
-                  requestId:
-                    type: string
-                  data:
-                    type: object
-                    required:
-                    - batchId
-                    - processingStatus
-                    - total
-                    properties:
-                      batchId:
-                        type: string
-                      processingStatus:
-                        type: string
-                        enum:
-                        - PENDING
-                        - PROCESSING
-                      total:
-                        type: integer
-              example:
-                success: true
-                code: ACCEPTED
-                requestId: req-demo
-                data:
-                  batchId: '7001'
-                  processingStatus: PENDING
-                  total: 2
       requestBody:
         required: true
         content:
@@ -5114,10 +5012,14 @@ paths:
                             - DEPT_POSITION
                         required:
                         - sourceDeptId
+                    maxItems: 100
                   reason:
                     type: string
                   dryRun:
                     type: boolean
+                    enum:
+                    - false
+                    description: 只能为false；不支持预检查模式
                 additionalProperties: false
                 required:
                 - operation
@@ -5146,17 +5048,21 @@ paths:
                       required:
                       - userId
                       - grantSourceId
+                    maxItems: 100
                   reason:
                     type: string
                   dryRun:
                     type: boolean
+                    enum:
+                    - false
+                    description: 只能为false；不支持预检查模式
                 additionalProperties: false
                 required:
                 - operation
                 - roleId
                 - targets
                 - reason
-              description: 按 operation 分辨请求结构。dryRun 可选，true 时不提交变更。
+              description: 按 operation 区分授予和回收；最多100人同步执行；dryRun可省略或false，true返回400。
             example:
               operation: GRANT
               roleId: '5'
@@ -5170,149 +5076,6 @@ paths:
               reason: 同岗位批量授权
               dryRun: false
       x-authorization-requirement: 管理端；`IAM_GRANTS_WRITE+M5_SCOPE+DELEGABLE_ROLE`。
-  /grants/batches/{batchId}:
-    get:
-      tags:
-      - M4 角色与授权管理
-      operationId: GR06
-      summary: 查询批量执行结果（必做）
-      description: 必做。读取持久任务汇总和分页逐项结果；逐项按当前管理员范围过滤，范围缩减后不得泄露原任务范围外对象。
-      x-authorization-requirement: 管理端；`IAM_GRANTS_VIEW+M5_SCOPE`。
-      x-optional-extension: true
-      parameters:
-      - name: batchId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-      - name: pageSize
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          maximum: 500
-          default: 20
-      security:
-      - UserBearer: []
-      responses:
-        '200':
-          description: 操作已完成或查询成功；鉴权接口还须检查 data.allowed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  code:
-                    type: string
-                  requestId:
-                    type: string
-                  data:
-                    type: object
-                    properties:
-                      batchId:
-                        type: string
-                      processingStatus:
-                        type: string
-                      succeeded:
-                        type: integer
-                      failed:
-                        type: integer
-                      pending:
-                        type: integer
-                      items:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            userId:
-                              type: string
-                            status:
-                              type: string
-                            grantSourceId:
-                              type: string
-                            code:
-                              type: string
-                          additionalProperties: false
-                          required:
-                          - status
-                          - userId
-                      page:
-                        type: integer
-                      pageSize:
-                        type: integer
-                      total:
-                        type: integer
-                        description: 当前可查看任务项数量
-                    additionalProperties: false
-                    required:
-                    - batchId
-                    - processingStatus
-                    - succeeded
-                    - failed
-                    - pending
-                additionalProperties: false
-                required:
-                - success
-                - code
-                - requestId
-                - data
-              example:
-                success: true
-                code: OK
-                requestId: req-demo
-                data:
-                  batchId: '7001'
-                  processingStatus: PARTIAL_SUCCESS
-                  succeeded: 1999
-                  failed: 1
-                  pending: 0
-                  items:
-                  - userId: '101'
-                    status: APPLIED
-                    grantSourceId: '901'
-                  page: 1
-                  pageSize: 20
-                  total: 2000
-        '400':
-          description: 参数无效
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '401':
-          description: 身份或令牌无效
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '403':
-          description: 无相应功能、对象范围或委派资格
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '404':
-          description: 资源不存在或无权查看
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /grants/history:
     get:
       tags:
@@ -5475,8 +5238,8 @@ paths:
       - M4 角色与授权管理
       operationId: OA01
       summary: 执行 OA 已批准角色授权或回收
-      description: '由可信 OA 服务已获准的角色、对象和操作范围决定执行资格，不重新检查原申请人的当前管理任命。OA 身份不能代表超级用户。撤销时指定要回收的审批授权依据，不误删其他来源；同一审批单和目标角色的有效
-        OA 授权来源须防重复登记，不仅检查 eventId。
+      description: '由可信 OA 服务已获准的角色、对象和操作范围决定执行资格，不重新检查原申请人的当前管理任命。OA 身份不能代表超级用户。撤销时指定要回收的审批授权依据，不误删其他来源；同一审批单和目标角色的有效 OA
+        授权来源须防重复登记，不仅检查 eventId。
 
         补充：REVOKE 事件须包含需撤销的 grantSourceId 或已批准审批单 approvalId，必须能唯一定位 OA 授权依据；原申请人标识如提供仅作审计，不作执行期授权判断。
 
@@ -5589,7 +5352,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '503':
-          description: 必要可信权限状态、签名、审计或外部服务不可用；安全拒绝。事务失败不报告成功；响应丢失按原事件ID或任务键查询已提交结果。PENDING_RECOVERY仅用于外部事件受控恢复，不表示缓存发布。
+          description: 数据库、可信状态或审计不可用时返回503；外部事件同事务回滚，需人工核对，无在线恢复。
           content:
             application/json:
               schema:
@@ -6251,13 +6014,7 @@ paths:
       - M5 管理员与管理范围控制
       operationId: AD06
       summary: 上级配置下级可授权角色清单
-      description: '仅有委派功能资格的有效上级管理员可配置下级清单；下级须属于上级管理范围，且每个角色在上级自身可合法委派集合内；超级角色禁止。全量替换采用版本比较，清单缩减立即影响后续授权操作，不自动撤销已合法授予其他人的角色。
-
-        可信状态：可能扩大或缩减权限，同事务保存事实、签名和审计。
-
-        协议按API规范2.4节执行；真实部署地址由配置确定。
-
-        缩减清单时同事务递归收缩受影响下级委派清单，更新修订号和签名，既有普通用户授权不追撤。'
+      description: 仅一级管理员直接配置较低等级管理员的可授权清单，使用expectedVersion；非一级拒绝，不递归传播。
       x-authorization-requirement: 管理端；`IAM_GRANTS_DELEGATE+M5_SCOPE`。
       parameters:
       - name: userId
@@ -6479,7 +6236,7 @@ paths:
       - M6 在线权限鉴定
       operationId: AU03
       summary: 业务服务端实时 API 鉴权
-      description: 可信业务服务+用户JWT；在本次新的数据库一致事务中检查账号、会话sv/jti、部门祖先、角色来源、菜单/API及签名。同步提交审计后返回决策；仅allowed=true放行。无Redis、缓存发布版本或栅栏。permissionVersion是本次事实证据摘要。真实管理入口仍需M5对象范围检查。
+      description: 校验当前用户、组织、角色来源及资源签名，记录基础鉴权日志；返回allowed、reasonCode、decisionId。
       security:
       - ServiceSignature: []
         UserBearer: []
@@ -6531,15 +6288,11 @@ paths:
                         type: string
                       decisionId:
                         type: string
-                      permissionVersion:
-                        type: string
-                        description: 本次规范化事实证据SHA-256摘要，不是缓存发布版本
                     additionalProperties: false
                     required:
                     - allowed
                     - reasonCode
                     - decisionId
-                    - permissionVersion
                 additionalProperties: false
                 required:
                 - success
@@ -6557,7 +6310,6 @@ paths:
                       allowed: true
                       reasonCode: ALLOW
                       decisionId: AUTH-001
-                      permissionVersion: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 deny:
                   summary: 拒绝（HTTP200也不得放行）
                   value:
@@ -6568,7 +6320,6 @@ paths:
                       allowed: false
                       reasonCode: NO_EFFECTIVE_MENU_PERMISSION
                       decisionId: AUTH-002
-                      permissionVersion: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         '400':
           description: 参数无效
           content:
@@ -6948,9 +6699,6 @@ paths:
                               type: string
                             allowed:
                               type: boolean
-                            permissionVersion:
-                              type: string
-                              description: 本次规范化事实证据SHA-256摘要，不是缓存发布版本
                             occurredAt:
                               type: string
                               format: date-time
@@ -6960,7 +6708,6 @@ paths:
                           - apiId
                           - decisionId
                           - occurredAt
-                          - permissionVersion
                           - userId
                       page:
                         type: integer
@@ -6992,7 +6739,6 @@ paths:
                     userId: '101'
                     apiId: '41'
                     allowed: true
-                    permissionVersion: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                     occurredAt: '2026-10-12T10:00:00+08:00'
                   page: 1
                   pageSize: 20
@@ -7203,9 +6949,6 @@ paths:
                         type: string
                       evidenceType:
                         type: string
-                      permissionVersion:
-                        type: string
-                        description: 本次规范化事实证据SHA-256摘要，不是缓存发布版本
                       integrityVerified:
                         type: boolean
                     additionalProperties: false
@@ -7213,7 +6956,6 @@ paths:
                     - eventId
                     - requestId
                     - evidenceType
-                    - permissionVersion
                     - integrityVerified
                 additionalProperties: false
                 required:
@@ -7229,7 +6971,6 @@ paths:
                   eventId: EV-001
                   requestId: req-demo
                   evidenceType: GRANT_CHANGE
-                  permissionVersion: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                   integrityVerified: true
         '400':
           description: 参数无效
@@ -7324,6 +7065,3 @@ x-development-baseline:
   smsSendIntervalSeconds: 60
   smsMaxAttempts: 5
   allOperationsRequired: true
-
-# 2026-10-16 task06: HR02/03/04仅契约修订，非本次人员接口实现。事件claim_token支持受控恢复，无自动接管；正式C/D缺失时安全拒绝。
-# 2026-10-16 task07: HR02/03/04已实现A侧编排并经MySQL/HTTP测试；真实C/D仍缺失，生产默认拒绝。三个接口PROCESSING为409，无202承诺；HR04 effectiveAt映射事件时间，不新增occurredAt必填。

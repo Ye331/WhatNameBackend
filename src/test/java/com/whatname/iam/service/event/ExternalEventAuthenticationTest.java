@@ -68,7 +68,7 @@ class ExternalEventAuthenticationTest {
     }
 
     @Test
-    void oaAuthorityLostAfterReceiptPreventsBusinessAndRecordsRejection() {
+    void oaAuthorityFailurePreventsEventRegistrationAndBusiness() {
         var f = new Fixture();
         doAnswer(
                         call -> {
@@ -92,52 +92,14 @@ class ExternalEventAuthenticationTest {
                                             return Map.of();
                                         }));
         assertEquals(ErrorCode.INVALID_SERVICE, error.errorCode());
-        assertEquals("REJECTED", f.row.get("status"));
+        assertNull(f.row);
         verify(f.repository, never()).applied(anyLong(), anyString());
         verifyNoInteractions(f.hr);
     }
 
-    @Test
-    void oaTerminalRecoveryUsesOnlyOaVerificationAndRecoveryAuthorization() {
-        var f = new Fixture();
-        var actor = actor("OA");
-        var command = command("OA_DECISION");
-        f.service.execute(actor, command, () -> Map.of("done", true));
-        clearInvocations(f.oa, f.hr);
-        assertEquals(
-                Map.of("done", true),
-                f.service.recover(
-                        actor,
-                        command,
-                        () -> {
-                            fail("Recovery must replay the committed result");
-                            return Map.of();
-                        }));
-        verify(f.oa).verifyTrustedEvent(actor, "OA_DECISION");
-        verify(f.oa).authorizeRecovery(actor, "OA_DECISION");
-        verifyNoInteractions(f.hr);
-    }
 
-    @Test
-    void hrTerminalRecoveryUsesOnlyHrVerificationAndRecoveryAuthorization() {
-        var f = new Fixture();
-        var actor = actor("HR");
-        var command = command("HR_EMPLOYEE");
-        f.service.execute(actor, command, () -> Map.of("done", true));
-        clearInvocations(f.oa, f.hr);
-        assertEquals(
-                Map.of("done", true),
-                f.service.recover(
-                        actor,
-                        command,
-                        () -> {
-                            fail("Recovery must replay the committed result");
-                            return Map.of();
-                        }));
-        verify(f.hr).verifyTrustedEvent(actor, "HR_EMPLOYEE");
-        verify(f.hr).authorizeRecovery(actor, "HR_EMPLOYEE");
-        verifyNoInteractions(f.oa);
-    }
+
+
 
     @Test
     void rejectedOaCallerNeverFallsBackToHr() {

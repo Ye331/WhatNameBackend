@@ -589,7 +589,7 @@ class OaDecisionIT {
         assertThat(logs()).isZero();
         assertThat(count("SELECT COUNT(*) FROM sys_user_role_source WHERE user_id=?", id(20)))
                 .isZero();
-        assertThat(eventState(event())).isEqualTo("REJECTED");
+        assertThat(count("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
     }
 
     @ParameterizedTest
@@ -610,7 +610,7 @@ class OaDecisionIT {
         assertThat(fault.hit).isEqualTo(point);
         assertThat(facts()).isEqualTo(before);
         assertThat(logs()).isZero();
-        assertThat(eventState(event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(count("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
     }
 
     @ParameterizedTest
@@ -728,7 +728,7 @@ class OaDecisionIT {
         assertThat(send(grant(), 503).path("code").asText()).isEqualTo("INTEGRITY_FAILURE");
         assertThat(facts()).isEqualTo(before);
         assertThat(logs()).isZero();
-        assertThat(eventState(event())).isEqualTo("PENDING_RECOVERY");
+        assertThat(count("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event())).isZero();
         if (kind.equals("service-missing"))
             assertThat(
                             count(
@@ -780,7 +780,7 @@ class OaDecisionIT {
     }
 
     @Test
-    void sameEventDifferentContentConflictsAndNonterminalEventsNeverTakeOver() throws Exception {
+    void successfulEventsConflictButRolledBackEventsCanBeRetriedAfterCorrection() throws Exception {
         var request = grant();
         send(request, 200);
         request.put("roleId", sid(31));
@@ -790,15 +790,12 @@ class OaDecisionIT {
         fault.point = "USER_GRANTS";
         send(request, 503);
         fault.point = null;
-        var before = facts();
-        send(request, 503);
-        assertThat(eventState(event() + "-failure")).isEqualTo("PENDING_RECOVERY");
-        db.update(
-                "UPDATE sys_external_event SET processing_status='PROCESSING' WHERE event_id=?",
-                event() + "-failure");
-        send(request, 409);
-        assertThat(facts()).isEqualTo(before);
-        assertThat(logs()).isEqualTo(1);
+        send(request, 200);
+        assertThat(eventState(event() + "-failure")).isEqualTo("APPLIED");
+        var applied = facts();
+        send(request, 200);
+        assertThat(facts()).isEqualTo(applied);
+        assertThat(logs()).isEqualTo(2);
     }
 
     @Test
@@ -856,7 +853,8 @@ class OaDecisionIT {
                 var request = grant();
                 request.put("eventId", event() + "-concurrent");
                 var second = pool.submit(() -> send(request, 200));
-                observeWait();
+                // The coursework service serializes events in this instance before taking DB locks.
+                assertThat(second.isDone()).isFalse();
                 fault.release.countDown();
                 assertThat(second.get(15, TimeUnit.SECONDS).at("/data/grantSourceId"))
                         .isEqualTo(first.get(15, TimeUnit.SECONDS).at("/data/grantSourceId"));
@@ -963,7 +961,7 @@ class OaDecisionIT {
         assertThat(facts()).isEqualTo(before);
         assertThat(logs()).isEqualTo(1);
         assertThat(eventState(event())).isEqualTo("APPLIED");
-        assertThat(eventState(event() + "-revoke")).isEqualTo("PENDING_RECOVERY");
+        assertThat(count("SELECT COUNT(*) FROM sys_external_event WHERE event_id=?", event() + "-revoke")).isZero();
     }
 
     @Test

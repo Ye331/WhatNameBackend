@@ -1,3 +1,5 @@
+> 当前验收按 [2026-10-23 课程作业简化范围](docs/COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
+
 # 统一权限管理系统
 
 Java 21 + Spring Boot + Spring Data JPA + MySQL，Vue 前端。Controller → Service → Repository 三层；RBAC0 功能权限与管理员任命、范围分别校验。
@@ -98,7 +100,7 @@ docker compose up -d --wait
 
 新库只执行 db/schema.sql；不要对现有数据库重复执行或删除 Docker 卷。
 
-正式性能指标（鉴权 ≤20ms）尚未测试，见 GUIDE 的已知限制。
+课堂验收记录实际耗时，不以原20ms或万人集中登录作为硬指标，见当前课程范围。
 
 
 ## 持久层与学习入口
@@ -114,3 +116,5 @@ docker compose up -d --wait
 姓名和手机号使用明文演示数据，响应返回 `realName`、`phone`，不做展示脱敏；不再配置 `IAM_DATA_KEY` 或 `IAM_PHONE_HMAC_KEY`。密码哈希、手机号唯一约束、权限及手机号防篡改签名、超级用户兜底均保留。此项隐私保护范围与原始需求 PDF 不同，演示请使用虚构数据。
 
 旧的空 Docker 数据库使用 [空库升级脚本](db/migrations/20261023-demo-identity.sql) 调整三张表，不需要删除 Docker 卷或重建其他表。脚本发现账号、短信或事件数据时会拒绝执行；已经有加密业务数据的数据库不能直接使用该脚本，需要另行解密迁移并重新签名。新库直接使用更新后的 `db/schema.sql`。
+
+现有演示库部署本次代码前，先手动备份，再执行 [课程范围迁移](db/migrations/20261023-coursework-scope.sql) 更新鉴权日志约束；新库使用当前 schema.sql。迁移不删除历史数据。
