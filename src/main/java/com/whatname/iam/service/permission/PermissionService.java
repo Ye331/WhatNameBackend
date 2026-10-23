@@ -288,7 +288,7 @@ public class PermissionService {
         result.put("parentId", Long.toString(number(menu, "parent_id")));
         result.put("menuCode", menu.get("menu_code"));
         result.put("menuName", menu.get("menu_name"));
-        result.put("menuType", number(menu, "menu_type"));
+        result.put("menuType", Math.toIntExact(number(menu, "menu_type")));
         result.put("path", menu.get("path"));
         result.put("navigationOnly", !granted);
         return result;
