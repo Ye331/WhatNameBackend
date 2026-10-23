@@ -27,7 +27,7 @@ import com.whatname.iam.dto.resource.ResourceResponses.UpdateMenuResult;
 import com.whatname.iam.entity.resource.ApiEntity;
 import com.whatname.iam.entity.resource.ApplicationEntity;
 import com.whatname.iam.entity.resource.MenuEntity;
-import com.whatname.iam.mapper.resource.ResourceMapper;
+import com.whatname.iam.repository.resource.ResourceRepository;
 import com.whatname.iam.service.admin.ManagementAccessService;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.DataSignatureService;
@@ -48,19 +48,19 @@ import java.util.Set;
 public class ResourceService {
     private static final Set<String> HTTP_METHODS =
             Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
-    private final ResourceMapper mapper;
+    private final ResourceRepository repository;
     private final ManagementAccessService access;
     private final DataSignatureService signatures;
     private final AuditService audit;
     private final String protectedAppCode;
 
     public ResourceService(
-            ResourceMapper mapper,
+            ResourceRepository repository,
             ManagementAccessService access,
             DataSignatureService signatures,
             AuditService audit,
             @Value("${iam.permission.management-app-code:IAM}") String protectedAppCode) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.access = access;
         this.signatures = signatures;
         this.audit = audit;
@@ -69,9 +69,9 @@ public class ResourceService {
 
     public PageResponse<ApplicationItem> listApplications(String bearer, PageRequest pageRequest) {
         access.requireRead(bearer, "IAM_RESOURCES_VIEW");
-        int total = mapper.countApplications();
+        int total = repository.countApplications();
         List<ApplicationItem> items =
-                mapper.listApplications(pageRequest.offset(), pageRequest.getPageSize()).stream()
+                repository.listApplications(pageRequest.offset(), pageRequest.getPageSize()).stream()
                         .map(
                                 app ->
                                         new ApplicationItem(
@@ -88,7 +88,7 @@ public class ResourceService {
             String bearer, CreateApplicationRequest request) {
         long actorId = access.requireLevelOneWrite(bearer, "IAM_RESOURCES_WRITE");
         String appCode = request.getAppCode().trim().toUpperCase(Locale.ROOT);
-        if (mapper.countApplicationCode(appCode, null) > 0) {
+        if (repository.countApplicationCode(appCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
         }
         ApplicationEntity entity = new ApplicationEntity();
@@ -96,7 +96,7 @@ public class ResourceService {
         entity.setAppName(request.getAppName().trim());
         entity.setAppDesc(request.getDescription().trim());
         entity.setStatus(1);
-        mapper.insertApplication(entity);
+        repository.insertApplication(entity);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, entity.getId());
         audit.resourceChange(
                 "RESOURCE",
@@ -137,7 +137,7 @@ public class ResourceService {
             update.setAppName(request.getAppName().trim());
         }
         update.setStatus(status);
-        mapper.updateApplication(update);
+        repository.updateApplication(update);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
         Map<String, Object> after = signatures.snapshot(SignedDataType.RESOURCE_APPLICATION, appId);
         audit.resourceChange(
@@ -157,7 +157,7 @@ public class ResourceService {
         access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         requireApplication(appId);
         List<MenuItem> menus =
-                mapper.listMenusByAppId(appId).stream()
+                repository.listMenusByAppId(appId).stream()
                         .map(
                                 menu ->
                                         new MenuItem(
@@ -189,7 +189,7 @@ public class ResourceService {
             }
         }
         String menuCode = request.getMenuCode().trim().toUpperCase(Locale.ROOT);
-        if (mapper.countMenuCode(appId, menuCode, null) > 0) {
+        if (repository.countMenuCode(appId, menuCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
         }
         MenuEntity entity = new MenuEntity();
@@ -201,7 +201,7 @@ public class ResourceService {
         entity.setPath(request.getPath().trim());
         entity.setApiRevision(1);
         entity.setStatus(1);
-        mapper.insertMenu(entity);
+        repository.insertMenu(entity);
         signatures.sign(SignedDataType.RESOURCE_MENU, entity.getId());
         signatures.sign(SignedDataType.MENU_APIS, entity.getId());
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
@@ -263,7 +263,7 @@ public class ResourceService {
         if (request.getMenuName() != null) {
             update.setMenuName(request.getMenuName().trim());
         }
-        mapper.updateMenu(update);
+        repository.updateMenu(update);
         signatures.sign(SignedDataType.RESOURCE_MENU, menuId);
         signatures.sign(SignedDataType.MENU_APIS, menuId);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
@@ -292,9 +292,9 @@ public class ResourceService {
         access.requireRead(bearer, "IAM_RESOURCES_VIEW");
         requireApplication(appId);
         String normalizedMethod = normalizeMethod(httpMethod, true);
-        long total = mapper.countApisByApp(appId, normalizedMethod);
+        long total = repository.countApisByApp(appId, normalizedMethod);
         List<ApiItem> items =
-                mapper
+                repository
                         .listApisByApp(
                                 appId,
                                 normalizedMethod,
@@ -333,7 +333,7 @@ public class ResourceService {
         entity.setCanonicalPath(canonical);
         entity.setHttpMethod(method);
         entity.setStatus(1);
-        mapper.insertApi(entity);
+        repository.insertApi(entity);
         signatures.sign(SignedDataType.RESOURCE_API, entity.getId());
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, appId);
         audit.resourceChange(
@@ -375,7 +375,7 @@ public class ResourceService {
         if (request.getApiName() != null) {
             update.setApiName(request.getApiName().trim());
         }
-        mapper.updateApi(update);
+        repository.updateApi(update);
         signatures.sign(SignedDataType.RESOURCE_API, apiId);
         signatures.sign(SignedDataType.RESOURCE_APPLICATION, existing.getAppId());
         Map<String, Object> after = signatures.snapshot(SignedDataType.RESOURCE_API, apiId);
@@ -398,7 +398,7 @@ public class ResourceService {
         if (menu.getMenuType() != 2) {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
         }
-        List<Long> apiIds = mapper.listApiIdsByMenuId(menuId);
+        List<Long> apiIds = repository.listApiIdsByMenuId(menuId);
         return new MenuApisResult(menuId, apiIds, RevisionUtils.toVersion(menu.getApiRevision()));
     }
 
@@ -420,7 +420,7 @@ public class ResourceService {
 
         List<Long> dedupApiIds = com.whatname.iam.common.util.IdUtils.distinct(request.getApiIds());
         if (!dedupApiIds.isEmpty()) {
-            List<ApiEntity> apis = mapper.listApisByIds(dedupApiIds);
+            List<ApiEntity> apis = repository.listApisByIds(dedupApiIds);
             if (apis.size() != dedupApiIds.size()) {
                 throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
             }
@@ -433,11 +433,11 @@ public class ResourceService {
         }
 
         Map<String, Object> before = signatures.snapshot(SignedDataType.MENU_APIS, menuId);
-        mapper.deleteMenuApis(menuId);
+        repository.deleteMenuApis(menuId);
         if (!dedupApiIds.isEmpty()) {
-            mapper.insertMenuApis(menuId, dedupApiIds);
+            repository.insertMenuApis(menuId, dedupApiIds);
         }
-        if (mapper.bumpMenuApiRevision(menuId, expectedRevision) != 1) {
+        if (repository.bumpMenuApiRevision(menuId, expectedRevision) != 1) {
             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
         }
         signatures.sign(SignedDataType.MENU_APIS, menuId);
@@ -471,7 +471,7 @@ public class ResourceService {
     }
 
     private ApplicationEntity requireApplication(long appId) {
-        ApplicationEntity entity = mapper.findApplicationById(appId);
+        ApplicationEntity entity = repository.findApplicationById(appId);
         if (entity == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -479,7 +479,7 @@ public class ResourceService {
     }
 
     private MenuEntity requireMenu(long menuId) {
-        MenuEntity menu = mapper.findMenuById(menuId);
+        MenuEntity menu = repository.findMenuById(menuId);
         if (menu == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -487,7 +487,7 @@ public class ResourceService {
     }
 
     private ApiEntity requireApi(long apiId) {
-        ApiEntity api = mapper.findApiById(apiId);
+        ApiEntity api = repository.findApiById(apiId);
         if (api == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -510,7 +510,7 @@ public class ResourceService {
 
     private void validateTemplateConflict(
             long appId, String method, String apiPath, Long excludeApiId) {
-        List<ApiEntity> existing = mapper.listApisByAppAndMethod(appId, method);
+        List<ApiEntity> existing = repository.listApisByAppAndMethod(appId, method);
         for (ApiEntity candidate : existing) {
             if (excludeApiId != null && excludeApiId.equals(candidate.getId())) {
                 continue;
@@ -528,7 +528,7 @@ public class ResourceService {
             if (current == menuId) {
                 return true;
             }
-            MenuEntity parent = mapper.findMenuById(current);
+            MenuEntity parent = repository.findMenuById(current);
             if (parent == null) {
                 throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
             }

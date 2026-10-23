@@ -5,7 +5,7 @@ public enum SignedDataType {
     USER_IDENTITY(
             "sys_user",
             "id",
-            "id,username,real_name_ciphertext,phone,phone_hash,password_hash,employee_no,dept_id,status,source,employment_type,password_initialized,session_version,grant_revision,hr_version,created_by,temp_reason"),
+            "id,username,real_name,phone,password_hash,employee_no,dept_id,status,source,employment_type,password_initialized,session_version,grant_revision,hr_version,created_by,temp_reason"),
     USER_GRANTS("sys_user", "id", "id,grant_revision"),
     ROLE_MENUS("sys_role", "id", "id,role_code,role_type,status,menu_revision"),
     RESOURCE_APPLICATION("sys_application", "id", "id,app_code,status"),

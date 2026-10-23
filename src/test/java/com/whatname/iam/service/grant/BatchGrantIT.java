@@ -150,13 +150,12 @@ class BatchGrantIT {
     private void insertUser(long user, long dept, int status) {
         jdbc.update(
                 "INSERT INTO"
-                    + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status)"
-                    + " VALUES(?,?,?,?,?,?,?,?,?)",
+                    + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status)"
+                    + " VALUES(?,?,?,?,?,?,?,?)",
                 user,
                 "batch_user_" + user,
                 "test-only-ciphertext",
-                "test-only-ciphertext",
-                String.format("%064x", user),
+                String.format("138%08d", user),
                 "test-only-unusable-hash",
                 dept,
                 3,
@@ -788,8 +787,7 @@ class BatchGrantIT {
                         user,
                         "bulk_" + user,
                         "test-only",
-                        "test-only",
-                        String.format("%064x", user),
+                        String.format("138%08d", user),
                         "test-only",
                         id(21)
                     });
@@ -797,8 +795,8 @@ class BatchGrantIT {
         }
         jdbc.batchUpdate(
                 "INSERT INTO"
-                    + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status)"
-                    + " VALUES(?,?,?,?,?,?,?,3,1)",
+                    + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status)"
+                    + " VALUES(?,?,?,?,?,?,3,1)",
                 users);
         long started = System.nanoTime();
         String batch = accepted("large", request(targets));

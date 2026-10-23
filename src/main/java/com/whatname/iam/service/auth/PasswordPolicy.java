@@ -33,7 +33,7 @@ public final class PasswordPolicy {
     /**
      * Username is required. Name pinyin and phone may be absent only when genuinely unavailable.
      * Caller supplies the full name pinyin and normalized full phone, not ciphertext or HMAC. Known
-     * fields must not be omitted to bypass checks. This class does not decrypt/transliterate.
+     * fields must not be omitted to bypass checks. This class does not transliterate.
      */
     public record IdentityContext(String username, String namePinyin, String phone) {
         @Override

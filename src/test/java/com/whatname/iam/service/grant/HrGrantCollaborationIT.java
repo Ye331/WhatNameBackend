@@ -12,9 +12,9 @@ import com.whatname.iam.common.security.*;
 import com.whatname.iam.dto.hr.HrRequests.*;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
+import com.whatname.iam.repository.event.ExternalEventRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.auth.PasswordHasher;
@@ -23,9 +23,6 @@ import com.whatname.iam.service.event.*;
 import com.whatname.iam.service.hr.*;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -83,35 +80,23 @@ class HrGrantCollaborationIT {
         r.add("spring.datasource.url", MYSQL::getJdbcUrl);
         r.add("spring.datasource.username", MYSQL::getUsername);
         r.add("spring.datasource.password", MYSQL::getPassword);
-        r.add("iam.security.data-key", () -> Base64.getEncoder().encodeToString(new byte[32]));
-        r.add(
-                "iam.security.phone-hmac-key",
-                () ->
-                        Base64.getEncoder()
-                                .encodeToString(
-                                        "12345678901234567890123456789012"
-                                                .getBytes(
-                                                        java.nio.charset.StandardCharsets.UTF_8)));
+
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Fault implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Fault extends com.whatname.iam.support.RepositoryProbe {
         volatile String point, hit;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
             if (point != null
-                    && ((point.equals("APPLIED") && id.endsWith("ExternalEventMapper.applied"))
-                            || (id.endsWith("SignatureMapper.save")
-                                    && point.equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
-                            || (id.endsWith("AuditMapper.insert")
+                    && ((point.equals("APPLIED") && id.endsWith("ExternalEventRepository.applied"))
+                            || (id.endsWith("SignatureRepository.save")
+                                    && point.equals(((Map<?, ?>) call.parameters()).get("type")))
+                            || (id.endsWith("AuditRepository.insert")
                                     && point.equals(
-                                            ((Map<?, ?>) call.getArgs()[1]).get("operation"))))) {
+                                            ((Map<?, ?>) call.parameters()).get("operation"))))) {
                 hit = point;
                 throw new IllegalStateException("fixture persistence failure");
             }
@@ -124,10 +109,9 @@ class HrGrantCollaborationIT {
     @Autowired AdminOrganizationLifecycle lifecycle;
     @Autowired AdminPolicyService policy;
     @Autowired DepartmentAccessService productionTrust;
-    @Autowired OrganizationWriteMapper org;
-    @Autowired UserAccountMapper users;
-    @Autowired ExternalEventMapper eventMapper;
-    @Autowired SensitiveDataCodec codec;
+    @Autowired OrganizationWriteRepository org;
+    @Autowired UserAccountRepository users;
+    @Autowired ExternalEventRepository eventMapper;
     @Autowired PasswordHasher passwords;
     @Autowired ObjectMapper json;
     @Autowired PlatformTransactionManager manager;
@@ -188,12 +172,12 @@ class HrGrantCollaborationIT {
         for (int u : List.of(10, 20, 21, 22))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,employee_no,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,employment_type,status,password_initialized,hr_version)"
-                        + " VALUES(?,?,?,'fixture','fixture',?,'fixture',?,1,1,1,1,1)",
+                        + " sys_user(id,username,employee_no,real_name,phone,password_hash,dept_id,source,employment_type,status,password_initialized,hr_version)"
+                        + " VALUES(?,?,?,'fixture',?,'fixture',?,1,1,1,1,1)",
                     id(u),
                     "U" + id(u),
                     "SG" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 10 ? 1 : u == 20 ? 2 : u == 21 ? 4 : 3));
         for (int u : List.of(10, 20, 21, 22))
             db.update(
@@ -373,7 +357,7 @@ class HrGrantCollaborationIT {
                         prepareManagement(actorId);
                     }
                 };
-        var events = new ExternalEventService(eventMapper, codec, port, json, manager, null);
+        var events = new ExternalEventService(eventMapper, port, json, manager, null);
         return new HrService(
                 events,
                 org,
@@ -382,7 +366,7 @@ class HrGrantCollaborationIT {
                 users,
                 identity,
                 new Participant(),
-                codec,
+
                 passwords,
                 Clock.systemUTC());
     }

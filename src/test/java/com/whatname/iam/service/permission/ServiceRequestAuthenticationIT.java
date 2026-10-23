@@ -9,7 +9,8 @@ import com.whatname.iam.service.event.TrustedEventContext;
 
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.function.Executable;
-import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,7 +50,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 class ServiceRequestAuthenticationIT {
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({"com.whatname.iam.mapper.service", "com.whatname.iam.mapper.permission"})
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({"com.whatname.iam.repository.service", "com.whatname.iam.repository.permission"})
     @Import({
         ServiceRequestAuthenticator.class,
         NonceStore.class,

@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.web.RequestIdFilter;
-import com.whatname.iam.mapper.audit.AuditMapper;
+import com.whatname.iam.repository.audit.AuditRepository;
 import com.whatname.iam.service.permission.DataSignatureService;
 
 import org.junit.jupiter.api.*;
@@ -20,9 +20,9 @@ import java.util.*;
 import java.util.stream.Stream;
 
 class AuditServiceTest {
-    private final AuditMapper mapper = mock(AuditMapper.class);
+    private final AuditRepository repository = mock(AuditRepository.class);
     private final DataSignatureService signatures = mock(DataSignatureService.class);
-    private final AuditService service = new AuditService(mapper, signatures);
+    private final AuditService service = new AuditService(repository, signatures);
 
     @AfterEach
     void clearRequestId() {
@@ -33,7 +33,7 @@ class AuditServiceTest {
     @ValueSource(
             strings = {
                 "password",
-                "real_name_ciphertext",
+                "real_name",
                 "phone",
                 "credential",
                 "private_key",
@@ -43,7 +43,7 @@ class AuditServiceTest {
     void sensitiveFieldsNestedInListsAreNeverWritten(String field) {
         var evidence = Map.<String, Object>of("changes", List.of(Map.of(field, "secret")));
         failure(ErrorCode.AUDIT_UNAVAILABLE, () -> change(evidence));
-        verifyNoInteractions(mapper, signatures);
+        verifyNoInteractions(repository, signatures);
     }
 
     @ParameterizedTest(name = "{0}/{1}/{2}")
@@ -52,7 +52,7 @@ class AuditServiceTest {
         failure(
                 ErrorCode.INVALID_ARGUMENT,
                 () -> service.change(operation, 1L, target, 2L, event, Map.of()));
-        verifyNoInteractions(mapper, signatures);
+        verifyNoInteractions(repository, signatures);
     }
 
     static Stream<Arguments> invalidMetadata() {
@@ -77,7 +77,7 @@ class AuditServiceTest {
         evidence.put("before", null);
         change(evidence);
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(mapper).insert(captor.capture());
+        verify(repository).insert(captor.capture());
         var entry = captor.getValue();
         if ("safe-request_1".equals(requestId)) assertEquals(requestId, entry.get("requestId"));
         else assertDoesNotThrow(() -> UUID.fromString((String) entry.get("requestId")));
@@ -93,13 +93,13 @@ class AuditServiceTest {
     void sealingFailureDoesNotWriteAnUnsealedRecord() {
         when(signatures.seal(anyMap())).thenThrow(new IllegalStateException("signing unavailable"));
         failure(ErrorCode.AUDIT_UNAVAILABLE, () -> change(Map.of("reason", "approved")));
-        verifyNoInteractions(mapper);
+        verifyNoInteractions(repository);
     }
 
     @Test
     void databaseFailureIsReportedAsAuditUnavailable() {
         when(signatures.seal(anyMap())).thenReturn(Map.of("keyId", "test"));
-        doThrow(new IllegalStateException("database unavailable")).when(mapper).insert(anyMap());
+        doThrow(new IllegalStateException("database unavailable")).when(repository).insert(anyMap());
         failure(ErrorCode.AUDIT_UNAVAILABLE, () -> change(Map.of()));
     }
 
@@ -107,7 +107,7 @@ class AuditServiceTest {
     void oversizedEvidenceIsNotInserted() {
         when(signatures.seal(anyMap())).thenReturn(Map.of("keyId", "test"));
         failure(ErrorCode.AUDIT_UNAVAILABLE, () -> change(Map.of("reason", "x".repeat(1_000_001))));
-        verifyNoInteractions(mapper);
+        verifyNoInteractions(repository);
     }
 
     @Test
@@ -115,14 +115,14 @@ class AuditServiceTest {
         when(signatures.seal(anyMap())).thenReturn(Map.of("keyId", "test"));
         service.resourceChange("ROLE", "ROLE_UPDATE", 1, 2, "reason", null, null, null);
         service.resourceChange("ROLE", "ROLE_UPDATE", 1, 2, "reason", Map.of(), Map.of(), Map.of());
-        verify(mapper, times(2)).insert(anyMap());
+        verify(repository, times(2)).insert(anyMap());
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, 3})
     void unsupportedLoginTypesAreRejected(int type) {
         failure(ErrorCode.INVALID_ARGUMENT, () -> service.login(1L, type, true, null));
-        verifyNoInteractions(mapper);
+        verifyNoInteractions(repository);
     }
 
     @Test
@@ -130,12 +130,12 @@ class AuditServiceTest {
         failure(
                 ErrorCode.INVALID_ARGUMENT,
                 () -> service.login(1L, 1, false, "contains private detail"));
-        doThrow(new IllegalStateException()).when(mapper).login(1L, 2, 0, "INVALID_CREDENTIALS");
+        doThrow(new IllegalStateException()).when(repository).login(1L, 2, 0, "INVALID_CREDENTIALS");
         failure(
                 ErrorCode.AUDIT_UNAVAILABLE,
                 () -> service.login(1L, 2, false, "INVALID_CREDENTIALS"));
         service.login(1L, 1, true, null);
-        verify(mapper).login(1L, 1, 1, null);
+        verify(repository).login(1L, 1, 1, null);
     }
 
     private void change(Map<String, Object> evidence) {

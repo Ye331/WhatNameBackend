@@ -1,7 +1,7 @@
 package com.whatname.iam.service.grant;
 
 import com.whatname.iam.entity.grant.GrantData.*;
-import com.whatname.iam.mapper.grant.GrantMapper;
+import com.whatname.iam.repository.grant.GrantRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.support.Fakes;
 
@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 /** 内存数据库替身；SQL、锁与回滚由 GrantIT 单独验证。 */
-public class GrantTestFixture implements GrantMapper {
+public class GrantTestFixture implements GrantRepository {
     public int insertOaSource(long userId, long roleId, String approvalId) {
         throw new UnsupportedOperationException("OA uses MySQL integration tests");
     }

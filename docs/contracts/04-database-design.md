@@ -1,6 +1,8 @@
+> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
+
 # 数据库设计说明
 
-版本：v3.1。MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。对应课程功能完整版本，Controller → Service → Mapper，MyBatis访问数据库，不增加DAO，不使用Redis或消息队列。
+版本：v3.1。MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。对应课程功能完整版本，Controller → Service → Repository，Spring Data JPA访问数据库，不增加DAO，不使用Redis或消息队列。
 
 RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并集。不引入角色继承、显式禁止、权限自动过期。当前移除原sys_permission_revision和sys_deny_fence，授权事实、签名与关键审计同事务；M6每次独立请求读取MySQL主库当前一致视图。20ms/50ms和约一万人集中登录仍是待实测目标，不视为当前已通过。
 
@@ -172,9 +174,8 @@ CHECK约束：`ck_api_status`、`ck_api_method`；完整布尔条件见建表SQL
 |---|---|---|
 | `id` | `BIGINT NOT NULL AUTO_INCREMENT` | 用户ID |
 | `username` | `VARCHAR(64) NOT NULL` | 用户名 |
-| `real_name_ciphertext` | `VARCHAR(512) NOT NULL` | 姓名AES-GCM密文，界面授权解密展示 |
-| `phone` | `VARCHAR(256) NOT NULL` | 规范化手机号AES-GCM密文，界面脱敏 |
-| `phone_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 规范化手机号HMAC-SHA256查询索引 |
+| `real_name` | `VARCHAR(64) NOT NULL` | 演示姓名，明文保存 |
+| `phone` | `VARCHAR(11) NOT NULL` | 规范化演示手机号，唯一索引，明文保存 |
 | `password_hash` | `VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 带盐scrypt密码哈希编码，不可逆 |
 | `employee_no` | `VARCHAR(64) DEFAULT NULL` | 工号 |
 | `dept_id` | `BIGINT NOT NULL` | 所属部门ID |
@@ -198,7 +199,7 @@ CHECK约束：`ck_api_status`、`ck_api_method`；完整布尔条件见建表SQL
 - `PRIMARY KEY (`id`)`。
 - `UNIQUE KEY `uk_username` (`username`)`。
 - `UNIQUE KEY `uk_employee_no` (`employee_no`)`。
-- `UNIQUE KEY `uk_phone_hash` (`phone_hash`)`。
+- `UNIQUE KEY `uk_phone` (`phone`)`。
 - `KEY `idx_dept_id` (`dept_id`)`。
 - `KEY `idx_status` (`status`)`。
 
@@ -451,7 +452,7 @@ CHECK约束：`ck_urs_type`、`ck_urs_dept`、`ck_urs_status`、`ck_urs_revoke`�
 
 ### 2.16 `sys_external_event` — HR/OA外部事件幂等与阶段记录表
 
-事件接收可独立提交；业务事实、签名、审计和APPLIED结果在单个事务提交。输入加密保存用于恢复；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
+事件接收可独立提交；业务事实、签名、审计和APPLIED结果在单个事务提交。输入 JSON 明文保存用于重复请求核对；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -465,7 +466,7 @@ CHECK约束：`ck_urs_type`、`ck_urs_dept`、`ck_urs_status`、`ck_urs_revoke`�
 | `target_ref` | `VARCHAR(64) DEFAULT NULL` | 目标外部标识：SG号或部门编码 |
 | `processing_status` | `VARCHAR(20) NOT NULL DEFAULT 'PROCESSING'` | 处理阶段：APPLIED/PROCESSING/PENDING_RECOVERY/REJECTED |
 | `processing_stage` | `VARCHAR(32) NOT NULL DEFAULT 'RECEIVED'` | RECEIVED/APPLYING/COMPLETED，业务事实在单个事务应用 |
-| `payload_ciphertext` | `MEDIUMTEXT NOT NULL` | 规范化输入加密保存，恢复重放使用，禁止保存明文手机号 |
+| `payload_json` | `MEDIUMTEXT NOT NULL` | 规范化输入 JSON 明文保存，供重复请求核对 |
 | `result_data` | `JSON DEFAULT NULL` | 可重放的业务结果；脱敏，不含密码、验证码或完整JWT |
 | `result_summary` | `VARCHAR(512) DEFAULT NULL` | 执行结果或失败原因摘要 |
 | `occurred_at` | `DATETIME DEFAULT NULL` | 业务事件时间 |
@@ -488,7 +489,7 @@ CHECK约束：`ck_ee_status`、`ck_ee_version`、`ck_ee_stage`；完整布尔条
 | 字段 | 定义 | 含义 |
 |---|---|---|
 | `id` | `BIGINT NOT NULL AUTO_INCREMENT` | 主键 |
-| `phone_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 手机号HMAC-SHA256索引 |
+| `phone` | `VARCHAR(11) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 规范化演示手机号 |
 | `purpose` | `VARCHAR(32) NOT NULL` | 用途：SET_PASSWORD首次设密 / RESET_PASSWORD重置；不设LOGIN |
 | `code_hash` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | 验证码HMAC-SHA256，不保存明文 |
 | `expires_at` | `DATETIME NOT NULL` | 过期时间 |
@@ -499,7 +500,7 @@ CHECK约束：`ck_ee_status`、`ck_ee_version`、`ck_ee_stage`；完整布尔条
 索引：
 
 - `PRIMARY KEY (`id`)`。
-- `KEY `idx_phone_purpose` (`phone_hash`, `purpose`)`。
+- `KEY `idx_phone_purpose` (`phone`, `purpose`)`。
 
 CHECK约束：`ck_sms_purpose`、`ck_sms_attempts`；完整布尔条件见建表SQL。
 
@@ -673,14 +674,14 @@ CHECK约束：`ck_item_status`、`ck_item_attempts`、`ck_item_source`、`ck_ite
 - 每次鉴权开启新事务，以主库REPEATABLE READ一致视图完成状态、来源、菜单、API和验签；鉴权审计同步提交后返回。变更成功后开始读取的新请求必须读到新状态；已建立旧快照的在途请求不追溯取消。
 - 管理写操作事务内复核功能权限和M5范围，支持判定的相关行按统一顺序加锁；用户角色来源增删与有效关联、grant_revision、签名、审计同事务。
 - 调岗来源回收与部门更新同事务；离职将来源置回收、移除当前角色、递增会话版本并提交审计；复职不恢复旧来源。
-- HR/OA接收记录保存加密输入、摘要和结果；HR锁定目标hr_version比较，OA使用业务审批来源唯一性，不伪造HR版本。
+- HR/OA接收记录保存 JSON 输入、摘要和结果；HR锁定目标hr_version比较，OA使用业务审批来源唯一性，不伪造HR版本。
 - 批量任务接收与全部输入项同事务；项目业务与APPLIED同事务，启动及周期工作线程恢复PENDING项。计数按项目汇总，工作线程不需要Redis或消息队列。
 - 验证码核销与密码写入同事务；发送新码需锁定对应账号并核销同用途旧码，失败次数限额5次。nonce验签后独立原子插入，业务事务回滚不允许重放相同nonce。
 - 集合签名验证成员完整性；签名与事实同事务。日志request_params/response_result仅写允许字段，禁止整份凭据请求直接入库。
 
 ## 5. 建表、初始化与验证
 
-本脚本仅用于首次空库，不是旧库迁移。组织者统一管理迁移文件，不运行删除或清空既有数据库的命令。初始化由Service生成加密、HMAC、密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
+本脚本仅用于首次空库，不是旧库迁移。组织者统一管理迁移文件，不运行删除或清空既有数据库的命令。初始化由 Service 保存演示身份、生成密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
 
 测试数据至少包含两个业务系统（各3—4菜单）、本系统菜单/API、一级和部门管理员、多角色重叠、多授权来源、冻结部门和临时账号。备份仍每周全量、每日增量；篡改保全现场后人工恢复并重新验签。
 

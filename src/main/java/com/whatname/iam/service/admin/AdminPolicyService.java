@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.entity.admin.AdminData.Appointment;
-import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -23,8 +23,8 @@ public class AdminPolicyService {
     private final AdminRules rules;
     private final AdminIntegrity integrity;
 
-    public AdminPolicyService(AdminMapper mapper, AdminRules rules, AdminIntegrity integrity) {
-        this.loader = new AdminStateLoader(mapper);
+    public AdminPolicyService(AdminRepository repository, AdminRules rules, AdminIntegrity integrity) {
+        this.loader = new AdminStateLoader(repository);
         this.rules = rules;
         this.integrity = integrity;
     }

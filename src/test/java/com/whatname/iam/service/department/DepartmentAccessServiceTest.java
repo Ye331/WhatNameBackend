@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.*;
-import com.whatname.iam.mapper.service.ServiceIdentityMapper;
+import com.whatname.iam.repository.service.ServiceIdentityRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.auth.AuthService;
 import com.whatname.iam.service.event.TrustedEventContext;
@@ -28,7 +28,7 @@ class DepartmentAccessServiceTest {
     private final ManagementDataSecurity data = mock(ManagementDataSecurity.class);
     private final AdminOrganizationLifecycle lifecycle = mock(AdminOrganizationLifecycle.class);
     private final ServiceRequestAuthenticator services = mock(ServiceRequestAuthenticator.class);
-    private final ServiceIdentityMapper identities = mock(ServiceIdentityMapper.class);
+    private final ServiceIdentityRepository identities = mock(ServiceIdentityRepository.class);
     private final DepartmentAccessService access =
             new DepartmentAccessService(policy, jwt, auth, data, lifecycle, services, identities);
     private static final TrustedEventContext HR =

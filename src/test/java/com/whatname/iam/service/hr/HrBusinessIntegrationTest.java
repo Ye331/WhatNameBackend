@@ -11,7 +11,7 @@ import com.whatname.iam.controller.hr.HrController;
 import com.whatname.iam.dto.hr.HrRequests.*;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.auth.*;
 import com.whatname.iam.service.department.*;
 import com.whatname.iam.service.event.*;
@@ -22,7 +22,8 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -47,18 +48,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 class HrBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({
-        "com.whatname.iam.mapper.user",
-        "com.whatname.iam.mapper.auth",
-        "com.whatname.iam.mapper.department",
-        "com.whatname.iam.mapper.event"
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({
+        "com.whatname.iam.repository.user",
+        "com.whatname.iam.repository.auth",
+        "com.whatname.iam.repository.department",
+        "com.whatname.iam.repository.event"
     })
     @Import({
         HrService.class,
         HrController.class,
         DepartmentService.class,
         ExternalEventService.class,
-        SensitiveDataCodec.class,
         PasswordHasher.class,
         PasswordPolicy.class,
         JwtTokenService.class,
@@ -112,17 +113,17 @@ class HrBusinessIntegrationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({
-        "com.whatname.iam.mapper.user",
-        "com.whatname.iam.mapper.department",
-        "com.whatname.iam.mapper.event"
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({
+        "com.whatname.iam.repository.user",
+        "com.whatname.iam.repository.department",
+        "com.whatname.iam.repository.event"
     })
     @Import({
         HrService.class,
         HrController.class,
         DepartmentService.class,
         ExternalEventService.class,
-        SensitiveDataCodec.class,
         PasswordHasher.class,
         GlobalExceptionHandler.class,
         DepartmentAccessService.class,
@@ -435,9 +436,8 @@ class HrBusinessIntegrationTest {
                         Arrays.asList(
                                         u.id,
                                         u.username,
-                                        u.realNameCiphertext,
+                                        u.realName,
                                         u.phone,
-                                        u.phoneHash,
                                         u.passwordHash,
                                         u.employeeNo,
                                         u.deptId,
@@ -488,9 +488,9 @@ class HrBusinessIntegrationTest {
     ServletWebServerApplicationContext app;
     JdbcTemplate db;
     HrService hr;
-    UserAccountMapper users;
+    UserAccountRepository users;
     TestPort port;
-    SensitiveDataCodec codec;
+
     PasswordHasher passwords;
     AuthService auth;
     JwtTokenService jwt;
@@ -515,8 +515,6 @@ class HrBusinessIntegrationTest {
                         List.of(
                                 "--server.port=18087",
                                 "--server.address=127.0.0.1",
-                                "--iam.security.data-key=" + key(0),
-                                "--iam.security.phone-hmac-key=" + key(1),
                                 "--iam.security.sms-hmac-key=" + key(2),
                                 "--iam.security.jwt-private-key="
                                         + Base64.getEncoder()
@@ -535,9 +533,8 @@ class HrBusinessIntegrationTest {
                                 .run(TestDatabase.arguments(args.toArray(String[]::new)));
         db = app.getBean(JdbcTemplate.class);
         hr = app.getBean(HrService.class);
-        users = app.getBean(UserAccountMapper.class);
+        users = app.getBean(UserAccountRepository.class);
         port = app.getBean(TestPort.class);
-        codec = app.getBean(SensitiveDataCodec.class);
         passwords = app.getBean(PasswordHasher.class);
         auth = app.getBean(AuthService.class);
         jwt = app.getBean(JwtTokenService.class);
@@ -778,7 +775,7 @@ class HrBusinessIntegrationTest {
     }
 
     @Test
-    void firstUpsertUsesRealInitialsEncryptedDataAndUnknownPlaceholderOverHttp() throws Exception {
+    void firstUpsertStoresPlainDemoIdentityAndUnknownPasswordOverHttp() throws Exception {
         String sg = sg();
         Employee r = request(sg, 10, deptA, Action.UPSERT);
         JsonNode result = http("PUT", "/integrations/hr/employees/" + sg, r, 200);
@@ -790,9 +787,9 @@ class HrBusinessIntegrationTest {
         assertEquals(1, u.source);
         assertEquals(1, u.employmentType);
         assertEquals(0, u.passwordInitialized);
-        assertEquals(r.realName(), codec.decrypt(u.realNameCiphertext));
-        assertEquals(r.phone(), codec.decrypt(u.phone));
-        assertEquals(codec.phoneHash(r.phone()), u.phoneHash);
+        assertEquals(r.realName(), (u.realName));
+        assertEquals(r.phone(), (u.phone));
+        assertEquals((r.phone()), u.phone);
         assertEquals(
                 PasswordHasher.VerificationResult.MISMATCH,
                 passwords.verify("SomePassword92!", u.passwordHash));
@@ -806,11 +803,11 @@ class HrBusinessIntegrationTest {
         assertFalse(result.toString().contains(r.phone()));
         String payload =
                 db.queryForObject(
-                        "SELECT payload_ciphertext FROM sys_external_event WHERE event_id=?",
+                        "SELECT payload_json FROM sys_external_event WHERE event_id=?",
                         String.class,
                         r.eventId());
-        assertTrue(payload.startsWith("gcm1:"));
-        assertFalse(payload.contains(r.phone()));
+        assertTrue(payload.startsWith("{"));
+        assertTrue(payload.contains(r.phone()));
         http(
                 "POST",
                 "/auth/login",
@@ -852,7 +849,7 @@ class HrBusinessIntegrationTest {
         assertEquals(u.sessionVersion, after.sessionVersion);
         assertEquals(2, after.employmentType);
         assertEquals(20, after.hrVersion);
-        assertEquals(r.realName(), codec.decrypt(after.realNameCiphertext));
+        assertEquals(r.realName(), (after.realName));
     }
 
     private void assertExactSgNoLookup() {
@@ -1016,10 +1013,10 @@ class HrBusinessIntegrationTest {
             assertEquals(
                     0,
                     db.queryForObject(
-                            "SELECT COUNT(*) FROM sys_user WHERE phone_hash IN (?,?)",
+                            "SELECT COUNT(*) FROM sys_user WHERE phone IN (?,?)",
                             Integer.class,
-                            codec.phoneHash(create.phone()),
-                            codec.phoneHash(update.phone())));
+                            (create.phone()),
+                            (update.phone())));
             http("PUT", "/integrations/hr/employees/" + u.employeeNo, update, 422);
             assertEquals(before, facts(u));
         }
@@ -1042,7 +1039,7 @@ class HrBusinessIntegrationTest {
                         3L,
                         sg,
                         r.realName(),
-                        codec.decrypt(u.phone),
+                        (u.phone),
                         deptA,
                         Action.UPSERT,
                         EmploymentType.FORMAL,
@@ -1513,7 +1510,7 @@ class HrBusinessIntegrationTest {
                 new HrService(
                         app.getBean(ExternalEventService.class),
                         app.getBean(
-                                com.whatname.iam.mapper.department.OrganizationWriteMapper.class),
+                                com.whatname.iam.repository.department.OrganizationWriteRepository.class),
                         app.getBean(DepartmentService.class),
                         port,
                         users,
@@ -1523,7 +1520,7 @@ class HrBusinessIntegrationTest {
                                 invocation -> {
                                     throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
                                 }),
-                        codec,
+
                         passwords,
                         clock);
         expect(

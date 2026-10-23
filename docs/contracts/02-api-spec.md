@@ -1,3 +1,5 @@
+> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
+
 # 统一权限管理系统：API 接口设计规范
 
 ## 1. 模块归属、契约边界
@@ -28,7 +30,7 @@
 | 请求追踪 | `X-Request-Id` 可选；无值由服务端生成，关联业务、鉴权和审计 |
 | 幂等 | HR/OA 必须有 `(sourceSystem,eventId)` 唯一记录；批量请求必须用 `Idempotency-Key`；HR/OA以事件键为业务幂等依据；普通授予以稳定来源键判定重复，全量替换以集合版本保护 |
 | 并发 | 全量集合替换使用 `expectedVersion`；版本来源为各表修订号（`api_revision`、`menu_revision`、`delegable_revision`）；用户授权使用 `sys_user.grant_revision` |
-| 数据展示 | 姓名按查看资格解密，手机号默认掩码；不返回密码哈希、验证码、完整 JWT（登录时返回 accessToken 是必要例外）或密钥 |
+| 数据展示 | 姓名、手机号按查看资格返回完整演示值；不返回密码哈希、验证码、完整 JWT（登录时返回 accessToken 是必要例外）或密钥 |
 | 外部服务错误 | 事务未提交不得返回业务已生效；按 `processingStatus` 显示 `APPLIED`、`PROCESSING`、`PENDING_RECOVERY`、`REJECTED` |
 
 **成功响应**（普通查询或已完成业务操作）：
@@ -103,7 +105,7 @@
 
 ### 2.4 本期已冻结的开发口径
 
-Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口纳入本期实现范围；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，原性能目标留待实测。功能权限与M5范围在写入事务中加锁复核。
+Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部56项接口纳入本期实现范围；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，原性能目标留待实测。功能权限与M5范围在写入事务中加锁复核。
 
 - JWT有效期3600秒，携带sv；注销当前jti，重置/暂停/离职递增session_version。
 - 短信码5分钟、间隔60秒、最多5次；重新发送撤销同用途旧码，验证码与密码更新事务核销。演示通过独立模拟发送通道，正式HTTP响应不返回验证码。
@@ -261,7 +263,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 
 | 字段 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `phone` | body | `string` | 是 | 完整手机号，仅 HTTPS 输入并加密保存 |
+| `phone` | body | `string` | 是 | 规范化演示手机号，明文保存 |
 | `purpose` | body | `string` | 是 | 验证码用途：SET_PASSWORD / RESET_PASSWORD |
 
 **请求体示例**：
@@ -295,7 +297,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 
 | 字段 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `phone` | body | `string` | 是 | 完整手机号，仅 HTTPS 输入并加密保存 |
+| `phone` | body | `string` | 是 | 规范化演示手机号，明文保存 |
 | `code` | body | `string` | 是 | 一次性短信验证码 |
 | `newPassword` | body | `string` | 是 | 新密码，不得记录日志 |
 
@@ -331,7 +333,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 
 | 字段 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `phone` | body | `string` | 是 | 完整手机号，仅 HTTPS 输入并加密保存 |
+| `phone` | body | `string` | 是 | 规范化演示手机号，明文保存 |
 | `code` | body | `string` | 是 | 一次性短信验证码 |
 | `newPassword` | body | `string` | 是 | 新密码，不得记录日志 |
 
@@ -385,7 +387,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 #### US01 · `GET /api/v1/users` — 按管理范围查询用户
 
 - **调用方/权限**：管理端；`IAM_USERS_VIEW+M5_SCOPE`。
-- **处理与边界**：M6 检查功能权限、M5 将搜索限定至当前部门根及子树；关键字段经允许后解密、手机号只返回掩码。
+- **处理与边界**：M6 检查功能权限、M5 将搜索限定至当前部门根及子树；关键字段经范围授权和验签后返回明文演示值。
 - **主要数据**：sys_user、sys_dept。
 
 | 字段 | 位置 | 类型 | 必填 | 说明 |
@@ -412,7 +414,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
         "username": "zs",
         "sgNo": "SG000123",
         "realName": "示例用户",
-        "phoneMasked": "138****0000",
+        "phone": "13800000000",
         "deptId": "17",
         "status": 1,
         "passwordInitialized": true,
@@ -429,7 +431,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 **典型错误**：`INVALID_ARGUMENT`(400：枚举/类型/分页/ID/关键词长度)、`INVALID_TOKEN`(401：缺失/失效会话)、`PERMISSION_DENIED`/`OUT_OF_SCOPE`(403)、必要可信依赖失败503。
 
 
-**10实现差异说明**：status/source与keyword/deptId均取当前M5范围交集，items/total共用SQL谓词；keyword最长64字符。当前只支持用户名/SG号子串、完整规范化手机号HMAC精确匹配；原文“搜索关键词，受限字段搜索”及keyword=张示例保留，姓名包含搜索尚无已确认的安全可分页方案，仍未完成。响应UserView还含passwordInitialized与source，非HR账号sgNo为null。
+**10实现差异说明**：status/source与keyword/deptId均取当前M5范围交集，items/total共用SQL谓词；keyword最长64字符。当前只支持用户名/SG号子串、完整规范化规范化手机号精确匹配；原文“搜索关键词，受限字段搜索”及keyword=张示例保留，姓名包含搜索尚无已确认的安全可分页方案，仍未完成。响应UserView还含passwordInitialized与source，非HR账号sgNo为null。
 
 #### US02 · `GET /api/v1/users/{userId}` — 查询用户详情
 
@@ -454,7 +456,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
     "username": "zs",
     "sgNo": "SG000123",
     "realName": "示例用户",
-    "phoneMasked": "138****0000",
+    "phone": "13800000000",
     "deptId": "17",
     "status": 1,
     "passwordInitialized": true,
@@ -477,8 +479,8 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 
 | 字段 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `realName` | body | `string` | 是 | 姓名，加密入库 |
-| `phone` | body | `string` | 是 | 完整手机号，仅 HTTPS 输入并加密保存 |
+| `realName` | body | `string` | 是 | 演示姓名，明文入库 |
+| `phone` | body | `string` | 是 | 规范化演示手机号，明文保存 |
 | `deptId` | body | `string` | 是 | 内部部门主键，字符串 |
 | `reason` | body | `string` | 是 | 操作原因和审计依据 |
 
@@ -502,7 +504,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
     "userId": "301",
     "username": "temp301",
     "source": 2,
-    "phoneMasked": "138****0000",
+    "phone": "13800000000",
     "deptId": "17",
     "status": 1
   }
@@ -684,8 +686,8 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 | `eventId` | body | `string` | 是 | 外部唯一事件 ID |
 | `eventVersion` | body | `integer` | 是 | 人员/部门变更单调版本 |
 | `sgNo` | body | `string` | 是 | 人员 SG 稳定标识 |
-| `realName` | body | `string` | 是 | 姓名，加密入库 |
-| `phone` | body | `string` | 是 | 完整手机号，仅 HTTPS 输入并加密保存 |
+| `realName` | body | `string` | 是 | 演示姓名，明文入库 |
+| `phone` | body | `string` | 是 | 规范化演示手机号，明文保存 |
 | `deptCode` | body | `string` | 是 | HR 部门稳定外部编码，须唯一映射到 sys_dept.id |
 | `employeeAction` | body | `string` | 否 | UPSERT（默认）/REHIRE/SUSPEND/RESUME；暂停保留授权且旧会话失效，恢复不增角色且旧令牌持续无效；离职仅REHIRE且不恢复旧授权 |
 | `employmentType` | body | `string` | 是 | FORMAL 正式、OUTSOURCED 外包（固定枚举） |
@@ -2472,7 +2474,7 @@ Controller → Service → Mapper 三层，MyBatis + MySQL，全部56项接口�
 
 ## 7. 数据库适配与联调基线
 
-数据库v3.1共23张表，取消原缓存发布版本和栅栏表；补齐用户会话/授权/HR版本、部门HR版本、事件加密输入及结果、服务公钥/OA范围、nonce、批量任务和逐项结果。字段定义以数据库说明和建表SQL为准。
+数据库v3.1共23张表，取消原缓存发布版本和栅栏表；补齐用户会话/授权/HR版本、部门HR版本、事件 JSON 输入及结果、服务公钥/OA范围、nonce、批量任务和逐项结果。字段定义以数据库说明和建表SQL为准。
 
 内部Service协作在同一MySQL事务执行；跨功能写表通过负责模块的Service入口。外部HR/OA由测试请求模拟，短信使用可替换发送通道；这些能力均须演示完整成功及失败链路。部署地址、真实短信供应商账号、公私钥和环境密码属于部署配置，不阻塞课程功能开发，也不写入仓库。
 
@@ -2484,6 +2486,6 @@ DP01仍使用data.items平铺节点；范围外父ID表示为"0"，不返回dept
 
 组织写（新增/改挂/合并/冻结）在SERIALIZABLE事务中按主键全表FOR UPDATE，包含插入间隙；所有其他写入者必须遵循相同组织保护后检查merged_into_dept_id，不能凭外键存在放行。事件锁先于组织锁，再用户锁及C/D内部锁；避免内部Service用REQUIRES_NEW拆开签名/审计。
 
-事件同号同摘要APPLIED返回原脱敏结果；同号异摘要409；PROCESSING返回409 VERSION_CONFLICT，PENDING_RECOVERY返回503；REJECTED重放原拒绝码，不自动重试。显式受控recover须D授权、核对保留加密载荷并换claim_token隔离旧执行者；无自动超时接管/调度器。payload摘要规范化JSON键顺序，覆盖可信来源、类型、目标、版本、发生时间与业务内容，排除顶层nonce/requestId/signature/clientId/keyId/timestamp。OA可无版本。认领/失败独立事务，业务/签名/审计/APPLIED一次提交。
+事件同号同摘要APPLIED返回原脱敏结果；同号异摘要409；PROCESSING返回409 VERSION_CONFLICT，PENDING_RECOVERY返回503；REJECTED重放原拒绝码，不自动重试。显式受控recover须D授权、核对保留 JSON 载荷并换claim_token隔离旧执行者；无自动超时接管/调度器。payload摘要规范化JSON键顺序，覆盖可信来源、类型、目标、版本、发生时间与业务内容，排除顶层nonce/requestId/signature/clientId/keyId/timestamp。OA可无版本。认领/失败独立事务，业务/签名/审计/APPLIED一次提交。
 
 以上HR02动作与HR04未来时间属于已确认契约修订；本次任务06未实现HR02/03/04人员HTTP。

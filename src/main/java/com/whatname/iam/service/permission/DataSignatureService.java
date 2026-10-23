@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.DataSigningKeys;
-import com.whatname.iam.mapper.permission.SignatureMapper;
+import com.whatname.iam.repository.permission.SignatureRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -17,11 +17,11 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class DataSignatureService {
-    private final SignatureMapper mapper;
+    private final SignatureRepository repository;
     private final DataSigningKeys keys;
 
-    public DataSignatureService(SignatureMapper mapper, DataSigningKeys keys) {
-        this.mapper = mapper;
+    public DataSignatureService(SignatureRepository repository, DataSigningKeys keys) {
+        this.repository = repository;
         this.keys = keys;
     }
 
@@ -31,17 +31,17 @@ public class DataSignatureService {
             if (id != 0) throw new IllegalArgumentException("Organization signature ID is zero");
             facts.put(
                     "departments",
-                    mapper.organization().stream().map(row -> fields(row, type.fields)).toList());
+                    repository.organization().stream().map(row -> fields(row, type.fields)).toList());
         } else {
-            var row = mapper.record(type, id);
-            if (row == null) throw new BusinessException(INTEGRITY_FAILURE);
+            var row = repository.record(type, id);
+            if ((row == null || row.isEmpty())) throw new BusinessException(INTEGRITY_FAILURE);
             facts.putAll(fields(row, type.fields));
             switch (type) {
                 case USER_GRANTS -> {
-                    facts.put("roles", mapper.userRoles(id));
+                    facts.put("roles", repository.userRoles(id));
                     facts.put(
                             "sources",
-                            mapper.sources(id).stream()
+                            repository.sources(id).stream()
                                     .map(
                                             source ->
                                                     fields(
@@ -49,12 +49,12 @@ public class DataSignatureService {
                                                             "id,role_id,source_type,source_ref,source_dept_id,status"))
                                     .toList());
                 }
-                case ROLE_MENUS -> facts.put("menus", mapper.roleMenus(id));
-                case MENU_APIS -> facts.put("apis", mapper.menuApis(id));
-                case ADMIN_DELEGABLE_ROLES -> facts.put("roles", mapper.delegableRoles(id));
+                case ROLE_MENUS -> facts.put("menus", repository.roleMenus(id));
+                case MENU_APIS -> facts.put("apis", repository.menuApis(id));
+                case ADMIN_DELEGABLE_ROLES -> facts.put("roles", repository.delegableRoles(id));
                 case RESOURCE_APPLICATION -> {
-                    facts.put("menus", mapper.applicationMenus(id));
-                    facts.put("apis", mapper.applicationApis(id));
+                    facts.put("menus", repository.applicationMenus(id));
+                    facts.put("apis", repository.applicationApis(id));
                 }
                 default -> {}
             }
@@ -65,21 +65,8 @@ public class DataSignatureService {
     public void sign(SignedDataType type, long id) {
         try {
             String keyId = keys.getKeyId();
-            if (!keyId.matches("[A-Za-z0-9._-]{1,64}")) throw new GeneralSecurityException();
-            var factory = KeyFactory.getInstance("Ed25519");
-            var privateKey =
-                    factory.generatePrivate(
-                            new PKCS8EncodedKeySpec(
-                                    Base64.getDecoder().decode(keys.getPrivateKey())));
-            var snapshot = snapshot(type, id);
-            byte[] data = CanonicalEvidence.bytes(snapshot);
-            var signer = Signature.getInstance("Ed25519");
-            signer.initSign(privateKey);
-            signer.update(data);
-            byte[] signature = signer.sign();
-            if (!verifyBytes(data, signature, keyId))
-                throw new GeneralSecurityException("Key pair mismatch");
-            mapper.save(type.name(), id, Base64.getEncoder().encodeToString(signature), keyId);
+            byte[] signature = signBytes(CanonicalEvidence.bytes(snapshot(type, id)));
+            repository.save(type.name(), id, Base64.getEncoder().encodeToString(signature), keyId);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -87,10 +74,10 @@ public class DataSignatureService {
         }
     }
 
-    /** Safe evidence references, never ciphertext, password hashes, or the private key. */
+    /** Safe evidence references, never personal fields, password hashes, or the private key. */
     @Transactional(propagation = Propagation.MANDATORY, noRollbackFor = BusinessException.class)
     public Map<String, Object> verify(SignedDataType type, long id) {
-        var record = mapper.signature(type.name(), id);
+        var record = repository.signature(type.name(), id);
         return verifySnapshot(type, id, snapshot(type, id), record);
     }
 
@@ -110,13 +97,13 @@ public class DataSignatureService {
         if (ids.isEmpty()) return Map.of();
         var records = new HashMap<Long, Map<String, Object>>();
         var signed = new HashMap<Long, Map<String, Object>>();
-        mapper.records(type, ids)
+        repository.records(type, ids)
                 .forEach(row -> records.put(((Number) row.get("id")).longValue(), row));
-        mapper.signatures(type.name(), ids)
+        repository.signatures(type.name(), ids)
                 .forEach(row -> signed.put(((Number) row.get("data_id")).longValue(), row));
         var members = new HashMap<Long, List<Long>>();
         if (type == SignedDataType.MENU_APIS)
-            mapper.menuApiMembers(ids)
+            repository.menuApiMembers(ids)
                     .forEach(
                             row ->
                                     members.computeIfAbsent(
@@ -126,7 +113,7 @@ public class DataSignatureService {
         var result = new LinkedHashMap<Long, Map<String, Object>>();
         for (long id : ids) {
             var row = records.get(id);
-            if (row == null) throw new BusinessException(INTEGRITY_FAILURE);
+            if ((row == null || row.isEmpty())) throw new BusinessException(INTEGRITY_FAILURE);
             var facts = fields(row, type.fields);
             if (type == SignedDataType.MENU_APIS)
                 facts.put("apis", members.getOrDefault(id, List.of()));
@@ -144,7 +131,7 @@ public class DataSignatureService {
             Map<String, Object> snapshot,
             Map<String, Object> record) {
         try {
-            if (record == null || ((Number) record.get("sign_version")).intValue() != 1)
+            if ((record == null || record.isEmpty()) || ((Number) record.get("sign_version")).intValue() != 1)
                 throw new GeneralSecurityException();
             byte[] data = CanonicalEvidence.bytes(snapshot);
             String keyId = (String) record.get("key_id");
@@ -175,18 +162,7 @@ public class DataSignatureService {
     public Map<String, Object> seal(Map<String, Object> evidence) {
         try {
             String keyId = keys.getKeyId();
-            if (!keyId.matches("[A-Za-z0-9._-]{1,64}")) throw new GeneralSecurityException();
-            var key =
-                    KeyFactory.getInstance("Ed25519")
-                            .generatePrivate(
-                                    new PKCS8EncodedKeySpec(
-                                            Base64.getDecoder().decode(keys.getPrivateKey())));
-            var signer = Signature.getInstance("Ed25519");
-            signer.initSign(key);
-            signer.update(CanonicalEvidence.bytes(evidence));
-            byte[] signature = signer.sign();
-            if (!verifyBytes(CanonicalEvidence.bytes(evidence), signature, keyId))
-                throw new GeneralSecurityException();
+            byte[] signature = signBytes(CanonicalEvidence.bytes(evidence));
             return Map.of(
                     "keyId",
                     keyId,
@@ -210,6 +186,20 @@ public class DataSignatureService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** One signing path for both current records and historical evidence. */
+    private byte[] signBytes(byte[] data) throws GeneralSecurityException {
+        String keyId = keys.getKeyId();
+        if (!keyId.matches("[A-Za-z0-9._-]{1,64}")) throw new GeneralSecurityException();
+        var key = KeyFactory.getInstance("Ed25519").generatePrivate(
+                new PKCS8EncodedKeySpec(Base64.getDecoder().decode(keys.getPrivateKey())));
+        var signer = Signature.getInstance("Ed25519");
+        signer.initSign(key);
+        signer.update(data);
+        byte[] signature = signer.sign();
+        if (!verifyBytes(data, signature, keyId)) throw new GeneralSecurityException("Key pair mismatch");
+        return signature;
     }
 
     private boolean verifyBytes(byte[] data, byte[] signature, String keyId)

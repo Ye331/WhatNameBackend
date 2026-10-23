@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.audit.AuditMapper;
+import com.whatname.iam.repository.audit.AuditRepository;
 import com.whatname.iam.service.permission.*;
 
 import org.junit.jupiter.api.Test;
@@ -16,11 +16,11 @@ import org.junit.jupiter.params.provider.*;
 import java.util.*;
 
 class AuditQueryServiceTest {
-    private final AuditMapper mapper = mock(AuditMapper.class);
+    private final AuditRepository repository = mock(AuditRepository.class);
     private final PermissionReadScope scope = mock(PermissionReadScope.class);
     private final DataSignatureService signatures = mock(DataSignatureService.class);
     private final AuditQueryService service =
-            new AuditQueryService(mapper, scope, signatures, new ObjectMapper());
+            new AuditQueryService(repository, scope, signatures, new ObjectMapper());
 
     @ParameterizedTest
     @CsvSource({"0,20", "1000001,20", "1,0", "1,501"})
@@ -29,7 +29,7 @@ class AuditQueryServiceTest {
                 ErrorCode.INVALID_ARGUMENT,
                 () -> service.operations("token", false, null, page, size));
         failure(ErrorCode.INVALID_ARGUMENT, () -> service.logins("token", null, page, size));
-        verifyNoInteractions(mapper, scope);
+        verifyNoInteractions(repository, scope);
     }
 
     @Test
@@ -39,16 +39,16 @@ class AuditQueryServiceTest {
         assertEquals(List.of(), service.operations("token", false, null, 1, 20).get("items"));
         assertEquals(0L, service.logins("token", null, 1, 20).get("total"));
         failure(ErrorCode.RESOURCE_NOT_FOUND, () -> service.evidence("token", "1"));
-        verifyNoInteractions(mapper, signatures);
+        verifyNoInteractions(repository, signatures);
     }
 
     @Test
     void invisibleRecordIsNotLoadedOrVerified() {
         when(scope.departments("token", "IAM_AUDIT_VIEW"))
                 .thenReturn(new PermissionReadScope.Scope(Set.of(2L), false));
-        when(mapper.visible(1, Set.of(2L), false)).thenReturn(0);
+        when(repository.visible(1, Set.of(2L), false)).thenReturn(0);
         failure(ErrorCode.RESOURCE_NOT_FOUND, () -> service.evidence("token", "1"));
-        verify(mapper, never()).operation(anyLong());
+        verify(repository, never()).operation(anyLong());
         verifyNoInteractions(signatures);
     }
 

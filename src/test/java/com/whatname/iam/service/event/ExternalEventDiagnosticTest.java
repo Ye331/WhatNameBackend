@@ -11,8 +11,8 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.SensitiveDataCodec;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
+import com.whatname.iam.common.security.PhoneNumbers;
+import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.department.DepartmentAccessService;
 
 import org.junit.jupiter.api.Test;
@@ -82,11 +82,9 @@ class ExternalEventDiagnosticTest {
         private final ExternalEventService service;
 
         Fixture(boolean failRecord) {
-            var mapper = mock(ExternalEventMapper.class);
-            var codec = mock(SensitiveDataCodec.class);
-            when(codec.encrypt(anyString())).thenReturn("encrypted");
-            when(mapper.lock(anyString(), anyString())).thenAnswer(call -> row.get());
-            when(mapper.insert(
+            var repository = mock(ExternalEventRepository.class);
+            when(repository.lock(anyString(), anyString())).thenAnswer(call -> row.get());
+            when(repository.insert(
                             anyString(),
                             anyString(),
                             anyString(),
@@ -106,10 +104,10 @@ class ExternalEventDiagnosticTest {
                                 return 1;
                             });
             if (failRecord) {
-                when(mapper.failed(anyLong(), anyString(), anyString()))
+                when(repository.failed(anyLong(), anyString(), anyString()))
                         .thenThrow(new IllegalStateException("private-record-marker"));
             } else {
-                when(mapper.failed(anyLong(), anyString(), anyString()))
+                when(repository.failed(anyLong(), anyString(), anyString()))
                         .thenAnswer(
                                 call -> {
                                     row.get().put("status", call.getArgument(1));
@@ -118,8 +116,8 @@ class ExternalEventDiagnosticTest {
             }
             service =
                     new ExternalEventService(
-                            mapper,
-                            codec,
+                            repository,
+
                             mock(DepartmentAccessService.class),
                             new ObjectMapper(),
                             new MemoryTransactionManager(),

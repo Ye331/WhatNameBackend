@@ -17,9 +17,6 @@ import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -108,26 +105,22 @@ class GrantIntegrationIT {
                 () -> encoded(ED.getPublic().getEncoded()));
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Failure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Failure extends com.whatname.iam.support.RepositoryProbe {
         volatile String point;
         volatile String hit;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
-            if (("AUDIT".equals(point) && id.endsWith("AuditMapper.insert"))
+            if (("AUDIT".equals(point) && id.endsWith("AuditRepository.insert"))
                     || ("SIGN".equals(point)
-                            && id.endsWith("SignatureMapper.save")
-                            && "USER_GRANTS".equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
+                            && id.endsWith("SignatureRepository.save")
+                            && "USER_GRANTS".equals(((Map<?, ?>) call.parameters()).get("type")))
                     || ("ADMIN_SIGN".equals(point)
-                            && id.endsWith("SignatureMapper.save")
+                            && id.endsWith("SignatureRepository.save")
                             && "ADMIN_DELEGABLE_ROLES"
-                                    .equals(((Map<?, ?>) call.getArgs()[1]).get("type")))) {
+                                    .equals(((Map<?, ?>) call.parameters()).get("type")))) {
                 hit = point;
                 throw new IllegalStateException("test persistence failure");
             }
@@ -140,8 +133,8 @@ class GrantIntegrationIT {
     @Autowired AdminService admins;
     @Autowired AdminOrganizationLifecycle organization;
     @Autowired com.whatname.iam.service.department.DepartmentAccessService departmentAdapter;
-    @Autowired com.whatname.iam.mapper.department.OrganizationWriteMapper organizationMapper;
-    @Autowired com.whatname.iam.mapper.event.ExternalEventMapper eventMapper;
+    @Autowired com.whatname.iam.repository.department.OrganizationWriteRepository organizationMapper;
+    @Autowired com.whatname.iam.repository.event.ExternalEventRepository eventMapper;
     @Autowired AuditService auditService;
     @Autowired DataSignatureService signatures;
     @Autowired PermissionService permissions;
@@ -153,7 +146,7 @@ class GrantIntegrationIT {
     @Autowired BatchWorker worker;
     @Autowired BatchService batchService;
     @Autowired GrantOperations operations;
-    @Autowired com.whatname.iam.mapper.grant.BatchMapper batches;
+    @Autowired com.whatname.iam.repository.grant.BatchRepository batches;
     static final AtomicLong NEXT = new AtomicLong(1000);
     long b;
     String bearer;
@@ -191,11 +184,11 @@ class GrantIntegrationIT {
         for (int u : List.of(10, 11, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?, 'fixture','fixture',?,'fixture',?,3,1,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?, 'fixture',?,'fixture',?,3,1,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
@@ -682,7 +675,7 @@ class GrantIntegrationIT {
                     batches.insertBatch(
                             id(10),
                             "C2-BATCH",
-                            "0".repeat(64),
+                            "13800000000",
                             "GRANT",
                             id(30),
                             "batch fixture",
@@ -1148,7 +1141,6 @@ class GrantIntegrationIT {
         var events =
                 new com.whatname.iam.service.event.ExternalEventService(
                         eventMapper,
-                        new SensitiveDataCodec(encoded(key), encoded(hmac)),
                         port,
                         json,
                         manager,

@@ -6,7 +6,7 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.util.IdUtils;
 import com.whatname.iam.dto.grant.BatchDtos.*;
 import com.whatname.iam.entity.grant.BatchData;
-import com.whatname.iam.mapper.grant.BatchMapper;
+import com.whatname.iam.repository.grant.BatchRepository;
 import com.whatname.iam.service.admin.*;
 
 import org.slf4j.Logger;
@@ -22,7 +22,7 @@ import java.util.*;
 @Service
 public class BatchService {
     private static final Logger log = LoggerFactory.getLogger(BatchService.class);
-    private final BatchMapper mapper;
+    private final BatchRepository repository;
     private final AdminPolicyService policy;
     private final AdminRules rules;
     private final RequestSecurity security;
@@ -31,13 +31,13 @@ public class BatchService {
     private final TransactionTemplate read;
 
     public BatchService(
-            BatchMapper mapper,
+            BatchRepository repository,
             AdminPolicyService policy,
             AdminRules rules,
             RequestSecurity security,
             BatchRecoveryService recovery,
             PlatformTransactionManager manager) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.policy = policy;
         this.rules = rules;
         this.security = security;
@@ -60,10 +60,10 @@ public class BatchService {
                     tx -> {
                         policy.requireAdministrator(actor);
                         security.require(actor, "IAM_GRANTS_WRITE");
-                        var existing = mapper.byKey(actor, key);
+                        var existing = repository.byKey(actor, key);
                         if (existing != null) return replay(actor, input, existing);
                         policy.requireDelegableRole(actor, input.roleId());
-                        mapper.insertBatch(
+                        repository.insertBatch(
                                 actor,
                                 key,
                                 input.digest(),
@@ -71,7 +71,7 @@ public class BatchService {
                                 input.roleId(),
                                 input.reason(),
                                 input.targets().size());
-                        var batch = mapper.byKey(actor, key);
+                        var batch = repository.byKey(actor, key);
                         if (batch == null) throw new BusinessException(AUTH_STATE_UNAVAILABLE);
                         var items =
                                 input.targets().stream()
@@ -98,7 +98,7 @@ public class BatchService {
                                         .toList();
                         for (int offset = 0; offset < items.size(); offset += 500) {
                             var chunk = items.subList(offset, Math.min(offset + 500, items.size()));
-                            if (mapper.insertItems(chunk) != chunk.size())
+                            if (repository.insertItems(chunk) != chunk.size())
                                 throw new BusinessException(AUTH_STATE_UNAVAILABLE);
                         }
                         TransactionSynchronizationManager.registerSynchronization(
@@ -123,7 +123,7 @@ public class BatchService {
             return read.execute(
                     tx -> {
                         security.require(actor, "IAM_GRANTS_WRITE");
-                        var batch = mapper.byKey(actor, key);
+                        var batch = repository.byKey(actor, key);
                         if (batch == null) throw race;
                         return replay(actor, input, batch);
                     });
@@ -146,9 +146,9 @@ public class BatchService {
 
     private Result view(long actor, long batchId, int page, int size) {
         security.require(actor, "IAM_GRANTS_VIEW");
-        var batch = mapper.batch(batchId);
+        var batch = repository.batch(batchId);
         if (batch == null) throw new BusinessException(RESOURCE_NOT_FOUND);
-        var all = mapper.items(batchId);
+        var all = repository.items(batchId);
         var authority =
                 policy.requireBatchReadContext(
                         actor, all.stream().map(BatchData.Item::userId).toList());

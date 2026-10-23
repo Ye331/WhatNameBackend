@@ -1,9 +1,11 @@
+> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
+
 # 功能与代码阅读说明
 
 ## 一、实现边界
 
 - 一个 Spring Boot 后端、一个 Vue 管理前端、一套 MySQL 数据库。
-- Controller 接收参数；Service 实现业务步骤与事务；Mapper 执行 SQL。
+- Controller 接收参数；Service 实现业务步骤与事务；Repository 执行 SQL。
 - 不做角色继承、显式拒绝、角色先决约束、权限自动过期、微服务、消息队列或 Redis。
 - 签名、审计、事务、授权来源精确回收、事件幂等、批量任务持久化都来自详细设计（docs/contracts），属于业务要求，不是可删的重复代码。
 
@@ -54,7 +56,7 @@
 | `event/ExternalEventService` | HR/OA 事件的幂等与事务 |
 | `permission/ServiceApiCaller`、`ServiceOaCaller` | 业务系统、OA 的请求签名认证 |
 
-阅读顺序：Controller 看请求字段 → Service 按"校验 → 权限/范围 → 修改 → 签名/审计"读 → Mapper/XML 看改了哪些表 → 同名测试先看正常场景，再看拒绝与回滚。
+阅读顺序：Controller 看请求字段 → Service 按"校验 → 权限/范围 → 修改 → 签名/审计"读 → Repository 查询及自定义片段 看改了哪些表 → 同名测试先看正常场景，再看拒绝与回滚。
 
 ## 四、三条主流程
 
@@ -104,7 +106,7 @@
 ## 七、已知限制
 
 - **鉴权性能**：需求目标是鉴权 ≤20ms、上限 50ms，并提示"别把鉴权做成每次查库"。本项目出于安全考虑选择每次请求读库并验签、不使用缓存，以保证撤权立即生效、篡改立即发现。代价是单次鉴权需要多次查询和验签，尚未做正式性能测试，很可能达不到 20ms。答辩时应说明这一取舍。
-- 同样的原因，管理端查询也偏慢：在 1 万名员工的真实数据上，超级用户查询第一页用户列表约 3.6 秒（需要逐个验签范围内的账号）。整套初始化约 5 分钟（一次性操作）。
+- 历史版本测量中，1 万名员工数据的用户列表约 3.6 秒、整套初始化约 5 分钟。当前仍逐条验签，但已移除姓名、手机号加解密；历史数字不代表本轮性能，当前版本尚未重新做正式性能验收。
 - 当前管理写入采用较宽的固定加锁顺序，以保证并发正确性。
 - HR/OA 服务身份（`sys_service_identity`）需要按各自的公钥另行登记，初始化不生成。
 - 需求写的是"重名拼手机号后几位"，详细设计写的是"追加 SG 工号后六位"，实现按详细设计。
@@ -119,3 +121,12 @@
 | 平台编码 | 后端 `iam.permission.management-app-code` 与前端 `VITE_IAM_APP_CODE` 一致，默认 `IAM` |
 
 验证见 [测试说明](TESTING.md)，运行见 [README](../README.md)，设计原件见 [contracts](contracts/README.md)。
+
+
+## Spring Data JPA 持久层
+
+依赖 `spring-boot-starter-data-jpa`，由 `JpaConfig` 扫描实体和 Repository。普通部门查询使用 JPQL，探活使用声明式原生查询；复杂操作通过 `*RepositoryOperations` 与 `*RepositoryOperationsImpl` 组成 Spring Data 自定义片段。`JpaSqlSupport` 负责值绑定、原生结果快照转换、更新后的上下文清理和自增 ID 回填。
+
+业务事务由 Service 定义，Repository 加入事务。数据库结构仍由 `db/schema.sql` 管理，`ddl-auto=none`，关闭 Open EntityManager in View、二级缓存与查询缓存。原生结果快照不参与脏检查；JPQL 返回的受管实体则遵循 JPA 生命周期。初始化的 JDBC 操作共享 JPA 事务连接。
+
+学习入口见 [Spring Data JPA 与三层链路](../../学习手册/01-三层链路.md)。

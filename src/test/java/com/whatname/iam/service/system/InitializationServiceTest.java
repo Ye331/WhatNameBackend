@@ -80,10 +80,8 @@ class InitializationServiceTest {
         r.add(
                 "iam.security.data-signing.public-keys.init-test",
                 () -> b64(ED.getPublic().getEncoded()));
-        r.add("iam.security.data-key", () -> b64(new byte[32]));
         byte[] hmac = new byte[32];
         Arrays.fill(hmac, (byte) 7);
-        r.add("iam.security.phone-hmac-key", () -> b64(hmac));
     }
 
     @TempDir static Path dir;

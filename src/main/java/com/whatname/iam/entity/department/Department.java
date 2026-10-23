@@ -3,7 +3,11 @@ package com.whatname.iam.entity.department;
 import java.time.LocalDateTime;
 
 /** Current sys_dept row; database IDs and HR/development codes have different roles. */
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "sys_dept")
 public class Department {
+    @jakarta.persistence.Id
+    @jakarta.persistence.GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
     private Long id;
     private Long parentId;
     private String deptCode;

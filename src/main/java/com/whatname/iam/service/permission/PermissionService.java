@@ -6,7 +6,7 @@ import static com.whatname.iam.service.permission.SignedDataType.*;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.JwtTokenService;
 import com.whatname.iam.common.util.RouteTemplateUtils;
-import com.whatname.iam.mapper.permission.*;
+import com.whatname.iam.repository.permission.*;
 import com.whatname.iam.service.audit.AuditService;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -20,8 +20,8 @@ import java.util.*;
 
 @Service
 public class PermissionService {
-    private final SignatureMapper facts;
-    private final PermissionMapper mapper;
+    private final SignatureRepository facts;
+    private final PermissionRepository repository;
     private final DataSignatureService signatures;
     private final JwtTokenService jwt;
     private final AuditService audit;
@@ -29,15 +29,15 @@ public class PermissionService {
     private final TransactionTemplate decisions;
 
     public PermissionService(
-            SignatureMapper facts,
-            PermissionMapper mapper,
+            SignatureRepository facts,
+            PermissionRepository repository,
             DataSignatureService signatures,
             JwtTokenService jwt,
             AuditService audit,
             @Value("${iam.permission.management-app-code:IAM}") String managementApplication,
             PlatformTransactionManager transactions) {
         this.facts = facts;
-        this.mapper = mapper;
+        this.repository = repository;
         this.signatures = signatures;
         this.jwt = jwt;
         this.audit = audit;
@@ -62,7 +62,7 @@ public class PermissionService {
     /** 仅返回本人已验签的任命摘要，页面无需额外取得管理员列表权限。 */
     private Map<String, Object> ownManagement(long userId) {
         var appointment = facts.record(ADMIN, userId);
-        if (appointment == null) return Map.of("appointed", false);
+        if (appointment == null || appointment.isEmpty()) return Map.of("appointed", false);
         signatures.verify(ADMIN, userId);
         if (number(appointment, "status") != 1) return Map.of("appointed", false);
         return Map.of(
@@ -76,11 +76,11 @@ public class PermissionService {
     public long currentUser(String authorization) {
         var principal = jwt.verifyBearer(authorization);
         var user = facts.record(USER_IDENTITY, principal.userId());
-        if (user == null
+        if ((user == null || user.isEmpty())
                 || number(user, "status") != 1
                 || number(user, "password_initialized") != 1
                 || number(user, "session_version") != principal.sessionVersion()
-                || mapper.invalidated(principal.jti()) != 0)
+                || repository.invalidated(principal.jti()) != 0)
             throw new BusinessException(INVALID_TOKEN);
         signatures.verify(USER_IDENTITY, principal.userId());
         return principal.userId();
@@ -135,7 +135,7 @@ public class PermissionService {
             var view = calculate(userId, applicationId);
             evidence.putAll(view.evidence());
             var candidates =
-                    mapper.apis(applicationId).stream()
+                    repository.apis(applicationId).stream()
                             .filter(
                                     api ->
                                             method.equals(api.get("http_method"))
@@ -187,7 +187,7 @@ public class PermissionService {
     private long application(String appCode) {
         if (appCode == null || !appCode.matches("[A-Za-z0-9_-]{1,64}"))
             throw new BusinessException(INVALID_ARGUMENT);
-        Long id = mapper.applicationId(appCode);
+        Long id = repository.applicationId(appCode);
         if (id == null) throw new BusinessException(RESOURCE_NOT_FOUND);
         return id;
     }
@@ -197,10 +197,10 @@ public class PermissionService {
         var evidence = new LinkedHashMap<String, Object>();
         evidence.put("signatures", signatureEvidence);
         var user = facts.record(USER_IDENTITY, userId);
-        if (user == null) throw new BusinessException(RESOURCE_NOT_FOUND);
+        if ((user == null || user.isEmpty())) throw new BusinessException(RESOURCE_NOT_FOUND);
         signatureEvidence.add(signatures.verify(USER_IDENTITY, userId));
         var app = facts.record(RESOURCE_APPLICATION, applicationId);
-        if (app == null) throw new BusinessException(INVALID_SERVICE);
+        if ((app == null || app.isEmpty())) throw new BusinessException(INVALID_SERVICE);
         signatureEvidence.add(signatures.verify(RESOURCE_APPLICATION, applicationId));
         signatureEvidence.add(signatures.verify(ORGANIZATION, 0));
         var departments = new HashMap<Long, Map<String, Object>>();
@@ -229,7 +229,7 @@ public class PermissionService {
         evidence.put("role_permission", new ArrayList<>());
         evidence.put("menu_api", new ArrayList<>());
         var menus = new LinkedHashMap<Long, Map<String, Object>>();
-        mapper.menus(applicationId).forEach(menu -> menus.put(number(menu, "id"), menu));
+        repository.menus(applicationId).forEach(menu -> menus.put(number(menu, "id"), menu));
         var granted = new LinkedHashSet<Long>();
         if (number(user, "status") != 1
                 || number(user, "password_initialized") != 1
@@ -299,8 +299,8 @@ public class PermissionService {
             if (number(role, "status") != 1) continue;
             for (long menuId : menuIds) {
                 var menu = menus.get(menuId);
-                if (menu == null) menu = facts.record(RESOURCE_MENU, menuId);
-                if (menu == null) throw new BusinessException(INTEGRITY_FAILURE);
+                if ((menu == null || menu.isEmpty())) menu = facts.record(RESOURCE_MENU, menuId);
+                if ((menu == null || menu.isEmpty())) throw new BusinessException(INTEGRITY_FAILURE);
                 if (number(menu, "app_id") != applicationId) continue;
                 if (number(menu, "menu_type") != 2) throw new BusinessException(INTEGRITY_FAILURE);
                 var menuChain = chain(menus, menuId, "parent_id");
@@ -360,7 +360,7 @@ public class PermissionService {
         if (id <= 0) throw new BusinessException(INTEGRITY_FAILURE);
         while (id != 0) {
             var row = records.get(id);
-            if (row == null || !seen.add(id)) throw new BusinessException(INTEGRITY_FAILURE);
+            if ((row == null || row.isEmpty()) || !seen.add(id)) throw new BusinessException(INTEGRITY_FAILURE);
             result.add(row);
             id = number(row, parentField);
         }

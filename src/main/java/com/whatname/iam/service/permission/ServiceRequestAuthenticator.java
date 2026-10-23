@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 import static com.whatname.iam.service.permission.SignedDataType.SERVICE_IDENTITY;
 
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.service.ServiceIdentityMapper;
+import com.whatname.iam.repository.service.ServiceIdentityRepository;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentMap;
  */
 @Service
 public class ServiceRequestAuthenticator {
-    private final ServiceIdentityMapper identities;
+    private final ServiceIdentityRepository identities;
     private final NonceStore nonces;
     private final DataSignatureService signatures;
     private final Clock clock = Clock.systemUTC();
@@ -38,7 +38,7 @@ public class ServiceRequestAuthenticator {
             new ConcurrentHashMap<>();
 
     public ServiceRequestAuthenticator(
-            ServiceIdentityMapper identities, NonceStore nonces, DataSignatureService signatures) {
+            ServiceIdentityRepository identities, NonceStore nonces, DataSignatureService signatures) {
         this.identities = identities;
         this.nonces = nonces;
         this.signatures = signatures;
@@ -67,7 +67,7 @@ public class ServiceRequestAuthenticator {
 
         Map<String, Object> identity = identities.find(clientId);
         verifyIdentityFact(identity);
-        if (identity == null
+        if ((identity == null || identity.isEmpty())
                 || !(identity.get("status") instanceof Number status)
                 || status.intValue() != 1
                 || !requiredScope.equals(identity.get("allowed_scope")))
@@ -172,7 +172,7 @@ public class ServiceRequestAuthenticator {
 
     private void verifyIdentityFact(Map<String, Object> identity) {
         try {
-            if (identity == null
+            if ((identity == null || identity.isEmpty())
                     || !(identity.get("id") instanceof Number id)
                     || id.longValue() <= 0) throw new BusinessException(INVALID_SERVICE);
             signatures.verify(SERVICE_IDENTITY, id.longValue());

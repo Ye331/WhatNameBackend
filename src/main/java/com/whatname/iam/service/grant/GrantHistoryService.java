@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.INVALID_ARGUMENT;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.grant.GrantDtos.*;
-import com.whatname.iam.mapper.grant.GrantHistoryMapper;
+import com.whatname.iam.repository.grant.GrantHistoryRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditQueryService;
 
@@ -21,19 +21,19 @@ import java.util.*;
         propagation = Propagation.REQUIRES_NEW,
         isolation = Isolation.REPEATABLE_READ)
 public class GrantHistoryService {
-    private final GrantHistoryMapper mapper;
+    private final GrantHistoryRepository repository;
     private final AdminPolicyService policy;
     private final AdminRules rules;
     private final RequestSecurity security;
     private final AuditQueryService audit;
 
     public GrantHistoryService(
-            GrantHistoryMapper mapper,
+            GrantHistoryRepository repository,
             AdminPolicyService policy,
             AdminRules rules,
             RequestSecurity security,
             AuditQueryService audit) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.policy = policy;
         this.rules = rules;
         this.security = security;
@@ -58,7 +58,7 @@ public class GrantHistoryService {
         long offset = ((long) page - 1) * pageSize, total = 0;
         Long cursor = null;
         while (true) {
-            var rows = mapper.candidates(user, cursor, 200);
+            var rows = repository.candidates(user, cursor, 200);
             if (rows.isEmpty()) break;
             var targets =
                     rows.stream()

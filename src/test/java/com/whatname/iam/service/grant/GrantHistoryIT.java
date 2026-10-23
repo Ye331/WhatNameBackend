@@ -16,9 +16,6 @@ import com.whatname.iam.dto.grant.GrantDtos.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -106,23 +103,14 @@ class GrantHistoryIT {
                 () -> encoded(ED.getPublic().getEncoded()));
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "query",
-                    args = {
-                        MappedStatement.class,
-                        Object.class,
-                        org.apache.ibatis.session.RowBounds.class,
-                        org.apache.ibatis.session.ResultHandler.class
-                    }))
-    static class Failure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Failure extends com.whatname.iam.support.RepositoryProbe {
         volatile Runnable afterHistoryPage;
 
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
-            if (id.endsWith("GrantHistoryMapper.candidates") && afterHistoryPage != null) {
+            if (id.endsWith("GrantHistoryRepository.candidates") && afterHistoryPage != null) {
                 Runnable action = afterHistoryPage;
                 afterHistoryPage = null;
                 action.run();
@@ -145,7 +133,7 @@ class GrantHistoryIT {
     @Autowired GrantHistoryService historyService;
     @Autowired com.whatname.iam.service.audit.AuditQueryService auditQueries;
     @Autowired BatchService batchService;
-    @Autowired com.whatname.iam.mapper.grant.BatchMapper batches;
+    @Autowired com.whatname.iam.repository.grant.BatchRepository batches;
     static final AtomicLong NEXT = new AtomicLong(1000);
     long b;
     String bearer;
@@ -178,11 +166,11 @@ class GrantHistoryIT {
         for (int u : List.of(10, 11, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?, 'fixture','fixture',?,'fixture',?,3,1,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?, 'fixture',?,'fixture',?,3,1,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"

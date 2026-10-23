@@ -9,8 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.audit.AuditMapper;
-import com.whatname.iam.mapper.permission.SignatureMapper;
+import com.whatname.iam.repository.audit.AuditRepository;
+import com.whatname.iam.repository.permission.SignatureRepository;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.*;
 
@@ -21,9 +21,9 @@ import org.springframework.transaction.support.*;
 import java.security.KeyPairGenerator;
 import java.util.*;
 
-/** 使用真实的规范化序列化、Ed25519 签名和审计封印；Mapper 存储和事务是内存替身， 这里不验证数据库回滚、加锁或权限。 */
+/** 使用真实的规范化序列化、Ed25519 签名和审计封印；Repository 存储和事务是内存替身， 这里不验证数据库回滚、加锁或权限。 */
 class ManagementDataSecurityTest {
-    SignatureMapper mapper;
+    SignatureRepository repository;
     DataSignatureService signatures;
     ManagementDataSecurity data;
     UserAccount user;
@@ -37,9 +37,8 @@ class ManagementDataSecurityTest {
         user = new UserAccount();
         user.id = 7L;
         user.username = "fixture";
-        user.realNameCiphertext = "cipher-name";
-        user.phone = "cipher-phone";
-        user.phoneHash = "index";
+        user.realName = "Demo Person";
+        user.phone = "13800000007";
         user.passwordHash = "hash";
         user.deptId = 2L;
         user.status = 1;
@@ -52,9 +51,8 @@ class ManagementDataSecurityTest {
         Object[] values = {
             user.id,
             user.username,
-            user.realNameCiphertext,
+            user.realName,
             user.phone,
-            user.phoneHash,
             user.passwordHash,
             null,
             user.deptId,
@@ -70,13 +68,13 @@ class ManagementDataSecurityTest {
         };
         String[] columns = USER_IDENTITY.fields.split(",");
         for (int i = 0; i < columns.length; i++) row.put(columns[i], values[i]);
-        mapper = mock(SignatureMapper.class);
+        repository = mock(SignatureRepository.class);
         stored = new HashMap<>();
-        when(mapper.record(USER_IDENTITY, 7)).thenAnswer(call -> row);
-        when(mapper.record(USER_GRANTS, 7))
+        when(repository.record(USER_IDENTITY, 7)).thenAnswer(call -> row);
+        when(repository.record(USER_GRANTS, 7))
                 .thenAnswer(call -> Map.of("id", 7L, "grant_revision", row.get("grant_revision")));
-        when(mapper.userRoles(7)).thenReturn(List.of());
-        when(mapper.sources(7)).thenReturn(List.of());
+        when(repository.userRoles(7)).thenReturn(List.of());
+        when(repository.sources(7)).thenReturn(List.of());
         doAnswer(
                         call -> {
                             stored.put(
@@ -90,9 +88,9 @@ class ManagementDataSecurityTest {
                                             call.getArgument(3)));
                             return null;
                         })
-                .when(mapper)
+                .when(repository)
                 .save(anyString(), eq(7L), anyString(), anyString());
-        when(mapper.signature(anyString(), eq(7L)))
+        when(repository.signature(anyString(), eq(7L)))
                 .thenAnswer(call -> stored.get(call.getArgument(0)));
         var keys = new DataSigningKeys();
         var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
@@ -102,8 +100,8 @@ class ManagementDataSecurityTest {
                 .put(
                         "unit-fixture",
                         Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
-        signatures = new DataSignatureService(mapper, keys);
-        var auditMapper = mock(AuditMapper.class);
+        signatures = new DataSignatureService(repository, keys);
+        var auditMapper = mock(AuditRepository.class);
         doAnswer(
                         call -> {
                             log = new LinkedHashMap<>(call.getArgument(0));

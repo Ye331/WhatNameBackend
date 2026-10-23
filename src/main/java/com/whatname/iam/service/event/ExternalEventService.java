@@ -6,8 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.SensitiveDataCodec;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
+import com.whatname.iam.common.security.PhoneNumbers;
+import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.department.DepartmentAccessService;
 import com.whatname.iam.service.permission.ServiceOaCaller;
 
@@ -55,8 +55,8 @@ public class ExternalEventService {
 
     private record FailureDisposition(Map<String, Object> replay, String state) {}
 
-    private final ExternalEventMapper mapper;
-    private final SensitiveDataCodec codec;
+    private final ExternalEventRepository repository;
+
     private final DepartmentAccessService integration;
     private final ServiceOaCaller oa;
     private final ObjectMapper json;
@@ -64,14 +64,13 @@ public class ExternalEventService {
     private final TransactionTemplate businessTx;
 
     public ExternalEventService(
-            ExternalEventMapper mapper,
-            SensitiveDataCodec codec,
+            ExternalEventRepository repository,
+
             DepartmentAccessService integration,
             ObjectMapper json,
             PlatformTransactionManager tm,
             ServiceOaCaller oa) {
-        this.mapper = mapper;
-        this.codec = codec;
+        this.repository = repository;
         this.integration = integration;
         this.json = json;
         this.oa = oa;
@@ -147,8 +146,8 @@ public class ExternalEventService {
                         // Event row first. Organization callbacks prepare the admin
                         // admin/department/role/list/user
                         // and resource locks before organization/person facts are read or changed.
-                        Map<String, Object> row = mapper.lock(ctx.sourceSystem(), c.eventId());
-                        if (row == null
+                        Map<String, Object> row = repository.lock(ctx.sourceSystem(), c.eventId());
+                        if ((row == null || row.isEmpty())
                                 || owned.id() != id(row)
                                 || !digest.equals(row.get("digest"))
                                 || !"PROCESSING".equals(row.get("status")))
@@ -165,7 +164,7 @@ public class ExternalEventService {
                         String encoded = encode(result);
                         if (encoded.length() > 65536)
                             throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
-                        if (mapper.applied(owned.id(), encoded) != 1)
+                        if (repository.applied(owned.id(), encoded) != 1)
                             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
                         return result;
                     });
@@ -184,8 +183,8 @@ public class ExternalEventService {
                                     // recording a failure, and never replace an already committed
                                     // result.
                                     Map<String, Object> row =
-                                            mapper.lock(ctx.sourceSystem(), c.eventId());
-                                    if (row == null
+                                            repository.lock(ctx.sourceSystem(), c.eventId());
+                                    if ((row == null || row.isEmpty())
                                             || owned.id() != id(row)
                                             || !digest.equals(row.get("digest")))
                                         return new FailureDisposition(null, "UNMATCHED");
@@ -195,7 +194,7 @@ public class ExternalEventService {
                                                 decode((String) row.get("result")), state);
                                     if ("PROCESSING".equals(state)) {
                                         state = definitive ? "REJECTED" : "PENDING_RECOVERY";
-                                        if (mapper.failed(owned.id(), state, code.name()) != 1)
+                                        if (repository.failed(owned.id(), state, code.name()) != 1)
                                             throw new IllegalStateException(
                                                     "External event failure state was not saved");
                                     }
@@ -267,8 +266,8 @@ public class ExternalEventService {
             TrustedEventContext ctx, Command c, String digest, String plaintext, boolean recovery) {
         return shortTx.execute(
                 tx -> {
-                    Map<String, Object> row = mapper.lock(ctx.sourceSystem(), c.eventId());
-                    if (row != null) {
+                    Map<String, Object> row = repository.lock(ctx.sourceSystem(), c.eventId());
+                    if (row != null && !row.isEmpty()) {
                         if (!digest.equals(row.get("digest")))
                             throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
                         String status = (String) row.get("status");
@@ -290,12 +289,12 @@ public class ExternalEventService {
                                             : ErrorCode.AUTH_STATE_UNAVAILABLE);
                         // Verify retained evidence, but do not confuse authorization with proof of
                         // quiescence.
-                        if (!plaintext.equals(codec.decrypt((String) row.get("ciphertext"))))
+                        if (!plaintext.equals((String) row.get("payloadJson")))
                             throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
                         throw new BusinessException(ErrorCode.AUTH_STATE_UNAVAILABLE);
                     }
                     if (recovery) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
-                    mapper.insert(
+                    repository.insert(
                             ctx.sourceSystem(),
                             c.eventId(),
                             c.eventType(),
@@ -303,13 +302,13 @@ public class ExternalEventService {
                             c.targetType(),
                             c.targetRef(),
                             digest,
-                            codec.encrypt(plaintext),
+                            (plaintext),
                             c.occurredAt() == null
                                     ? null
                                     : c.occurredAt()
                                             .withOffsetSameInstant(ZoneOffset.ofHours(8))
                                             .toLocalDateTime());
-                    return new Claim(id(mapper.lock(ctx.sourceSystem(), c.eventId())), null);
+                    return new Claim(id(repository.lock(ctx.sourceSystem(), c.eventId())), null);
                 });
     }
 
@@ -383,7 +382,7 @@ public class ExternalEventService {
                             e -> {
                                 String k = e.getKey().toLowerCase(Locale.ROOT);
                                 if (k.matches(
-                                        ".*(password|secret|token|phone|ciphertext|credential|realname).*"))
+                                        ".*(password|secret|token|phone|payloadJson|credential|realname).*"))
                                     throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
                                 assertSafeResult(e.getValue());
                             });

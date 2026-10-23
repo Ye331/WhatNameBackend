@@ -8,8 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.grant.GrantDtos.*;
 import com.whatname.iam.entity.grant.BatchData.Batch;
-import com.whatname.iam.mapper.grant.BatchMapper;
-import com.whatname.iam.mapper.grant.GrantMapper;
+import com.whatname.iam.repository.grant.BatchRepository;
+import com.whatname.iam.repository.grant.GrantRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,20 +25,20 @@ import java.sql.SQLException;
 @Service
 public class BatchWorker {
     private static final Logger log = LoggerFactory.getLogger(BatchWorker.class);
-    private final BatchMapper mapper;
+    private final BatchRepository repository;
     private final GrantOperations grants;
-    private final GrantMapper grantMapper;
+    private final GrantRepository grantMapper;
     private final ObjectMapper json;
     private final TransactionTemplate transaction;
     private final TransactionTemplate guard;
 
     public BatchWorker(
-            BatchMapper mapper,
+            BatchRepository repository,
             GrantOperations grants,
-            GrantMapper grantMapper,
+            GrantRepository grantMapper,
             ObjectMapper json,
             PlatformTransactionManager manager) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.grants = grants;
         this.grantMapper = grantMapper;
         this.json = json;
@@ -54,16 +54,16 @@ public class BatchWorker {
             guard.executeWithoutResult(
                     task -> {
                         // NOWAIT：另一进程正在运行时退出；进程退出由数据库释放锁，不按超时猜测接管。
-                        Batch batch = mapper.lockBatch(batchId);
+                        Batch batch = repository.lockBatch(batchId);
                         if (batch == null) return;
-                        mapper.start(batchId);
+                        repository.start(batchId);
                         while (true) {
                             var items =
-                                    transaction.execute(tx -> mapper.pendingItems(batchId, 100));
+                                    transaction.execute(tx -> repository.pendingItems(batchId, 100));
                             if (items.isEmpty()) break;
                             for (var item : items) executeItem(batch, item.id());
                         }
-                        mapper.refresh(batchId);
+                        repository.refresh(batchId);
                     });
         } catch (RuntimeException failure) {
             // 无法核实/写入结果时停止；保留已提交项，后续扫描重新取得任务锁。
@@ -80,15 +80,15 @@ public class BatchWorker {
                     Boolean.TRUE.equals(
                             transaction.execute(
                                     tx -> {
-                                        var item = mapper.lockItem(itemId);
+                                        var item = repository.lockItem(itemId);
                                         if (item == null
                                                 || !"PENDING".equals(item.processingStatus()))
                                             return false;
                                         if (item.attempts() >= 4) {
-                                            mapper.failed(itemId, AUTH_STATE_UNAVAILABLE.name());
+                                            repository.failed(itemId, AUTH_STATE_UNAVAILABLE.name());
                                             return false;
                                         }
-                                        if (mapper.reserve(itemId) != 1)
+                                        if (repository.reserve(itemId) != 1)
                                             throw new BusinessException(AUTH_STATE_UNAVAILABLE);
                                         return true;
                                     }));
@@ -102,7 +102,7 @@ public class BatchWorker {
                                 transaction.execute(
                                         tx -> {
                                             // 包括 COMMIT 确认丢失：必须先看真实状态，不覆盖已经提交的 APPLIED。
-                                            var current = mapper.lockItem(itemId);
+                                            var current = repository.lockItem(itemId);
                                             if (current == null
                                                     || !"PENDING"
                                                             .equals(current.processingStatus()))
@@ -122,7 +122,7 @@ public class BatchWorker {
                                                     failure instanceof BusinessException business
                                                             ? business.errorCode().name()
                                                             : AUTH_STATE_UNAVAILABLE.name();
-                                            if (mapper.failed(itemId, code) != 1)
+                                            if (repository.failed(itemId, code) != 1)
                                                 throw new BusinessException(AUTH_STATE_UNAVAILABLE);
                                             return false;
                                         }));
@@ -146,7 +146,7 @@ public class BatchWorker {
     }
 
     private void apply(Batch batch, long itemId) {
-        var item = mapper.lockItem(itemId);
+        var item = repository.lockItem(itemId);
         if (item == null || !"PENDING".equals(item.processingStatus())) return;
         com.whatname.iam.service.admin.AuthorizationContext.batch(
                 batch.actorUserId(), batch.id(), item.id());
@@ -190,7 +190,7 @@ public class BatchWorker {
                     throw new BusinessException(AUTH_STATE_UNAVAILABLE);
                 evidence.put("permissionRevision", "v" + revision);
             }
-            if (mapper.applied(itemId, source, json.writeValueAsString(evidence)) != 1)
+            if (repository.applied(itemId, source, json.writeValueAsString(evidence)) != 1)
                 throw new BusinessException(AUTH_STATE_UNAVAILABLE);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize batch result", e);

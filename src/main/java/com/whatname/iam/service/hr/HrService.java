@@ -3,12 +3,12 @@ package com.whatname.iam.service.hr;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.security.AccountSecurity;
-import com.whatname.iam.common.security.SensitiveDataCodec;
+import com.whatname.iam.common.security.PhoneNumbers;
 import com.whatname.iam.dto.hr.HrRequests.*;
 import com.whatname.iam.entity.department.Department;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.auth.NamePinyin;
 import com.whatname.iam.service.auth.PasswordHasher;
 import com.whatname.iam.service.department.*;
@@ -33,25 +33,25 @@ import java.util.function.Supplier;
 @Service
 public class HrService {
     private final ExternalEventService events;
-    private final OrganizationWriteMapper organization;
+    private final OrganizationWriteRepository organization;
     private final DepartmentService departments;
     private final DepartmentAccessService trusted;
-    private final UserAccountMapper users;
+    private final UserAccountRepository users;
     private final AccountSecurity identity;
     private final HrGrantCollaboration grants;
-    private final SensitiveDataCodec codec;
+
     private final PasswordHasher passwords;
     private final Clock clock;
 
     public HrService(
             ExternalEventService events,
-            OrganizationWriteMapper organization,
+            OrganizationWriteRepository organization,
             DepartmentService departments,
             DepartmentAccessService trusted,
-            UserAccountMapper users,
+            UserAccountRepository users,
             AccountSecurity identity,
             HrGrantCollaboration grants,
-            SensitiveDataCodec codec,
+
             PasswordHasher passwords,
             @Qualifier("hrClock") Clock clock) {
         this.events = events;
@@ -61,7 +61,6 @@ public class HrService {
         this.users = users;
         this.identity = identity;
         this.grants = grants;
-        this.codec = codec;
         this.passwords = passwords;
         this.clock = clock;
     }
@@ -86,7 +85,7 @@ public class HrService {
         List<Department> all = lock(actor, r.eventId(), "HR_EMPLOYEE", r.sgNo());
         Department target = assignable(all, r.deptCode());
         UserAccount u = users.lockByEmployeeNo(r.sgNo());
-        String phone = SensitiveDataCodec.normalizePhone(r.phone());
+        String phone = PhoneNumbers.normalize(r.phone());
         // Validate the whole name before lifecycle, grant or profile writes (including updates).
         NamePinyin.variants(r.realName().strip());
         if (u == null) {
@@ -260,9 +259,8 @@ public class HrService {
     }
 
     private void profile(UserAccount u, Employee r, String phone) {
-        u.realNameCiphertext = codec.encrypt(r.realName().strip());
-        u.phone = codec.encrypt(phone);
-        u.phoneHash = codec.phoneHash(phone);
+        u.realName = r.realName().strip();
+        u.phone = phone;
         u.employmentType = r.employmentType() == EmploymentType.FORMAL ? 1 : 2;
         u.hrVersion = r.eventVersion();
     }

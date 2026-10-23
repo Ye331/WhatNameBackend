@@ -4,7 +4,7 @@ import static com.whatname.iam.common.api.ErrorCode.*;
 
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.util.IdUtils;
-import com.whatname.iam.mapper.permission.SignatureMapper;
+import com.whatname.iam.repository.permission.SignatureRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -15,10 +15,10 @@ import java.util.Map;
 public class UserPermissionService {
     private final PermissionReadScope scope;
     private final PermissionService permissions;
-    private final SignatureMapper facts;
+    private final SignatureRepository facts;
 
     public UserPermissionService(
-            PermissionReadScope scope, PermissionService permissions, SignatureMapper facts) {
+            PermissionReadScope scope, PermissionService permissions, SignatureRepository facts) {
         this.scope = scope;
         this.permissions = permissions;
         this.facts = facts;
@@ -29,7 +29,7 @@ public class UserPermissionService {
         long id = IdUtils.parse(userId);
         var allowed = scope.departments(authorization, "IAM_USERS_VIEW");
         var user = facts.record(SignedDataType.USER_IDENTITY, id);
-        if (user == null
+        if ((user == null || user.isEmpty())
                 || !allowed.departments().contains(((Number) user.get("dept_id")).longValue()))
             throw new BusinessException(RESOURCE_NOT_FOUND);
         return permissions.userMenus(id, appCode);

@@ -16,9 +16,6 @@ import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -108,22 +105,8 @@ class BatchRecoveryIT {
                 () -> encoded(ED.getPublic().getEncoded()));
     }
 
-    @Intercepts({
-        @org.apache.ibatis.plugin.Signature(
-                type = Executor.class,
-                method = "update",
-                args = {MappedStatement.class, Object.class}),
-        @org.apache.ibatis.plugin.Signature(
-                type = Executor.class,
-                method = "query",
-                args = {
-                    MappedStatement.class,
-                    Object.class,
-                    org.apache.ibatis.session.RowBounds.class,
-                    org.apache.ibatis.session.ResultHandler.class
-                })
-    })
-    static class Failure implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Failure extends com.whatname.iam.support.RepositoryProbe {
         volatile String point;
         volatile String hit;
         volatile int remaining;
@@ -134,9 +117,9 @@ class BatchRecoveryIT {
         volatile int databaseTimeouts;
 
         public Object intercept(Invocation call) throws Throwable {
-            String statement = ((MappedStatement) call.getArgs()[0]).getId();
-            if (releaseDatabaseLock != null && statement.endsWith("AdminMapper.selectUsers")) {
-                var connection = ((Executor) call.getTarget()).getTransaction().getConnection();
+            String statement = call.id();
+            if (releaseDatabaseLock != null && statement.endsWith("AdminRepository.selectUsers")) {
+                var connection = call.connection();
                 try (var sql = connection.createStatement()) {
                     sql.execute("SET SESSION innodb_lock_wait_timeout=1");
                 }
@@ -159,11 +142,11 @@ class BatchRecoveryIT {
                 }
             }
             Object result = call.proceed();
-            if (statement.endsWith("BatchMapper.applied")
+            if (statement.endsWith("BatchRepository.applied")
                     || ("SIGN_DB".equals(point)
-                            && statement.endsWith("SignatureMapper.save")
-                            && "USER_GRANTS".equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
-                    || ("AUDIT_DB".equals(point) && statement.endsWith("AuditMapper.insert"))) {
+                            && statement.endsWith("SignatureRepository.save")
+                            && "USER_GRANTS".equals(((Map<?, ?>) call.parameters()).get("type")))
+                    || ("AUDIT_DB".equals(point) && statement.endsWith("AuditRepository.insert"))) {
                 if (afterCommit != null) {
                     Runnable action = afterCommit;
                     afterCommit = null;
@@ -207,8 +190,8 @@ class BatchRecoveryIT {
     @Autowired AdminService admins;
     @Autowired AdminOrganizationLifecycle organization;
     @Autowired com.whatname.iam.service.department.DepartmentAccessService departmentAdapter;
-    @Autowired com.whatname.iam.mapper.department.OrganizationWriteMapper organizationMapper;
-    @Autowired com.whatname.iam.mapper.event.ExternalEventMapper eventMapper;
+    @Autowired com.whatname.iam.repository.department.OrganizationWriteRepository organizationMapper;
+    @Autowired com.whatname.iam.repository.event.ExternalEventRepository eventMapper;
     @Autowired AuditService auditService;
     @Autowired DataSignatureService signatures;
     @Autowired PermissionService permissions;
@@ -247,7 +230,7 @@ class BatchRecoveryIT {
 
     @Autowired BatchService batchService;
     @Autowired GrantOperations operations;
-    @Autowired com.whatname.iam.mapper.grant.BatchMapper batches;
+    @Autowired com.whatname.iam.repository.grant.BatchRepository batches;
     static final AtomicLong NEXT = new AtomicLong(1000);
     long b;
     String bearer;
@@ -289,11 +272,11 @@ class BatchRecoveryIT {
         for (int u : List.of(10, 11, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?, 'fixture','fixture',?,'fixture',?,3,1,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?, 'fixture',?,'fixture',?,3,1,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(u == 11 ? 2 : 1));
         db.update(
                 "INSERT INTO sys_admin(user_id,admin_level,dept_id,status)"
@@ -756,11 +739,11 @@ class BatchRecoveryIT {
         db.update("UPDATE sys_user SET dept_id=? WHERE id=?", id(2), id(20));
         db.update(
                 "INSERT INTO"
-                    + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                    + " VALUES(?,?,'fixture','fixture',?,'fixture',?,3,1,1)",
+                    + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                    + " VALUES(?,?,'fixture',?,'fixture',?,3,1,1)",
                 id(21),
                 "U" + id(21),
-                String.format("%064x", id(21)),
+                String.format("138%08d", id(21)),
                 id(2));
         tx.executeWithoutResult(
                 s -> {
@@ -800,7 +783,7 @@ class BatchRecoveryIT {
     void boundedScanAdvancesPastOneHundredTasksThenWraps() {
         for (int n = 0; n < 101; n++) {
             batches.insertBatch(
-                    id(10), "SCAN-" + b + "-" + n, "0".repeat(64), "GRANT", id(30), "fixture", 1);
+                    id(10), "SCAN-" + b + "-" + n, "13800000000", "GRANT", id(30), "fixture", 1);
             var batch = batches.byKey(id(10), "SCAN-" + b + "-" + n);
             batches.insertItems(
                     List.of(
@@ -948,12 +931,12 @@ class BatchRecoveryIT {
         for (int n = 0; n < 2001; n++) {
             offsets[n] = 100 + n;
             long user = id(offsets[n]);
-            users.add(new Object[] {user, "SCALE" + user, String.format("%064x", user), id(1)});
+            users.add(new Object[] {user, "SCALE" + user, String.format("138%08d", user), id(1)});
         }
         db.batchUpdate(
                 "INSERT INTO"
-                    + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                    + " VALUES(?,?,'fixture','fixture',?,'fixture',?,3,1,1)",
+                    + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                    + " VALUES(?,?,'fixture',?,'fixture',?,3,1,1)",
                 users);
         tx.executeWithoutResult(
                 s -> {

@@ -4,7 +4,7 @@ import static com.whatname.iam.service.permission.SignedDataType.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.whatname.iam.common.security.SensitiveDataCodec;
+import com.whatname.iam.common.security.PhoneNumbers;
 import com.whatname.iam.common.util.RouteTemplateUtils;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.auth.NamePinyin;
@@ -191,7 +191,7 @@ public class InitializationService {
     public record SuperUser(String username, String realName, String phone, String password) {}
 
     private final JdbcTemplate db;
-    private final SensitiveDataCodec codec;
+
     private final PasswordHasher passwords;
     private final PasswordPolicy policy;
     private final DataSignatureService signatures;
@@ -201,7 +201,7 @@ public class InitializationService {
 
     public InitializationService(
             JdbcTemplate db,
-            SensitiveDataCodec codec,
+
             PasswordHasher passwords,
             PasswordPolicy policy,
             DataSignatureService signatures,
@@ -209,7 +209,6 @@ public class InitializationService {
             ObjectMapper json,
             @Value("${iam.permission.management-app-code:IAM}") String managementAppCode) {
         this.db = db;
-        this.codec = codec;
         this.passwords = passwords;
         this.policy = policy;
         this.signatures = signatures;
@@ -364,7 +363,7 @@ public class InitializationService {
             String deptName =
                     departments.containsKey(branch + "-" + dept) ? branch + "-" + dept : dept;
             long deptId = required(departments, deptName);
-            String phone = SensitiveDataCodec.normalizePhone(row.path("电话号码").asText());
+            String phone = PhoneNumbers.normalize(row.path("电话号码").asText());
             String username = HrLoginName.initials(name);
             if (!usernames.add(username)) {
                 username = username + sgNo.substring(Math.max(0, sgNo.length() - 6));
@@ -373,13 +372,12 @@ public class InitializationService {
             }
             db.update(
                     "INSERT INTO"
-                        + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,"
+                        + " sys_user(username,real_name,phone,password_hash,"
                         + "employee_no,dept_id,source,employment_type,status,password_initialized)"
-                        + " VALUES(?,?,?,?,?,?,?,1,1,1,0)",
+                        + " VALUES(?,?,?,?,?,?,1,1,1,0)",
                     username,
-                    codec.encrypt(name),
-                    codec.encrypt(phone),
-                    codec.phoneHash(phone),
+                    (name),
+                    phone,
                     unusableHash,
                     sgNo,
                     deptId);
@@ -453,7 +451,7 @@ public class InitializationService {
 
     /** 超级用户：受控初始化账号（source=3），密码由运维在初始化时提供，不内置默认密码。 */
     private long createSuperUser(SuperUser s, long rootDeptId, long superRole) {
-        String phone = SensitiveDataCodec.normalizePhone(s.phone());
+        String phone = PhoneNumbers.normalize(s.phone());
         var check =
                 policy.validate(
                         s.password(),
@@ -466,12 +464,11 @@ public class InitializationService {
         long userId =
                 insert(
                         "INSERT INTO"
-                            + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                            + " VALUES(?,?,?,?,?,?,3,1,1)",
+                            + " sys_user(username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                            + " VALUES(?,?,?,?,?,3,1,1)",
                         s.username(),
-                        codec.encrypt(s.realName()),
-                        codec.encrypt(phone),
-                        codec.phoneHash(phone),
+                        (s.realName()),
+                        phone,
                         hash,
                         rootDeptId);
         db.update(

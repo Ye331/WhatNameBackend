@@ -106,13 +106,12 @@ class GrantIT {
         for (var user : data.users.values()) {
             jdbc.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status)"
-                        + " VALUES(?,?,?,?,?,?,?,?,?)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status)"
+                        + " VALUES(?,?,?,?,?,?,?,?)",
                     id(user.id()),
                     "test_grant_user_" + id(user.id()),
                     "test-only-ciphertext",
-                    "test-only-ciphertext",
-                    String.format("%064x", id(user.id())),
+                    String.format("138%08d", id(user.id())),
                     "test-only-unusable-hash",
                     id(user.deptId()),
                     3,

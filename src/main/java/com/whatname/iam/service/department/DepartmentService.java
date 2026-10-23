@@ -4,7 +4,7 @@ import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.dto.department.DepartmentRequests;
 import com.whatname.iam.entity.department.Department;
-import com.whatname.iam.mapper.department.OrganizationWriteMapper;
+import com.whatname.iam.repository.department.OrganizationWriteRepository;
 import com.whatname.iam.service.event.ExternalEventService;
 import com.whatname.iam.service.event.TrustedEventContext;
 
@@ -18,15 +18,15 @@ import java.util.*;
 
 @Service
 public class DepartmentService {
-    private final OrganizationWriteMapper mapper;
+    private final OrganizationWriteRepository repository;
     private final DepartmentAccessService integration;
     private final ExternalEventService events;
 
     public DepartmentService(
-            OrganizationWriteMapper mapper,
+            OrganizationWriteRepository repository,
             DepartmentAccessService integration,
             ExternalEventService events) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.integration = integration;
         this.events = events;
     }
@@ -67,7 +67,7 @@ public class DepartmentService {
     }
 
     private List<Department> readOrganization() {
-        List<Department> departments = mapper.organization();
+        List<Department> departments = repository.organization();
         validateTree(departments);
         integration.verifyOrganization(departments);
         return departments;
@@ -101,9 +101,9 @@ public class DepartmentService {
                                                                                         .getDeptPath()))))
                         .map(Department::getId)
                         .toList();
-        long total = mapper.countUsers(ids);
+        long total = repository.countUsers(ids);
         List<Map<String, Object>> items = new ArrayList<>();
-        for (Map<String, Object> row : mapper.users(ids, size, ((long) page - 1) * size)) {
+        for (Map<String, Object> row : repository.users(ids, size, ((long) page - 1) * size)) {
             Map<String, Object> item = new LinkedHashMap<>(row);
             item.put("userId", row.get("userId").toString());
             item.put("deptId", row.get("deptId").toString());
@@ -137,7 +137,7 @@ public class DepartmentService {
         Map<Long, Department> byId = index(all);
         List<Map<String, Object>> before = snapshot(all);
         Department current = byCode(all, r.deptCode());
-        if (current == null && mapper.idByCode(r.deptCode()) != null)
+        if (current == null && repository.idByCode(r.deptCode()) != null)
             fail(ErrorCode.INVALID_DEPT_MAPPING);
         Department parent = r.parentDeptCode().isEmpty() ? null : byCode(all, r.parentDeptCode());
         if (!r.parentDeptCode().isEmpty() && parent == null) fail(ErrorCode.INVALID_DEPT_MAPPING);
@@ -151,7 +151,7 @@ public class DepartmentService {
         Long managerId = null;
         if (r.managerSgNo() != null) {
             if (r.managerSgNo().isBlank()) fail(ErrorCode.INVALID_ARGUMENT);
-            managerId = mapper.manager(r.managerSgNo());
+            managerId = repository.manager(r.managerSgNo());
             if (managerId == null) fail(ErrorCode.INVALID_DEPT_MAPPING);
         }
         if (current == null) {
@@ -164,7 +164,7 @@ public class DepartmentService {
             current.setStatus(1);
             current.setHrVersion(r.eventVersion());
             current.setSortOrder(0);
-            mapper.insert(current);
+            repository.insert(current);
             all.add(current);
             byId.put(current.getId(), current);
         } else {
@@ -220,9 +220,9 @@ public class DepartmentService {
             fail(ErrorCode.BUSINESS_RULE_VIOLATION);
         if (frozen(source, byId)) fail(ErrorCode.BUSINESS_RULE_VIOLATION);
         List<Map<String, Object>> before = snapshot(all);
-        List<Map<String, Object>> users = mapper.lockUsers(source.getId());
+        List<Map<String, Object>> users = repository.lockUsers(source.getId());
         integration.verifyUsers(users);
-        if (mapper.moveUsers(source.getId(), target.getId()) != users.size())
+        if (repository.moveUsers(source.getId(), target.getId()) != users.size())
             fail(ErrorCode.VERSION_CONFLICT);
         for (Department d : all)
             if (d.getParentId().equals(source.getId())) d.setParentId(target.getId());
@@ -256,7 +256,7 @@ public class DepartmentService {
         active(d);
         List<Map<String, Object>> before = snapshot(all);
         d.setStatus(freeze ? 0 : 1);
-        mapper.update(d);
+        repository.update(d);
         integration.signAndAudit(
                 freeze ? "DEPT_FREEZE" : "DEPT_UNFREEZE",
                 actor,
@@ -276,7 +276,7 @@ public class DepartmentService {
     private void updateDepartments(List<Department> departments, Set<Long> changed) {
         for (Department department : departments) {
             if (changed.contains(department.getId())) {
-                mapper.update(department);
+                repository.update(department);
             }
         }
     }
@@ -287,7 +287,7 @@ public class DepartmentService {
                         TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
                         java.sql.Connection.TRANSACTION_SERIALIZABLE))
             throw new IllegalStateException("Serializable organization transaction required");
-        List<Department> all = mapper.lockOrganization();
+        List<Department> all = repository.lockOrganization();
         validateTree(all);
         integration.verifyOrganization(all);
         return all;

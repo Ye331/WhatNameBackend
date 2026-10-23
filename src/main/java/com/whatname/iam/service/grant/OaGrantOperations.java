@@ -9,9 +9,9 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.util.IdUtils;
 import com.whatname.iam.dto.oa.OaDtos.Decision;
 import com.whatname.iam.entity.grant.GrantData.Source;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
-import com.whatname.iam.mapper.grant.GrantMapper;
-import com.whatname.iam.mapper.oa.OaScopeMapper;
+import com.whatname.iam.repository.event.ExternalEventRepository;
+import com.whatname.iam.repository.grant.GrantRepository;
+import com.whatname.iam.repository.oa.OaScopeRepository;
 import com.whatname.iam.service.admin.*;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.event.TrustedEventContext;
@@ -26,11 +26,11 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class OaGrantOperations {
-    private final GrantMapper mapper;
-    private final ExternalEventMapper events;
+    private final GrantRepository repository;
+    private final ExternalEventRepository events;
     private final AdminServiceLocks locks;
     private final AdminRules rules;
-    private final OaScopeMapper services;
+    private final OaScopeRepository services;
     private final ServiceOaCaller callers;
     private final DataSignatureService signatures;
     private final GrantIntegrity integrity;
@@ -38,17 +38,17 @@ public class OaGrantOperations {
     private final ObjectMapper json;
 
     public OaGrantOperations(
-            GrantMapper mapper,
-            ExternalEventMapper events,
+            GrantRepository repository,
+            ExternalEventRepository events,
             AdminServiceLocks locks,
             AdminRules rules,
-            OaScopeMapper services,
+            OaScopeRepository services,
             ServiceOaCaller callers,
             DataSignatureService signatures,
             GrantIntegrity integrity,
             AuditService audit,
             ObjectMapper json) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.events = events;
         this.locks = locks;
         this.rules = rules;
@@ -63,7 +63,7 @@ public class OaGrantOperations {
     public Map<String, Object> apply(TrustedEventContext actor, Decision request) {
         long user = IdUtils.parse(request.targetUserId()), role = IdUtils.parse(request.roleId());
         var event = events.lock("OA", request.eventId());
-        if (event == null
+        if ((event == null || event.isEmpty())
                 || !"OA_DECISION".equals(event.get("eventType"))
                 || !"PROCESSING".equals(event.get("status"))
                 || !"USER".equals(event.get("targetType"))
@@ -76,15 +76,15 @@ public class OaGrantOperations {
         Source source;
         boolean changed;
         if ("GRANT".equals(request.operation())) {
-            source = mapper.selectSourceByKey(user, role, "OA_APPROVAL", request.approvalId());
+            source = repository.selectSourceByKey(user, role, "OA_APPROVAL", request.approvalId());
             if (source != null && source.status() != 1) fail(DUPLICATE_RESOURCE);
             changed = source == null;
             if (changed) {
                 incrementable(before);
-                expectOne(mapper.insertOaSource(user, role, request.approvalId()));
-                source = mapper.selectSourceByKey(user, role, "OA_APPROVAL", request.approvalId());
+                expectOne(repository.insertOaSource(user, role, request.approvalId()));
+                source = repository.selectSourceByKey(user, role, "OA_APPROVAL", request.approvalId());
                 if (before.effectiveRoles().stream().noneMatch(r -> r.roleId() == role))
-                    expectOne(mapper.insertOaEffectiveRole(user, role));
+                    expectOne(repository.insertOaEffectiveRole(user, role));
             }
         } else {
             if (request.grantSourceId() != null) {
@@ -101,13 +101,13 @@ public class OaGrantOperations {
                                 .orElse(null);
             } else
                 source =
-                        mapper.selectSourceByKey(
+                        repository.selectSourceByKey(
                                 user, role, "OA_APPROVAL", request.originalApprovalId());
             if (source == null) fail(GRANT_SOURCE_NOT_FOUND);
             changed = source.status() == 1;
             if (changed) {
                 incrementable(before);
-                expectOne(mapper.revokeOaSource(user, role, source.id()));
+                expectOne(repository.revokeOaSource(user, role, source.id()));
                 long sourceId = source.id();
                 boolean supported =
                         before.sources().stream()
@@ -116,7 +116,7 @@ public class OaGrantOperations {
                                                 s.status() == 1
                                                         && s.roleId() == role
                                                         && s.id() != sourceId);
-                if (!supported) expectOne(mapper.deleteEffectiveRole(user, role));
+                if (!supported) expectOne(repository.deleteEffectiveRole(user, role));
             }
         }
         if (source == null
@@ -124,7 +124,7 @@ public class OaGrantOperations {
                 || !"OA_APPROVAL".equals(source.sourceType())) fail(INTEGRITY_FAILURE);
         GrantState after = before;
         if (changed) {
-            expectOne(mapper.advanceRevision(user, before.grantRevision()));
+            expectOne(repository.advanceRevision(user, before.grantRevision()));
             after = load(user);
             GrantOperations.consistent(after);
             integrity.sign(after);
@@ -184,7 +184,7 @@ public class OaGrantOperations {
         // 入口认证不得提前持有服务行锁并带入此业务阶段，以免形成反向锁序。
         var state = locks.lock(user);
         var identity = services.lock(actor.clientId());
-        if (identity == null || !actor.clientId().equals(identity.get("client_id")))
+        if ((identity == null || identity.isEmpty()) || !actor.clientId().equals(identity.get("client_id")))
             fail(INVALID_SERVICE);
         long serviceId = ((Number) identity.get("id")).longValue();
         signatures.verify(SERVICE_IDENTITY, serviceId);
@@ -278,13 +278,13 @@ public class OaGrantOperations {
     }
 
     private GrantState load(long user) {
-        Long revision = mapper.selectRevision(user, true);
+        Long revision = repository.selectRevision(user, true);
         if (revision == null || revision < 1) fail(INTEGRITY_FAILURE);
         return new GrantState(
                 user,
                 revision,
-                mapper.selectSources(user, true),
-                mapper.selectEffectiveRoles(user, true));
+                repository.selectSources(user, true),
+                repository.selectEffectiveRoles(user, true));
     }
 
     private Map<String, Object> decision(Decision r, Source source) {

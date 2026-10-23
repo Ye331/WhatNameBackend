@@ -14,7 +14,7 @@ import com.whatname.iam.dto.role.RoleResponses.RoleMenusResult;
 import com.whatname.iam.dto.role.RoleResponses.UpdateRoleResult;
 import com.whatname.iam.entity.resource.MenuEntity;
 import com.whatname.iam.entity.role.RoleEntity;
-import com.whatname.iam.mapper.role.RoleMapper;
+import com.whatname.iam.repository.role.RoleRepository;
 import com.whatname.iam.service.admin.ManagementAccessService;
 import com.whatname.iam.service.audit.AuditService;
 import com.whatname.iam.service.permission.DataSignatureService;
@@ -30,17 +30,17 @@ import java.util.Map;
 @Service
 @Transactional(readOnly = true)
 public class RoleService {
-    private final RoleMapper mapper;
+    private final RoleRepository repository;
     private final ManagementAccessService access;
     private final DataSignatureService signatures;
     private final AuditService audit;
 
     public RoleService(
-            RoleMapper mapper,
+            RoleRepository repository,
             ManagementAccessService access,
             DataSignatureService signatures,
             AuditService audit) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.access = access;
         this.signatures = signatures;
         this.audit = audit;
@@ -48,9 +48,9 @@ public class RoleService {
 
     public PageResponse<RoleItem> listRoles(String bearer, PageRequest pageRequest) {
         access.requireRead(bearer, "IAM_ROLES_VIEW");
-        int total = mapper.countRoles();
+        int total = repository.countRoles();
         List<RoleItem> items =
-                mapper.listRoles(pageRequest.offset(), pageRequest.getPageSize()).stream()
+                repository.listRoles(pageRequest.offset(), pageRequest.getPageSize()).stream()
                         .map(
                                 role ->
                                         new RoleItem(
@@ -71,7 +71,7 @@ public class RoleService {
             throw new BusinessException(ErrorCode.BUSINESS_RULE_VIOLATION);
         }
         String roleCode = request.getRoleCode().trim().toUpperCase(Locale.ROOT);
-        if (mapper.countRoleCode(roleCode, null) > 0) {
+        if (repository.countRoleCode(roleCode, null) > 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
         }
         RoleEntity entity = new RoleEntity();
@@ -81,7 +81,7 @@ public class RoleService {
         entity.setRoleType(roleType);
         entity.setMenuRevision(1);
         entity.setStatus(1);
-        mapper.insertRole(entity);
+        repository.insertRole(entity);
         signatures.sign(SignedDataType.ROLE_MENUS, entity.getId());
         audit.resourceChange(
                 "ROLE",
@@ -134,7 +134,7 @@ public class RoleService {
         if (request.getRoleName() != null) {
             update.setRoleName(request.getRoleName().trim());
         }
-        mapper.updateRole(update);
+        repository.updateRole(update);
         signatures.sign(SignedDataType.ROLE_MENUS, roleId);
         Map<String, Object> after = signatures.snapshot(SignedDataType.ROLE_MENUS, roleId);
         audit.resourceChange(
@@ -153,7 +153,7 @@ public class RoleService {
     public RoleMenusResult listRoleMenus(String bearer, long roleId) {
         access.requireRead(bearer, "IAM_ROLES_VIEW");
         RoleEntity role = requireRole(roleId);
-        List<Long> menuIds = mapper.listMenuIdsByRoleId(roleId);
+        List<Long> menuIds = repository.listMenuIdsByRoleId(roleId);
         return new RoleMenusResult(
                 roleId, menuIds, RevisionUtils.toVersion(role.getMenuRevision()));
     }
@@ -175,7 +175,7 @@ public class RoleService {
         List<Long> dedupMenuIds =
                 com.whatname.iam.common.util.IdUtils.distinct(request.getMenuIds());
         if (!dedupMenuIds.isEmpty()) {
-            List<MenuEntity> menus = mapper.listMenusByIds(dedupMenuIds);
+            List<MenuEntity> menus = repository.listMenusByIds(dedupMenuIds);
             if (menus.size() != dedupMenuIds.size()) {
                 throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
             }
@@ -188,11 +188,11 @@ public class RoleService {
         }
 
         Map<String, Object> before = signatures.snapshot(SignedDataType.ROLE_MENUS, roleId);
-        mapper.deleteRoleMenus(roleId);
+        repository.deleteRoleMenus(roleId);
         if (!dedupMenuIds.isEmpty()) {
-            mapper.insertRoleMenus(roleId, dedupMenuIds);
+            repository.insertRoleMenus(roleId, dedupMenuIds);
         }
-        if (mapper.bumpRoleMenuRevision(roleId, expectedRevision) != 1) {
+        if (repository.bumpRoleMenuRevision(roleId, expectedRevision) != 1) {
             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
         }
         signatures.sign(SignedDataType.ROLE_MENUS, roleId);
@@ -213,7 +213,7 @@ public class RoleService {
     }
 
     private RoleEntity requireRole(long roleId) {
-        RoleEntity role = mapper.findRoleById(roleId);
+        RoleEntity role = repository.findRoleById(roleId);
         if (role == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }

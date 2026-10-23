@@ -1,6 +1,6 @@
 package com.whatname.iam.service.grant;
 
-import com.whatname.iam.mapper.grant.BatchMapper;
+import com.whatname.iam.repository.grant.BatchRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +19,7 @@ import java.util.concurrent.Executor;
 @Service
 public class BatchRecoveryService {
     private static final Logger log = LoggerFactory.getLogger(BatchRecoveryService.class);
-    private final BatchMapper mapper;
+    private final BatchRepository repository;
     private final BatchWorker worker;
     private final Executor executor;
     private final boolean enabled;
@@ -27,11 +27,11 @@ public class BatchRecoveryService {
     private long cursor;
 
     public BatchRecoveryService(
-            BatchMapper mapper,
+            BatchRepository repository,
             BatchWorker worker,
             @Qualifier("grantBatchExecutor") Executor executor,
             @Value("${iam.grant-batch.recovery.enabled:true}") boolean enabled) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.worker = worker;
         this.executor = executor;
         this.enabled = enabled;
@@ -51,7 +51,7 @@ public class BatchRecoveryService {
 
     public synchronized void scan() {
         try {
-            var ids = mapper.unfinished(cursor, 100);
+            var ids = repository.unfinished(cursor, 100);
             if (ids.isEmpty()) {
                 cursor = 0;
                 return;

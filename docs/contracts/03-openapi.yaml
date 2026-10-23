@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: 统一权限管理系统：三层功能开发 RBAC0 API 契约
   version: 0.6.0
-  description: 与详细设计和数据库v3.1一致。Controller-Service-Mapper三层，MyBatis+MySQL，当前无Redis/DAO/缓存发布/消息队列；56项接口全部纳入实现范围，GR06必做。权限直读当前数据库事实，审计同步提交。SG重名规则保持；原性能指标待实测。外部系统用测试请求模拟，短信发送通道可替换。
+  description: 与详细设计和数据库v3.1一致。Controller-Service-Repository三层，Spring Data JPA+MySQL，当前无Redis/DAO/缓存发布/消息队列；56项接口全部纳入实现范围，GR06必做。权限直读当前数据库事实，审计同步提交。SG重名规则保持；原性能指标待实测。外部系统用测试请求模拟，短信发送通道可替换。
 servers:
 - url: https://iam.example.test/api/v1
   description: 占位地址（非真实部署地址）
@@ -486,10 +486,10 @@ paths:
       - M1 身份认证与账号管理
       operationId: US01
       summary: 按管理范围查询用户
-      description: 'M6 检查功能权限、M5 将搜索限定至当前部门根及子树；关键字段经允许后解密、手机号只返回掩码。
+      description: 'M6 检查功能权限、M5 将搜索限定至当前部门根及子树；关键字段经范围授权和验签后返回明文演示值。
 
         协议按API规范2.4节执行；真实部署地址由配置确定。'
-      x-implementation-notes: status与source分别为可选整数1/2/3，省略不限制该维度；所有条件与M5范围取交集，items/total共用SQL谓词。page为1至1000000，pageSize为1至500。当前keyword只实现用户名/SG号子串和完整规范化手机号HMAC精确匹配；姓名包含搜索仍未完成，原keyword=张示例所隐含需求保留待确定安全可分页方案。
+      x-implementation-notes: status与source分别为可选整数1/2/3，省略不限制该维度；所有条件与M5范围取交集，items/total 使用相同范围和匹配规则。page为1至1000000，pageSize为1至500。keyword 支持用户名/SG 号子串、规范化手机号精确匹配和 Unicode NFC 姓名包含搜索；姓名搜索在范围内分批验签、匹配和计数。
       security:
       - UserBearer: []
       parameters:
@@ -567,7 +567,7 @@ paths:
                               nullable: true
                             realName:
                               type: string
-                            phoneMasked:
+                            phone:
                               type: string
                             deptId:
                               type: string
@@ -583,7 +583,7 @@ paths:
                           - passwordInitialized
                           - source
                           - deptId
-                          - phoneMasked
+                          - phone
                           - realName
                           - sgNo
                           - status
@@ -619,7 +619,7 @@ paths:
                     username: zs
                     sgNo: SG000123
                     realName: 示例用户
-                    phoneMasked: 138****0000
+                    phone: 13800000000
                     deptId: '17'
                     status: 1
                     passwordInitialized: true
@@ -696,7 +696,7 @@ paths:
                         nullable: true
                       realName:
                         type: string
-                      phoneMasked:
+                      phone:
                         type: string
                       deptId:
                         type: string
@@ -713,7 +713,7 @@ paths:
                     - username
                     - sgNo
                     - realName
-                    - phoneMasked
+                    - phone
                     - deptId
                     - status
                     - source
@@ -733,7 +733,7 @@ paths:
                   username: zs
                   sgNo: SG000123
                   realName: 示例用户
-                  phoneMasked: 138****0000
+                  phone: 13800000000
                   deptId: '17'
                   status: 1
                   passwordInitialized: true
@@ -806,7 +806,7 @@ paths:
                         type: string
                       source:
                         type: integer
-                      phoneMasked:
+                      phone:
                         type: string
                       deptId:
                         type: string
@@ -817,7 +817,7 @@ paths:
                     - userId
                     - username
                     - source
-                    - phoneMasked
+                    - phone
                     - deptId
                     - status
                 additionalProperties: false
@@ -834,7 +834,7 @@ paths:
                   userId: '301'
                   username: temp301
                   source: 2
-                  phoneMasked: 138****0000
+                  phone: 13800000000
                   deptId: '17'
                   status: 1
         '400':
@@ -7313,7 +7313,7 @@ x-development-baseline:
   layers:
   - Controller
   - Service
-  - Mapper
+  - Repository
   redis: false
   authorizationStorage: MySQL primary, fresh request transaction
   audit: synchronous MySQL commit before ALLOW

@@ -9,24 +9,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.exception.GlobalExceptionHandler;
-import com.whatname.iam.common.security.SensitiveDataCodec;
+import com.whatname.iam.common.security.PhoneNumbers;
 import com.whatname.iam.controller.department.DepartmentController;
 import com.whatname.iam.dto.department.DepartmentRequests;
 import com.whatname.iam.entity.department.Department;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
+import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.event.*;
 import com.whatname.iam.support.TestDatabase;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
-import org.apache.ibatis.session.ResultHandler;
-import org.apache.ibatis.session.RowBounds;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -52,13 +48,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 class DepartmentBusinessIntegrationTest {
     @TestConfiguration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({"com.whatname.iam.mapper.department", "com.whatname.iam.mapper.event"})
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({"com.whatname.iam.repository.department", "com.whatname.iam.repository.event"})
     @Import({
         DepartmentService.class,
         ExternalEventService.class,
         DepartmentController.class,
         GlobalExceptionHandler.class,
-        SensitiveDataCodec.class
     })
     static class TestApplication {
         @Bean
@@ -77,27 +73,17 @@ class DepartmentBusinessIntegrationTest {
         }
     }
 
-    /** Observe the actual recovery mapper connection, without replacing its SQL or transaction. */
-    @Intercepts(
-            @Signature(
-                    type = Executor.class,
-                    method = "query",
-                    args = {
-                        MappedStatement.class,
-                        Object.class,
-                        RowBounds.class,
-                        ResultHandler.class
-                    }))
-    static class RecoveryLockObserver implements Interceptor {
+    /** Observe the actual recovery repository connection, without replacing its SQL or transaction. */
+    @org.aspectj.lang.annotation.Aspect
+    static class RecoveryLockObserver extends com.whatname.iam.support.RepositoryProbe {
         final ThreadLocal<CompletableFuture<Long>> nextLock = new ThreadLocal<>();
         final ThreadLocal<PausedBusinessLock> beforeBusinessLock = new ThreadLocal<>();
 
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
             boolean eventLock =
-                    ((MappedStatement) invocation.getArgs()[0])
-                            .getId()
-                            .equals("com.whatname.iam.mapper.event.ExternalEventMapper.lock");
+                    invocation.id()
+                            .equals("com.whatname.iam.repository.event.ExternalEventRepository.lock");
             var pause = beforeBusinessLock.get();
             // The claim transaction performs its initial lookup and inserted-row lookup first.
             if (eventLock && pause != null && ++pause.calls == 3) {
@@ -109,9 +95,7 @@ class DepartmentBusinessIntegrationTest {
             if (signal != null && eventLock) {
                 nextLock.remove();
                 try (var statement =
-                                ((Executor) invocation.getTarget())
-                                        .getTransaction()
-                                        .getConnection()
+                                invocation.connection()
                                         .createStatement();
                         var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
                     assertTrue(result.next());
@@ -130,13 +114,13 @@ class DepartmentBusinessIntegrationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableAutoConfiguration
-    @MapperScan({"com.whatname.iam.mapper.department", "com.whatname.iam.mapper.event"})
+    @EntityScan("com.whatname.iam.entity")
+    @EnableJpaRepositories({"com.whatname.iam.repository.department", "com.whatname.iam.repository.event"})
     @Import({
         DepartmentService.class,
         ExternalEventService.class,
         DepartmentController.class,
         GlobalExceptionHandler.class,
-        SensitiveDataCodec.class,
         DepartmentAccessService.class
     })
     static class DefaultApplication {}
@@ -260,7 +244,7 @@ class DepartmentBusinessIntegrationTest {
     ExternalEventService events;
     TestPort port;
     ObjectMapper json;
-    SensitiveDataCodec codec;
+
     String prefix;
     String base;
     List<Map<String, Object>> seedBefore;
@@ -284,8 +268,6 @@ class DepartmentBusinessIntegrationTest {
                                         TestDatabase.arguments(
                                                 "--server.port=18086",
                                                 "--server.address=127.0.0.1",
-                                                "--iam.security.data-key=" + key,
-                                                "--iam.security.phone-hmac-key=" + hmacKey,
                                                 "--logging.level.root=WARN",
                                                 "--spring.main.banner-mode=off"));
         db = app.getBean(JdbcTemplate.class);
@@ -293,7 +275,6 @@ class DepartmentBusinessIntegrationTest {
         events = app.getBean(ExternalEventService.class);
         port = app.getBean(TestPort.class);
         json = app.getBean(ObjectMapper.class);
-        codec = app.getBean(SensitiveDataCodec.class);
         base = "http://127.0.0.1:18086/api/v1";
         seedBefore =
                 db.queryForList(
@@ -375,12 +356,11 @@ class DepartmentBusinessIntegrationTest {
                                         % 100_000_000L);
         db.update(
                 "INSERT INTO"
-                    + " sys_user(username,real_name_ciphertext,phone,phone_hash,password_hash,employee_no,dept_id,source,employment_type,hr_version)"
-                    + " VALUES(?,?,?,?,?,?,?,1,1,10)",
+                    + " sys_user(username,real_name,phone,password_hash,employee_no,dept_id,source,employment_type,hr_version)"
+                    + " VALUES(?,?,?,?,?,?,1,1,10)",
                 name,
-                codec.encrypt("isolated test"),
-                codec.encrypt(phone),
-                codec.phoneHash(phone),
+                ("isolated test"),
+                (phone),
                 "test-not-login-hash",
                 sg,
                 dept);
@@ -745,11 +725,11 @@ class DepartmentBusinessIntegrationTest {
                                         time)));
         assertTrue(
                 db.queryForObject(
-                                "SELECT payload_ciphertext FROM sys_external_event WHERE"
+                                "SELECT payload_json FROM sys_external_event WHERE"
                                         + " event_id=?",
                                 String.class,
                                 request.eventId())
-                        .startsWith("gcm1:"));
+                        .startsWith("{"));
     }
 
     @Test
@@ -1065,10 +1045,10 @@ class DepartmentBusinessIntegrationTest {
                                     }));
             assertEquals("PENDING_RECOVERY", eventState(savedEvent).get("processing_status"));
 
-            var delegate = app.getBean(ExternalEventMapper.class);
+            var delegate = app.getBean(ExternalEventRepository.class);
             var failing =
                     mock(
-                            ExternalEventMapper.class,
+                            ExternalEventRepository.class,
                             org.mockito.AdditionalAnswers.delegatesTo(delegate));
             doThrow(new IllegalStateException("private-record-marker"))
                     .when(failing)
@@ -1076,7 +1056,7 @@ class DepartmentBusinessIntegrationTest {
             var unreliable =
                     new ExternalEventService(
                             failing,
-                            codec,
+
                             port,
                             json,
                             app.getBean(PlatformTransactionManager.class),
@@ -1348,8 +1328,8 @@ class DepartmentBusinessIntegrationTest {
                 };
         var uncertainEvents =
                 new ExternalEventService(
-                        app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
-                        codec,
+                        app.getBean(com.whatname.iam.repository.event.ExternalEventRepository.class),
+
                         port,
                         json,
                         ambiguousCommit,
@@ -1419,8 +1399,8 @@ class DepartmentBusinessIntegrationTest {
                 };
         var uncertainEvents =
                 new ExternalEventService(
-                        app.getBean(com.whatname.iam.mapper.event.ExternalEventMapper.class),
-                        codec,
+                        app.getBean(com.whatname.iam.repository.event.ExternalEventRepository.class),
+
                         port,
                         json,
                         ambiguousReceipt,
@@ -1740,8 +1720,8 @@ class DepartmentBusinessIntegrationTest {
                                     throw new BusinessException(ErrorCode.AUDIT_UNAVAILABLE);
                                 }));
         db.update(
-                "UPDATE sys_external_event SET payload_ciphertext=? WHERE event_id=?",
-                codec.encrypt("tampered retained canonical payload"),
+                "UPDATE sys_external_event SET payload_json=? WHERE event_id=?",
+                ("tampered retained canonical payload"),
                 event);
         var before = eventState(event);
         error(

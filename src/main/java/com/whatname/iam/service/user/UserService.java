@@ -7,7 +7,7 @@ import com.whatname.iam.common.util.IdUtils;
 import com.whatname.iam.dto.common.PageResponse;
 import com.whatname.iam.dto.user.UserRequests.*;
 import com.whatname.iam.entity.user.UserAccount;
-import com.whatname.iam.mapper.user.UserAccountMapper;
+import com.whatname.iam.repository.user.UserAccountRepository;
 import com.whatname.iam.service.auth.AuthService;
 import com.whatname.iam.service.auth.NamePinyin;
 import com.whatname.iam.service.auth.PasswordHasher;
@@ -22,27 +22,26 @@ import java.util.*;
 
 @Service
 public class UserService {
-    private final UserAccountMapper users;
+    private final UserAccountRepository users;
     private final AuthService auth;
     private final JwtTokenService jwt;
-    private final SensitiveDataCodec codec;
+
     private final AccountSecurity security;
     private final PasswordHasher hasher;
     private static final int SEARCH_BATCH_SIZE = 200;
     private final TransactionTemplate tx;
 
     public UserService(
-            UserAccountMapper users,
+            UserAccountRepository users,
             AuthService auth,
             JwtTokenService jwt,
-            SensitiveDataCodec codec,
+
             AccountSecurity security,
             PasswordHasher hasher,
             PlatformTransactionManager manager) {
         this.users = users;
         this.auth = auth;
         this.jwt = jwt;
-        this.codec = codec;
         this.security = security;
         this.hasher = hasher;
         tx = new TransactionTemplate(manager);
@@ -55,7 +54,7 @@ public class UserService {
             String username,
             String sgNo,
             String realName,
-            String phoneMasked,
+            String phone,
             String deptId,
             int status,
             boolean passwordInitialized,
@@ -65,7 +64,7 @@ public class UserService {
             String userId,
             String username,
             int source,
-            String phoneMasked,
+            String phone,
             String deptId,
             int status) {}
 
@@ -83,7 +82,7 @@ public class UserService {
         validateListRequest(keyword, accountStatus, source, page, pageSize);
         Long department = deptId == null ? null : IdUtils.parse(deptId);
         String term = keyword == null || keyword.isBlank() ? null : keyword.strip();
-        String phoneHash = searchPhoneHash(term);
+        String phoneLookup = searchPhone(term);
         var principal = jwt.verifyBearer(bearer);
         return tx.execute(
                 status -> {
@@ -107,7 +106,7 @@ public class UserService {
                                             scope,
                                             department,
                                             term,
-                                            phoneHash,
+                                            phoneLookup,
                                             accountStatus,
                                             source,
                                             page,
@@ -128,11 +127,11 @@ public class UserService {
         }
     }
 
-    private String searchPhoneHash(String term) {
+    private String searchPhone(String term) {
         if (term == null || !term.matches("(?:\\+86)?1[3-9][0-9]{9}")) {
             return null;
         }
-        return codec.phoneHash(SensitiveDataCodec.normalizePhone(term));
+        return (PhoneNumbers.normalize(term));
     }
 
     private PageResponse<UserView> listPage(
@@ -151,12 +150,12 @@ public class UserService {
         return new PageResponse<>(items, page, pageSize, count);
     }
 
-    /** 姓名已加密，必须在同一事务快照内逐批验签、解密；总数也按实际匹配计算。 */
+    /** 同一事务快照内逐批验签并做 Unicode 姓名匹配；总数按实际匹配计算。 */
     private PageResponse<UserView> searchPage(
             Set<Long> scope,
             Long department,
             String term,
-            String phoneHash,
+            String phoneLookup,
             Integer status,
             Integer source,
             int page,
@@ -172,14 +171,14 @@ public class UserService {
                             scope,
                             department,
                             term,
-                            phoneHash,
+                            phoneLookup,
                             status,
                             source,
                             afterId,
                             SEARCH_BATCH_SIZE);
             for (UserAccount user : batch) {
                 security.verifyIdentity(user);
-                String name = codec.decrypt(user.realNameCiphertext);
+                String name = user.realName;
                 boolean matched =
                         Boolean.TRUE.equals(user.identifierMatched)
                                 || normalizeName(name, ErrorCode.INTEGRITY_FAILURE)
@@ -217,7 +216,7 @@ public class UserService {
     public Created createTemporary(String bearer, Temporary input) {
         long deptId = IdUtils.parse(input.deptId());
         var principal = jwt.verifyBearer(bearer);
-        String normalized = SensitiveDataCodec.normalizePhone(input.phone());
+        String normalized = PhoneNumbers.normalize(input.phone());
         // Unrecoverable random secret is never returned and is never password history.
         try {
             return tx.execute(
@@ -237,7 +236,7 @@ public class UserService {
                                 u.id.toString(),
                                 u.username,
                                 2,
-                                mask(normalized),
+                                normalized,
                                 u.deptId.toString(),
                                 1);
                     });
@@ -260,9 +259,8 @@ public class UserService {
                         + new java.math.BigInteger(
                                         UUID.randomUUID().toString().replace("-", ""), 16)
                                 .toString();
-        u.realNameCiphertext = codec.encrypt(input.realName().strip());
-        u.phone = codec.encrypt(normalized);
-        u.phoneHash = codec.phoneHash(normalized);
+        u.realName = input.realName().strip();
+        u.phone = normalized;
         u.passwordHash = placeholder;
         u.deptId = deptId;
         u.createdBy = actorId;
@@ -333,19 +331,17 @@ public class UserService {
 
     private UserView view(UserAccount u) {
         security.verifyIdentity(u);
-        return view(u, codec.decrypt(u.realNameCiphertext));
+        return view(u, u.realName);
     }
 
     private UserView view(UserAccount u, String name) {
-        String phone = SensitiveDataCodec.normalizePhone(codec.decrypt(u.phone));
-        if (!codec.phoneHash(phone).equals(u.phoneHash))
-            throw new BusinessException(ErrorCode.INTEGRITY_FAILURE);
+        String phone = PhoneNumbers.normalize(u.phone);
         return new UserView(
                 u.id.toString(),
                 u.username,
                 u.employeeNo,
                 name,
-                mask(phone),
+                phone,
                 u.deptId.toString(),
                 u.status,
                 u.passwordInitialized == 1,
@@ -364,7 +360,4 @@ public class UserService {
         return java.text.Normalizer.normalize(value.strip(), java.text.Normalizer.Form.NFC);
     }
 
-    private static String mask(String phone) {
-        return phone.substring(0, 3) + "****" + phone.substring(7);
-    }
 }

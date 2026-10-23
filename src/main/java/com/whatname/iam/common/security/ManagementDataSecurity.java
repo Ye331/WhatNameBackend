@@ -185,9 +185,8 @@ public class ManagementDataSecurity {
                         old,
                         current,
                         Set.of(
-                                "real_name_ciphertext",
+                                "real_name",
                                 "phone",
-                                "phone_hash",
                                 "dept_id",
                                 "employment_type",
                                 "status",
@@ -449,9 +448,8 @@ public class ManagementDataSecurity {
     private void sameIdentity(UserAccount u, Map<String, Object> row) {
         equal(row, "id", u.id);
         equal(row, "username", u.username);
-        equal(row, "real_name_ciphertext", u.realNameCiphertext);
+        equal(row, "real_name", u.realName);
         equal(row, "phone", u.phone);
-        equal(row, "phone_hash", u.phoneHash);
         equal(row, "password_hash", u.passwordHash);
         equal(row, "employee_no", u.employeeNo);
         equal(row, "dept_id", u.deptId);

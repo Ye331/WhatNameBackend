@@ -3,9 +3,6 @@ package com.whatname.iam.service.grant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.IamApplication;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -28,17 +25,13 @@ public final class BatchRecoveryProcess {
         }
     }
 
-    @Intercepts(
-            @Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class CrashInterceptor implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class CrashInterceptor extends com.whatname.iam.support.RepositoryProbe {
         public Object intercept(Invocation call) throws Throwable {
-            String id = ((MappedStatement) call.getArgs()[0]).getId();
+            String id = call.id();
             Object result = call.proceed();
-            boolean applied = id.endsWith("BatchMapper.applied");
-            boolean reserved = id.endsWith("BatchMapper.reserve");
+            boolean applied = id.endsWith("BatchRepository.applied");
+            boolean reserved = id.endsWith("BatchRepository.reserve");
             if (("APPLIED".equals(crash) && applied) || ("RESERVE".equals(crash) && reserved)) {
                 TransactionSynchronizationManager.registerSynchronization(
                         new TransactionSynchronization() {

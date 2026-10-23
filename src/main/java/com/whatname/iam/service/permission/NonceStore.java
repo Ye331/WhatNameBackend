@@ -3,7 +3,7 @@ package com.whatname.iam.service.permission;
 import static com.whatname.iam.common.api.ErrorCode.INVALID_SERVICE;
 
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.mapper.service.ServiceIdentityMapper;
+import com.whatname.iam.repository.service.ServiceIdentityRepository;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,16 +21,16 @@ import java.time.ZoneOffset;
  */
 @Service
 public class NonceStore {
-    private final ServiceIdentityMapper mapper;
+    private final ServiceIdentityRepository repository;
 
-    public NonceStore(ServiceIdentityMapper mapper) {
-        this.mapper = mapper;
+    public NonceStore(ServiceIdentityRepository repository) {
+        this.repository = repository;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void consume(String clientId, String nonce, LocalDateTime expiresAt) {
         try {
-            mapper.insertNonce(clientId, nonce, expiresAt);
+            repository.insertNonce(clientId, nonce, expiresAt);
         } catch (DuplicateKeyException replay) {
             throw new BusinessException(INVALID_SERVICE);
         }
@@ -41,6 +41,6 @@ public class NonceStore {
             initialDelayString = "${iam.security.service-auth.nonce-cleanup-delay-ms:300000}")
     @Transactional
     public void purgeExpired() {
-        mapper.deleteExpiredNonces(LocalDateTime.now(ZoneOffset.ofHours(8)));
+        repository.deleteExpiredNonces(LocalDateTime.now(ZoneOffset.ofHours(8)));
     }
 }

@@ -67,13 +67,12 @@ class BatchAsyncIT {
         for (long user : new long[] {1, 2})
             jdbc.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status)"
-                        + " VALUES(?,?,?,?,?,?,1,3,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status)"
+                        + " VALUES(?,?,?,?,?,1,3,1)",
                     user,
                     "async_" + user,
                     "test-only",
-                    "test-only",
-                    String.format("%064x", user),
+                    String.format("138%08d", user),
                     "test-only");
         jdbc.update("INSERT INTO sys_admin(user_id,admin_level,dept_id,status) VALUES(1,1,1,1)");
         jdbc.update(

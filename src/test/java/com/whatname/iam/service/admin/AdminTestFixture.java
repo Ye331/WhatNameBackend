@@ -1,13 +1,13 @@
 package com.whatname.iam.service.admin;
 
 import com.whatname.iam.entity.admin.AdminData.*;
-import com.whatname.iam.mapper.admin.AdminMapper;
+import com.whatname.iam.repository.admin.AdminRepository;
 import com.whatname.iam.support.Fakes;
 
 import java.util.*;
 
 /** 为服务测试提供内存数据替身；真实事务行为由 AdminIT 使用 MySQL 验证。 */
-public class AdminTestFixture implements AdminMapper {
+public class AdminTestFixture implements AdminRepository {
     public final Map<Long, Appointment> appointments = new TreeMap<>();
     public final Map<Long, Department> departments = new TreeMap<>();
     public final Map<Long, User> users = new TreeMap<>();

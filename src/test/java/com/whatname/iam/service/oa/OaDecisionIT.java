@@ -13,9 +13,6 @@ import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.service.event.TrustedEventContext;
 import com.whatname.iam.service.permission.*;
 
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.plugin.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -108,7 +105,6 @@ class OaDecisionIT {
         r.add(
                 "iam.security.data-signing.public-keys.oa-test",
                 () -> base64(ED.getPublic().getEncoded()));
-        r.add("iam.security.data-key", () -> base64(new byte[32]));
     }
 
     static class Caller extends ServiceOaCaller {
@@ -140,30 +136,26 @@ class OaDecisionIT {
         }
     }
 
-    @Intercepts(
-            @org.apache.ibatis.plugin.Signature(
-                    type = Executor.class,
-                    method = "update",
-                    args = {MappedStatement.class, Object.class}))
-    static class Fault implements Interceptor {
+    @org.aspectj.lang.annotation.Aspect
+    static class Fault extends com.whatname.iam.support.RepositoryProbe {
         volatile String point, hit;
         volatile CountDownLatch ready, release;
 
         public Object intercept(Invocation call) throws Throwable {
-            var statement = (MappedStatement) call.getArgs()[0];
-            String id = statement.getId();
+            var statement = call;
+            String id = statement.id();
             Object result = call.proceed();
-            if (id.endsWith("ExternalEventMapper.applied") && ready != null) {
+            if (id.endsWith("ExternalEventRepository.applied") && ready != null) {
                 ready.countDown();
                 if (!release.await(15, TimeUnit.SECONDS))
                     throw new AssertionError("fixture release timeout");
             }
             if (point != null
-                    && ((id.endsWith("SignatureMapper.save")
-                                    && point.equals(((Map<?, ?>) call.getArgs()[1]).get("type")))
-                            || (id.endsWith("AuditMapper.insert")
+                    && ((id.endsWith("SignatureRepository.save")
+                                    && point.equals(((Map<?, ?>) call.parameters()).get("type")))
+                            || (id.endsWith("AuditRepository.insert")
                                     && point.equals(
-                                            ((Map<?, ?>) call.getArgs()[1]).get("operation")))
+                                            ((Map<?, ?>) call.parameters()).get("operation")))
                             || id.endsWith("." + point))) {
                 hit = point;
                 throw new IllegalStateException("fixture persistence failure");
@@ -229,11 +221,11 @@ class OaDecisionIT {
         for (int u : List.of(10, 20))
             db.update(
                     "INSERT INTO"
-                        + " sys_user(id,username,real_name_ciphertext,phone,phone_hash,password_hash,dept_id,source,status,password_initialized)"
-                        + " VALUES(?,?,'fixture','fixture',?,'fixture',?,3,?,1)",
+                        + " sys_user(id,username,real_name,phone,password_hash,dept_id,source,status,password_initialized)"
+                        + " VALUES(?,?,'fixture',?,'fixture',?,3,?,1)",
                     id(u),
                     "U" + id(u),
-                    String.format("%064x", id(u)),
+                    String.format("138%08d", id(u)),
                     id(2),
                     u == 10 ? 3 : 1);
         db.update(

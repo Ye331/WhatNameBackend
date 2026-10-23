@@ -6,7 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.exception.BusinessException;
 import com.whatname.iam.common.util.IdUtils;
-import com.whatname.iam.mapper.audit.AuditMapper;
+import com.whatname.iam.repository.audit.AuditRepository;
 import com.whatname.iam.service.permission.*;
 
 import org.springframework.stereotype.Service;
@@ -20,17 +20,17 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.REPEATABLE_READ)
 public class AuditQueryService {
-    private final AuditMapper mapper;
+    private final AuditRepository repository;
     private final PermissionReadScope scope;
     private final DataSignatureService signatures;
     private final ObjectMapper json;
 
     public AuditQueryService(
-            AuditMapper mapper,
+            AuditRepository repository,
             PermissionReadScope scope,
             DataSignatureService signatures,
             ObjectMapper json) {
-        this.mapper = mapper;
+        this.repository = repository;
         this.scope = scope;
         this.signatures = signatures;
         this.json = json;
@@ -43,7 +43,7 @@ public class AuditQueryService {
         var permitted = scope.departments(authorization, "IAM_AUDIT_VIEW");
         if (permitted.departments().isEmpty()) return paged(List.of(), page, size, 0);
         var items =
-                mapper
+                repository
                         .operations(
                                 permitted.departments(),
                                 permitted.global(),
@@ -58,7 +58,7 @@ public class AuditQueryService {
                 items,
                 page,
                 size,
-                mapper.operationCount(
+                repository.operationCount(
                         permitted.departments(), permitted.global(), authorizations, user));
     }
 
@@ -68,7 +68,7 @@ public class AuditQueryService {
         var permitted = scope.departments(authorization, "IAM_AUDIT_VIEW");
         if (permitted.departments().isEmpty()) return paged(List.of(), page, size, 0);
         var items =
-                mapper
+                repository
                         .logins(
                                 permitted.departments(),
                                 permitted.global(),
@@ -99,7 +99,7 @@ public class AuditQueryService {
                 items,
                 page,
                 size,
-                mapper.loginCount(permitted.departments(), permitted.global(), user));
+                repository.loginCount(permitted.departments(), permitted.global(), user));
     }
 
     /**
@@ -110,9 +110,9 @@ public class AuditQueryService {
         long id = IdUtils.parse(eventId);
         var permitted = scope.departments(authorization, "IAM_AUDIT_VIEW");
         if (permitted.departments().isEmpty()
-                || mapper.visible(id, permitted.departments(), permitted.global()) != 1)
+                || repository.visible(id, permitted.departments(), permitted.global()) != 1)
             throw new BusinessException(RESOURCE_NOT_FOUND);
-        var row = mapper.operation(id);
+        var row = repository.operation(id);
         var retained = evidence(row);
         var result = new LinkedHashMap<String, Object>();
         result.put("eventId", eventId);

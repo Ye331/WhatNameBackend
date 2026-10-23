@@ -7,8 +7,8 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.whatname.iam.common.api.ErrorCode;
 import com.whatname.iam.common.exception.BusinessException;
-import com.whatname.iam.common.security.SensitiveDataCodec;
-import com.whatname.iam.mapper.event.ExternalEventMapper;
+import com.whatname.iam.common.security.PhoneNumbers;
+import com.whatname.iam.repository.event.ExternalEventRepository;
 import com.whatname.iam.service.department.DepartmentAccessService;
 import com.whatname.iam.service.permission.ServiceOaCaller;
 
@@ -93,7 +93,7 @@ class ExternalEventAuthenticationTest {
                                         }));
         assertEquals(ErrorCode.INVALID_SERVICE, error.errorCode());
         assertEquals("REJECTED", f.row.get("status"));
-        verify(f.mapper, never()).applied(anyLong(), anyString());
+        verify(f.repository, never()).applied(anyLong(), anyString());
         verifyNoInteractions(f.hr);
     }
 
@@ -148,13 +148,13 @@ class ExternalEventAuthenticationTest {
                 .verifyTrustedEvent(any(), any());
         var service =
                 new ExternalEventService(
-                        f.mapper, f.codec, f.hr, new ObjectMapper(), new MemoryTransactions(), oa);
+                        f.repository, f.hr, new ObjectMapper(), new MemoryTransactions(), oa);
         var error =
                 assertThrows(
                         BusinessException.class,
                         () -> service.execute(actor("OA"), command("OA_DECISION"), Map::of));
         assertEquals(ErrorCode.INVALID_SERVICE, error.errorCode());
-        verifyNoInteractions(f.mapper, f.hr);
+        verifyNoInteractions(f.repository, f.hr);
     }
 
     @Test
@@ -165,7 +165,7 @@ class ExternalEventAuthenticationTest {
                         BusinessException.class,
                         () -> f.service.execute(actor("OA"), command("HR_TRANSFER"), Map::of));
         assertEquals(ErrorCode.INVALID_SERVICE, error.errorCode());
-        verifyNoInteractions(f.mapper, f.oa, f.hr);
+        verifyNoInteractions(f.repository, f.oa, f.hr);
     }
 
     private static TrustedEventContext actor(String source) {
@@ -184,17 +184,15 @@ class ExternalEventAuthenticationTest {
     }
 
     private static final class Fixture {
-        final ExternalEventMapper mapper = mock(ExternalEventMapper.class);
-        final SensitiveDataCodec codec = mock(SensitiveDataCodec.class);
+        final ExternalEventRepository repository = mock(ExternalEventRepository.class);
         final DepartmentAccessService hr = mock(DepartmentAccessService.class);
         final ServiceOaCaller oa = mock(ServiceOaCaller.class);
         Map<String, Object> row;
         final ExternalEventService service;
 
         Fixture() {
-            when(codec.encrypt(anyString())).thenReturn("encrypted");
-            when(mapper.lock(anyString(), anyString())).thenAnswer(call -> row);
-            when(mapper.insert(
+            when(repository.lock(anyString(), anyString())).thenAnswer(call -> row);
+            when(repository.insert(
                             anyString(),
                             anyString(),
                             anyString(),
@@ -212,14 +210,14 @@ class ExternalEventAuthenticationTest {
                                 row.put("status", "PROCESSING");
                                 return 1;
                             });
-            when(mapper.applied(anyLong(), anyString()))
+            when(repository.applied(anyLong(), anyString()))
                     .thenAnswer(
                             call -> {
                                 row.put("status", "APPLIED");
                                 row.put("result", call.getArgument(1));
                                 return 1;
                             });
-            when(mapper.failed(anyLong(), anyString(), anyString()))
+            when(repository.failed(anyLong(), anyString(), anyString()))
                     .thenAnswer(
                             call -> {
                                 row.put("status", call.getArgument(1));
@@ -227,7 +225,7 @@ class ExternalEventAuthenticationTest {
                             });
             service =
                     new ExternalEventService(
-                            mapper, codec, hr, new ObjectMapper(), new MemoryTransactions(), oa);
+                            repository, hr, new ObjectMapper(), new MemoryTransactions(), oa);
         }
     }
 
