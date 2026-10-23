@@ -295,6 +295,11 @@ class PermissionAuditIntegrationTest {
                 Set.of(Long.toString(directory), Long.toString(menu), Long.toString(secondMenu)),
                 ids(result.at("/data/menus")));
         assertFalse(ids(result.at("/data/menus")).contains("0"));
+        for (var item : result.at("/data/menus")) {
+            assertTrue(item.path("menuType").isInt(), "menuType must be a numeric enum, not an ID string");
+            assertTrue(Set.of(1, 2).contains(item.path("menuType").asInt()));
+            assertTrue(item.path("menuId").isTextual(), "BIGINT IDs must remain strings");
+        }
         assertTrue(check().at("/data/allowed").asBoolean());
         var first = check().path("data");
         var second = check().path("data");
