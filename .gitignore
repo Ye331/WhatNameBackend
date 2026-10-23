@@ -51,3 +51,7 @@ Desktop.ini
 # Python 本地校验缓存
 __pycache__/
 *.pyc
+
+# 本地文档备份与归档文件
+/docs/archive/
+/docs/contracts/source-manifest.json

@@ -1,195 +1,39 @@
-## 课程作业范围简化验证（2026-10-23）
+# 测试说明与验证结果
 
-本轮先留档后缩减需求，历史提交为后端 a18d128、前端 00ad125；当前行为见 [课程范围](COURSEWORK_SCOPE.md)。下方旧记录属于旧版验证，不代表本轮范围。
+验证日期：2026-10-23。使用干净构建连续执行全部默认Java测试和8个集成测试类，结果为BUILD SUCCESS，后端耗时18分27秒。
 
-- 后端分轮执行规则、HTTP、真实 MySQL 与集成测试；按 classname + testcase name 去重后 **740 项通过，0失败、0错误、0跳过**。报告位于 target/surefire-reports 与 target/failsafe-reports；重复执行的 GrantIT 不重复计数。
-- 前端浏览器测试 **37项通过**，包含同步批量、100人上限、仅重试明确失败项、未知结果不自动重发、无任务恢复及管理员操作。前端生产构建通过；本轮修改文件的格式检查通过。
-- 04–09学习手册 **49个接口**与实际Controller一致，无遗漏、无重复；示例JSON和代码链接检查通过。OpenAPI共55个操作，JSON/YAML可解析，GR06已移除。
-- 数据库 ck_auth_allowed_path 已改为验证基础日志的 decisionId、metadata、seal，不再要求五类完整权限事实。现有演示库先做完整备份，再应用课程范围迁移；未删除历史数据。
-- 已删除后台批量执行器、线程池配置和恢复扫描，以及只服务于已取消需求的测试；保留授权历史、签名、会话、范围及基础安全边界验证。
-- 专门验证离职时任命已撤销但本人仍有残留清单的情况：清理后更新版本与签名；旧版下级委派记录不再阻止再入职。
-
-复核命令：Maven wrapper test；启用 integration-tests 的 verify；前端 npm test -- --workers=2 与 npm run build。由于真实MySQL与历史签名测试耗时较长，本轮失败项按新规则修正后定向复测，以上汇总来自每个用例的最新报告。
-
-> 当前验收按 [2026-10-23 课程作业简化范围](COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
-
-# 测试与验证
-
-## 统一入口
-
-需要 JDK 21、Python 和可用的 Docker。在 backend 目录执行：
-
-```powershell
-.\scripts\dev.ps1 test                # 日常：数据脚本测试 + 默认 *Test
-.\scripts\dev.ps1 test -Integration   # 追加全部 *IT 集成测试，耗时较长
-```
-
-每个数据库测试类用 Testcontainers 启动一个临时 MySQL，只加载 db/schema.sql 和最小测试夹具，结束后删除，不连接个人数据库。手工联调见 [system.http](../requests/system.http)。
-
-## 结构精简与受控初始化验证（2026-10-21）
-
-本轮删除了端口接口、单实现接口和装配配置类，新增 `InitializationService`。业务判断、加锁、签名、审计未改动。
-
-| 范围 | 结果 |
+| 验证范围 | 结果 |
 | --- | --- |
-| 默认测试（全部 *Test 类） | 整套运行中 3 个类因测试替身改为继承后带上事务代理而失败（AccountManagement、HrIntegrity、HrBusiness）；修正替身后这 3 个类重跑通过，其余类首次即通过 |
-| 新增 InitializationServiceTest | 3 项通过：小样本导入、超级用户登录并通过正常接口授权、重复初始化被拒、撤销任命后兜底恢复 |
-| 集成测试 AdminIT、GrantIT、GrantIntegrationIT、GrantHistoryIT、HrGrantCollaborationIT、OaDecisionIT、ServiceRequestAuthenticationIT、TrustedServiceE2EIT、BatchAsyncIT | **258 项通过，0 失败**，与重构前记录的 258 项一致 |
-| 真实 Excel 数据（一次性检查，未纳入测试源码） | 导入 111 个部门、10000 名员工及超级用户，约 284 秒；超级用户登录后查询用户列表约 3.6 秒 |
-| 测试命名整合 | 测试中的分工代号统一改为功能名（如 `TestD` → `FakeDataSecurity`、`task06` → `dept`，`DBackedManagementDataSecurityTest` → `ManagementDataSecurityTest`），注释中的 A/B/C/D、M5/M6 改为模块名称；受影响的 6 个类与资源角色、审计、部门访问、批量输入补测共 11 个类重跑，**264 项通过** |
-| 前端 | npm run build、npm run format:check 通过 |
+| 后端默认测试（Surefire） | 498项通过 |
+| 后端集成测试（Failsafe） | 250项通过 |
+| 后端 Java 合计 | **748项通过，0失败、0错误、0跳过** |
+| Python 数据整理脚本测试 | 4项通过，另计 |
+| 前端 Playwright 浏览器测试 | **39项通过**，约44秒 |
+| 前端生产构建 | 通过 |
+| 后端行覆盖率 | **92.53%（6674/7213）** |
+| 后端分支覆盖率 | **76.63%（2492/3252）** |
+| 同步批量 BatchService | 行覆盖34/34、分支覆盖12/12，均100% |
 
-BatchGrantIT、BatchRecoveryIT（大批量与恢复）本轮未运行。
+## 验证内容
 
-### 整套覆盖率（一次连续 clean verify）
+后端测试验证逐人独立事务、单人业务失败后继续、全部失败、指定来源回收、完整性错误中止、提交确认丢失、无效会话和外层事务拒绝。真实数据库回滚由现有 GrantIT 等集成用例同时验证；Mockito用例只验证编排边界。前端测试检查缺少逐人结果、旧异步状态，确保不展示成功或允许重试未知结果。
 
-```powershell
-.\mvnw.cmd '-Pcoverage,integration-tests' '-Dit.test=AdminIT,GrantIT,GrantIntegrationIT,GrantHistoryIT,HrGrantCollaborationIT,OaDecisionIT,ServiceRequestAuthenticationIT,TrustedServiceE2EIT,BatchAsyncIT' clean verify
-```
+## 执行方法
 
-结果：**754 项通过，0 失败、0 错误、0 跳过**（默认测试 496 项 + 集成测试 258 项），BUILD SUCCESS。命令与重构前记录相同，可直接比较。
-
-| 范围 | 行覆盖率 | 分支覆盖率 |
-| --- | ---: | ---: |
-| 全部后端 | **94.07%（5726/6087）** | **75.80%（2415/3186）** |
-| 重构前干净重测（参考） | 91.53% | 71.39% |
-
-| Service 包 | 行覆盖率 | 分支覆盖率 |
-| --- | ---: | ---: |
-| 账号 user | 100.00% | 87.96% |
-| 角色 role | 99.17% | 92.50% |
-| 资源 resource | 98.71% | 90.20% |
-| 审计 audit | 98.45% | 94.92% |
-| HR hr | 96.09% | 67.57% |
-| 部门 department | 95.22% | 81.63% |
-| 管理员 admin | 94.91% | 75.51% |
-| 在线权限 permission | 94.59% | 71.33% |
-| 认证 auth | 93.02% | 84.92% |
-| 授权 grant | 92.72% | 70.31% |
-| 事件 event | 91.49% | 73.97% |
-| 初始化 system | 86.64% | 71.43% |
-| OA oa | 100.00% | 72.92% |
-
-初始化包中 `InitializationService` 行覆盖 98.67%；`InitializationRunner`（命令行入口，执行后退出进程）没有自动化测试，是该包偏低的原因。分支覆盖较低的是 HR、授权、在线权限，主要是批量恢复、HR/OA 联动和各种故障组合。
-
-报告：target/site/jacoco/index.html。
-
-耗时说明：GrantHistoryIT 约 23 分钟、GrantIntegrationIT 约 5 分钟，原因是每次操作都会对整个组织和历史记录验签，测试数据增多后越来越慢。这与“鉴权不缓存”的取舍同源，见 GUIDE 已知限制。
-
-## 如何阅读测试和覆盖率
-
-覆盖率入口是 target/site/jacoco/index.html；XML 和 CSV 位于同目录。业务代码没有通过排除配置隐藏。行覆盖率表示执行过的行，分支覆盖率表示条件路径，不能代替结果断言，也不能证明代码简单。
-
-按功能阅读测试：InitializationServiceTest、AccountAuthenticationIntegrationTest、AccountManagementIntegrationTest、AccountIntegrityIntegrationTest、DepartmentBusinessIntegrationTest、HrBusinessIntegrationTest、ResourceRoleIntegrationTest、PermissionAuditIntegrationTest，以及授权与管理员的 *IT。
-
-新增边界测试检查空白搜索与普通分页等价、合法签名下电话密文和索引不一致仍拒绝读取、异常 Unicode 输入不改变账号状态，以及 ID 集合去重和非法成员拒绝。现有测试继续检查越权拒绝、回滚、签名与审计故障、并发和事件重复提交。
-
-缺少必需服务的局部应用现在在启动时失败，不再依赖阶段占位实现。未认证 HR 请求由真实认证模块返回 INVALID_SERVICE；对应旧测试已按这一行为修正，未删除拒绝断言。
-
-受控初始化和超级用户恢复已有测试；真实页面完整链路及性能验收仍需单独完成。
-
-## 资源与角色补测（2026-10-21）
-
-新增 12 项，ResourceRoleIntegrationTest 从 12 项增至 24 项。本次整组执行 **24 项通过，0 失败、0 错误、0 跳过**。只修改测试和本文档，未修改正式业务代码。
+先启动 Docker Desktop，安装JDK21、Python、Node.js及Chrome。在PowerShell执行：
 
 ```powershell
-.\mvnw.cmd -Pcoverage -Dtest=ResourceRoleIntegrationTest verify
+cd D:\WhatName\backend
+.\scripts\dev.ps1 test -Integration
+
+cd D:\WhatName\frontend
+npm ci
+npm test -- --workers=2
+npm run build
 ```
 
-新增场景涵盖应用、菜单、API、角色的修改；管理平台与系统角色保护；非法状态、缺失资源、菜单跨应用父节点与自引用；清空映射及旧版本拒绝；HTTP 空修改请求拒绝；审计失败后映射、版本与签名一起回滚，解除故障后可按原版本重试。每项检查持久化结果或未变状态，不仅检查异常。
+后端脚本先跑Python测试，再执行Maven `-Pcoverage,integration-tests clean verify`。如果找不到Java，先将JAVA_HOME设置为自己的JDK21安装目录。数据库测试使用临时MySQL和测试配置，不使用个人演示数据库。前端需要5175、5176端口空闲。
 
-审计故障通过临时测试库的检查约束模拟，仅拒绝本场景的两种审计记录，并在 finally 中移除。无需额外数据库权限，不修改正式数据库结构。
+覆盖率报告为 `backend/target/site/jacoco/index.html`，计数来自同目录 `jacoco.xml` 的顶层LINE、BRANCH counter；测试报告分别在 `target/surefire-reports` 和 `target/failsafe-reports`。运行日志可在执行命令时重定向保存，日志文件不纳入版本控制。
 
-| Service 包 | 补测前行覆盖率 | 补测后行覆盖率 | 补测前分支覆盖率 | 补测后分支覆盖率 |
-| --- | ---: | ---: | ---: | ---: |
-| 资源 resource | 74.28% | **98.71%** | 49.02% | **90.20%** |
-| 角色 role | 70.25% | **99.17%** | 50.00% | **92.50%** |
-
-当前累计覆盖率：行 **93.79%**，分支 **73.28%**。这是前述 651 项整套验证的覆盖数据与本次补测在同一正式代码版本上的累计结果；本次没有重新运行整套测试，不能称为本次全量干净重测。两次结果分别保留，不把未重跑的用例算作本次执行。完整重测仍使用上面的 clean verify 命令。
-
-测试源码：src/test/java/com/whatname/iam/service/resource/ResourceRoleIntegrationTest.java。
-
-## 授权输入、审计和部门访问补测（2026-10-21）
-
-本轮新增四个小型单元测试类，共 **99 项通过，0 失败、0 错误、0 跳过**。正式业务代码未修改；使用项目已有的 JUnit 与 Mockito，不增加依赖。依赖被替换的单元测试验证输入与协作边界，不能替代此前真实数据库的事务回滚测试。
-
-| 测试类 | 项数 | 主要断言 |
-| --- | ---: | --- |
-| BatchInputTest | 28 | 顺序与完全重复目标不影响摘要；角色或原因变化影响摘要；来源字段和回收来源必须一致，冲突目标拒绝 |
-| AuditServiceTest | 25 | 递归拒绝敏感字段；记录元数据合法；请求标识处理；签名、写入失败和证据超限时不写入不完整日志 |
-| AuditQueryServiceTest | 22 | 分页边界、空范围与不可见记录；九种元数据篡改；无效签名和损坏证据拒绝读取 |
-| DepartmentAccessServiceTest | 24 | 加锁后复核会话；范围与功能权限同时检查；HR 上下文、当前身份状态、作用域及操作清单约束 |
-
-```powershell
-.\mvnw.cmd -Pcoverage '-Dtest=BatchInputTest,AuditServiceTest,AuditQueryServiceTest,DepartmentAccessServiceTest' verify
-```
-
-本次命令完整执行成功。累计报告以同一正式代码版本的既有覆盖数据继续收集，**不是重新运行整套测试**。
-
-| 范围 | 累计行覆盖率 | 累计分支覆盖率 |
-| --- | ---: | ---: |
-| 全部后端 | **94.35%** | **75.83%** |
-| 审计 Service 包 | 98.45% | **94.92%** |
-| 部门 Service 包 | 95.01% | **81.63%** |
-| 授权 Service 包 | 92.57% | 70.31% |
-| BatchInput 类 | 93.22% | 90.74% |
-| AuditService 类 | 100.00% | 100.00% |
-| AuditQueryService 类 | 97.22% | 88.46% |
-| DepartmentAccessService 类 | 97.30% | 95.24% |
-
-剩余未覆盖分支主要还涉及批量任务执行/恢复和复杂 HR、OA 授权联动。不能从当前数字推断完整恢复、压力或全部故障组合均已验收。此次没有删除业务判断、排除代码或为了数字改变正式行为。
-
-原 651 项整套验证、资源角色 12 项增量以及本轮 99 项增量应按各自执行范围解读；需要新的全量验收时运行 clean verify。
-
-## 提交前定向复核（2026-10-22）
-
-本次检查覆盖单实现接口合并、依赖注入、初始化与恢复，以及管理员/授权/可信服务调用的主要路径。执行下面的定向验证：
-
-```powershell
-.\mvnw.cmd '-Pintegration-tests' '-Dtest=InitializationServiceTest,ManagementDataSecurityTest,AdminServiceTest,GrantServiceTest,ExternalEventAuthenticationTest,BatchInputTest,AuditServiceTest,AuditQueryServiceTest,DepartmentAccessServiceTest' '-Dit.test=AdminIT,GrantIT,TrustedServiceE2EIT' verify
-```
-
-结果：**195 项通过，0 失败、0 错误、0 跳过**（默认测试 154 项 + 集成测试 41 项）。Python 数据脚本 4 项测试通过，PowerShell 入口语法检查通过，当前文档链接和提交差异空白检查通过。
-
-本次没有重新执行 754 项整套测试，也没有重新收集覆盖率；前面的完整覆盖率属于其注明的历史运行。前端本次仅删除归档资料、更新 README，没有修改页面代码。运行日志位于本地 target/precommit-review.log，不提交。
-
-
-## Spring Data JPA 迁移验证（2026-10-22）
-
-持久层测试已切换到 Spring Data Repository。`DepartmentRepositoryTest` 新增两项迁移专用检查：空 Map 查询与列别名契约，以及原生 JPA 更新清理受管状态、与 JDBC 共享回滚。原故障注入与并发测试使用测试专用 `RepositoryProbe`，仍在真实 MySQL 上运行。
-
-完整验证命令：
-
-```powershell
-.\mvnw.cmd clean verify -Pintegration-tests
-```
-
-另外，使用打包后的 JAR 与不可达的隔离数据库地址进行独立启动检查：`/api/v1/system/ping` 返回 200 / OK，`/api/v1/system/database` 返回 503 / AUTH_STATE_UNAVAILABLE。该检查不加载个人配置，不连接开发数据库。JPA 与 Hibernate 来自正式依赖，测试专用 AOP 故障注入不参与发布。
-
-最终复核（2026-10-23）：上述完整验证共 **814 项通过，0 失败、0 错误、0 跳过**，其中 Surefire 40 个测试类、498 项，Failsafe 11 个测试类、316 项。包含真实 MySQL 事务回滚、并发锁、重复键、2001 个目标批量授权，以及进程中断后的恢复测试。本次未启用覆盖率配置，历史覆盖率不代表迁移后的覆盖率。
-
-本地完整运行日志保留于 `target/jpa-migration-verify.log`，测试明细位于 `target/surefire-reports` 和 `target/failsafe-reports`。清除旧 Mapper 空目录占位文件后，仅强制重新打包，不重复执行测试；正式代码与本次完整验证一致。
-
-## 演示身份与本地签名简化（2026-10-23）
-
-本轮移除姓名/手机号 AES-GCM 加解密和手机号 HMAC 查询索引，改用 `real_name`、规范化 `phone` 及唯一约束；短信记录按 `phone` 查询，外部事件内容改为 `payload_json`。用户接口返回 `phone`，前端与模拟数据同步更新。手机号仍参与身份签名，篡改后拒绝读取的断言保留；旧的密文解密测试改为明文存储与响应测试。
-
-数据签名和审计证据共用签名实现。本地配置可自动生成一对 Ed25519 密钥并持续复用，新增首次生成、重启复用、损坏文件拒绝、显式密钥优先及未启用时不生成的测试。JWT 与短信验证码密钥仍使用原配置。
-
-修复迁移过程发现的问题后，执行完整后端验证：
-
-```powershell
-.\mvnw.cmd verify -Pintegration-tests
-```
-
-结果：**818 项通过，0 失败、0 错误、0 跳过**（Surefire 41 个类 / 502 项，Failsafe 11 个类 / 316 项），命令退出码为 0。包括账号、HR/OA、超级用户初始化及恢复、权限篡改拒绝、事务回滚、并发锁、2001 人批量授权和进程中断恢复。真实签名的 2001 个目标全部成功，每项执行一次，重复运行不增加授权事实；这不代表完成正式性能验收。本轮未重新收集覆盖率。
-
-其他验证：
-
-- 前端 `npm run build` 成功；`npm test -- --workers=2` 的 37 项浏览器测试通过，使用模拟 API。
-- 数据脚本 `python -m unittest discover -s scripts -p 'test_*.py' -q` 的 4 项测试通过。
-- 使用打包 JAR 和实际本地配置连续启动两次，`/api/v1/system/ping` 与 `/api/v1/system/database` 均返回 200 / OK；两次启动后的本地签名密钥文件保持一致，检查过程不输出密钥。
-- JAR 不包含旧 `SensitiveDataCodec`、MyBatis 或本地密钥文件；OpenAPI YAML 解析、276 个本地文档链接及差异空白检查通过。
-- 当前 Docker 库的账号、短信、外部事件均为空后，执行空库字段升级；保留数据库和其他表，没有导入账号或初始化业务数据。有加密业务数据的库需要另行解密并重新签名，升级脚本会拒绝直接处理。
-
-本地日志：`target/privacy-migration-verify.log`，启动检查结果：`target/privacy-smoke-result.json`。报告分别在 `target/surefire-reports`、`target/failsafe-reports`；日志和生成密钥不提交。
+前端测试使用模拟接口，不代表真实前后端页面联调，也没有统计前端代码覆盖率。后端可信服务端到端测试使用真实应用链路与临时数据库。覆盖率只能表明执行范围，不能保证没有缺陷。

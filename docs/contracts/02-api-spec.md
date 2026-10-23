@@ -1,7 +1,3 @@
-> 当前课程作业口径：见 [简化范围](../COURSEWORK_SCOPE.md)。已取消 GR06，批量同步返回；下面各接口按更新后的契约验收。
-
-> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
-
 # 统一权限管理系统：API 接口设计规范
 
 ## 1. 模块归属、契约边界
@@ -105,9 +101,9 @@
 | `eventVersion` | HR 每人员/部门的顺序版本，不应仅依全局时间戳决定顺序 |
 | `processingStatus` | 外部事件成功为 APPLIED；同步批量为 COMPLETED / PARTIAL_SUCCESS / FAILED |
 
-### 2.4 本期已冻结的开发口径
+### 2.4 架构与处理约定
 
-Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部55项接口纳入本期实现范围；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，只记录课堂数据规模的实测耗时。功能权限与M5范围在写入事务中加锁复核。
+Controller → Service → Repository 三层，Spring Data JPA + MySQL，业务接口共55项；无DAO、Redis、消息队列或缓存发布机制。鉴权直接查主库，在本次一致事务读取状态并同步提交审计，只记录课堂数据规模的实测耗时。功能权限与M5范围在写入事务中加锁复核。
 
 - JWT有效期3600秒，携带sv；注销当前jti，重置/暂停/离职递增session_version。
 - 短信码5分钟、间隔60秒、最多5次；重新发送撤销同用途旧码，验证码与密码更新事务核销。演示通过独立模拟发送通道，正式HTTP响应不返回验证码。
@@ -118,7 +114,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 外部事件登记和业务成功结果同事务；失败整体回滚，不提供在线恢复。鉴权返回 allowed、reasonCode、decisionId，不返回权限证据摘要。
 - HR02部门变化必须调用调岗处理；HR版本比较锁定目标行，OA无顺序版本允许数据库event_version=NULL。OA执行角色、部门和操作按服务身份配置校验。
 
-## 3. 接口目录（55项，课程作业范围）
+## 3. 接口目录（55项）
 
 ### M1 身份认证与账号管理
 
@@ -210,7 +206,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 | LG03 | `GET` | `/audit/logins` | 查询登录日志 | `IAM_AUDIT_VIEW+M5_SCOPE` |
 | LG04 | `GET` | `/audit/evidence/{eventId}` | 查询授权或变更审计证据 | `IAM_AUDIT_VIEW+M5_SCOPE` |
 
-**新增编号**：AU05、AU07、AU08（验证码与密码）、GR05（授权依据查询）、AD05—AD06（可授权角色清单）。原 AU06（验证码登录）已按需求删除：登录方式仅保留账号密码、手机号密码两种，短信验证码只用于首次设密与密码重置的本人身份验证。旧有49项仍保留编号；HR01 保留外部部门编码并强制映射至 `sys_dept.id`，HR02 路径变量明确为 SG 号。
+登录支持账号密码和手机号密码，短信验证码用于首次设密与密码重置。HR部门编码映射至 `sys_dept.id`，人员同步路径使用SG号。
 
 ## 4. 逐接口详细契约
 
@@ -432,7 +428,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 **典型错误**：`INVALID_ARGUMENT`(400：枚举/类型/分页/ID/关键词长度)、`INVALID_TOKEN`(401：缺失/失效会话)、`PERMISSION_DENIED`/`OUT_OF_SCOPE`(403)、必要可信依赖失败503。
 
 
-**10实现差异说明**：status/source与keyword/deptId均取当前M5范围交集，items/total共用SQL谓词；keyword最长64字符。当前只支持用户名/SG号子串、完整规范化规范化手机号精确匹配；原文“搜索关键词，受限字段搜索”及keyword=张示例保留，姓名包含搜索尚无已确认的安全可分页方案，仍未完成。响应UserView还含passwordInitialized与source，非HR账号sgNo为null。
+查询条件与管理员当前管理范围取交集，items与total使用相同过滤条件。UserView包含passwordInitialized与source；非HR账号的sgNo为null。
 
 #### US02 · `GET /api/v1/users/{userId}` — 查询用户详情
 
@@ -726,7 +722,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 **典型错误**：`DUPLICATE_RESOURCE`(409手机号/登录名唯一冲突)、`IDEMPOTENCY_CONFLICT`(409同号异内容)、`VERSION_CONFLICT`(409处理中)、`INVALID_HR_ORDER`/`INVALID_DEPT_MAPPING`(422)、`RESOURCE_NOT_FOUND`(404未知人员的非UPSERT动作)、可信依赖缺失503。
 
-**人员状态边界（07实现选择，非新增负责人答复）**：未知人员只允许UPSERT，其余动作404；REHIRE仅允许已有离职账号，非离职REHIRE为422。普通UPSERT不解除暂停；再次SUSPEND只推进新的HR版本，不再次增加sv；RESUME不增sv、不新增角色。REHIRE递增sv并核对无有效旧授权/管理员资格，保留账号ID、登录名和合法凭据。所有必填资料继续校验。
+**人员状态边界**：未知人员只允许UPSERT，其余动作404；REHIRE仅允许已有离职账号，非离职REHIRE为422。普通UPSERT不解除暂停；再次SUSPEND只推进新的HR版本，不再次增加sv；RESUME不增sv、不新增角色。REHIRE递增sv并核对无有效旧授权/管理员资格，保留账号ID、登录名和合法凭据。所有必填资料继续校验。
 
 #### HR03 · `POST /api/v1/integrations/hr/transfers` — HR 调岗事件
 
@@ -824,7 +820,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 #### HR05 · `POST /api/v1/integrations/hr/merges` — HR 部门合并事件
 
 - **调用方/权限**：可信 HR 服务；`HR_SERVICE`。
-- **处理与边界**：保留空源行，merged_into_dept_id标记去向；源直属人员迁目标，直属子部门挂目标并重算子树路径，子部门自身冻结保留。源或祖先冻结时422，须先合法显式解冻。拒绝自合并/合入后代/已合并源或目标；源不再接收人员/任命。既有合法角色和来源历史保留，C同事务先限制失效管理员范围后重审，不自动扩大范围。eventVersion仅比较及推进源hr_version，源10目标40事件11成功后源11目标40。
+- **处理与边界**：保留空源行，merged_into_dept_id标记去向；源直属人员迁目标，直属子部门挂目标并重算子树路径，子部门自身冻结保留。源或祖先冻结时422，须先合法显式解冻。拒绝自合并/合入后代/已合并源或目标；源不再接收人员/任命。既有合法角色和来源历史保留，在同一事务中校验管理员范围，不自动扩大范围。eventVersion仅比较及推进源hr_version，源10目标40事件11成功后源11目标40。
 - **主要数据**：sys_dept、sys_user、外部事件记录。
 - **权限状态影响**：可能扩大或缩减权限，在数据库事务中更新业务事实、签名与审计。
 
@@ -1134,7 +1130,7 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 #### RE06 · `PATCH /api/v1/menus/{menuId}` — 修改、移动或停用菜单
 
 - **调用方/权限**：管理端；`IAM_RESOURCES_WRITE+M5_L1`。
-- **处理与边界**：新增 parentId 字段支持同应用移动，校验无环；移动保留原菜单 ID、角色授权和 API 映射，按新祖先状态重算。目录停用使后代菜单逻辑失效，不批量改写后代 status。
+- **处理与边界**：parentId字段支持同应用移动，校验无环；移动保留原菜单 ID、角色授权和 API 映射，按新祖先状态重算。目录停用使后代菜单逻辑失效，不批量改写后代 status。
 - **主要数据**：sys_menu。
 - **权限状态影响**：可能扩大或缩减权限，在数据库事务中更新业务事实、签名与审计。
 
@@ -1766,10 +1762,6 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 请求格式和人数错误为 400，无有效身份为 401；每项业务拒绝记录在 items；基础设施故障返回 503，先前已提交项不会撤销。
 
-#### 已取消的 GR06（历史编号）
-
-此接口已移除，访问返回 404。批量结果由 GR03 同步返回。
-
 #### GR04 · `GET /api/v1/grants/history` — 查询角色授权变更历史
 
 - **调用方/权限**：管理端；`IAM_GRANTS_VIEW+M5_SCOPE`。
@@ -2377,8 +2369,6 @@ Controller → Service → Repository 三层，Spring Data JPA + MySQL，全部5
 
 ## 7. 数据库适配与联调基线
 
-数据库v3.1共23张表，取消原缓存发布版本和栅栏表；补齐用户会话/授权/HR版本、部门HR版本、事件 JSON 输入及结果、服务公钥/OA范围、nonce、批量任务和逐项结果。字段定义以数据库说明和建表SQL为准。
+数据库共23张表，涵盖用户会话、授权与HR版本、部门HR版本、事件输入及结果、服务公钥与OA范围、nonce、审计及兼容数据。字段定义以数据库说明和建表SQL为准。
 
-内部Service协作在同一MySQL事务执行；跨功能写表通过负责模块的Service入口。外部HR/OA由测试请求模拟，短信使用可替换发送通道；这些能力均须演示完整成功及失败链路。部署地址、真实短信供应商账号、公私钥和环境密码属于部署配置，不阻塞课程功能开发，也不写入仓库。
-
-组织者负责工程和Git；A负责M1/M2与事件记录，B负责M3及角色配置，C负责授权/OA/批量/M5，D负责M6及签名审计；前端与测试各一人。A/C稍多、B/D稍少，采用两阶段：第一阶段独立完成基础功能及公共入口，第二阶段补齐跨模块规则与联调。阶段中途先联调登录、授权、菜单、API允许和撤权拒绝；最终覆盖本规范全部56项功能及签名审计。阶段划分不改变HTTP字段、鉴权要求或数据库定义；未接入必要校验的入口不默认允许。详见 [两阶段开发计划](../../DEVELOPMENT_PLAN.md)。
+内部Service协作在同一MySQL事务执行；跨功能写表通过负责模块的Service入口。外部HR/OA由测试请求模拟，短信使用可替换发送通道；这些能力均须演示完整成功及失败链路。部署地址、真实短信供应商账号、公私钥和环境密码属于部署配置，不写入仓库。

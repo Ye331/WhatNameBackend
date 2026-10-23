@@ -1,12 +1,8 @@
-> 当前验收按 [2026-10-23 课程作业简化范围](../COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
-
-> 当前作业口径（2026-10-23）：按用户确认，姓名和手机号使用明文演示数据，不做存储加密或展示脱敏；权限与手机号防篡改签名仍保留。此项与原始需求 PDF 的隐私保护要求不同。
-
 # 数据库设计说明
 
-版本：v3.1。MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。对应课程功能完整版本，Controller → Service → Repository，Spring Data JPA访问数据库，不增加DAO，不使用Redis或消息队列。
+MySQL 8.0.16及以上，共23张表（13张业务表 + 10张支撑表）。Controller → Service → Repository，Spring Data JPA访问数据库，不增加DAO，不使用Redis或消息队列。
 
-RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并集。不引入角色继承、显式禁止、权限自动过期。当前移除原sys_permission_revision和sys_deny_fence，授权事实、签名与关键审计同事务；M6每次独立请求读取MySQL主库当前一致视图。本期仅记录课堂规模数据的实测耗时，不设20/50ms或万人集中登录硬指标。
+RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并集。不引入角色继承、显式禁止、权限自动过期。授权事实、签名与关键审计同事务；M6每次独立请求读取MySQL主库当前一致视图。性能验证记录实际数据规模和测量条件。
 
 ## 1. 表关系与开发边界
 
@@ -19,7 +15,7 @@ RBAC0关系为用户—角色—菜单权限，菜单映射API；多角色取并
 | sys_grant_batch → sys_grant_batch_item | 异步任务与逐项持久结果 |
 | sys_service_identity、sys_service_nonce、sys_external_event | 服务签名、请求重放防护及HR/OA业务幂等 |
 
-部门及菜单由parent_id表示树，0为根。日志和签名不设置业务实体外键以保留历史；证据按当时事实保存。所有BIGINT在JSON中为十进制字符串，grantSourceId/batchId不使用gs-/B-前缀。修订号以vN表示；permissionVersion为sha256加本次证据摘要。
+部门及菜单由parent_id表示树，0为根。日志和签名不设置业务实体外键以保留历史；证据按当时事实保存。所有BIGINT在JSON中为十进制字符串，grantSourceId使用十进制字符串，修订号以vN表示。
 
 组织者负责脚本协调；A负责用户/部门/会话/外部事件，B负责资源和角色配置，C负责用户授权/管理员/批量，D负责签名和审计。写表经对应Service入口，Controller不写SQL。
 
@@ -454,7 +450,7 @@ CHECK约束：`ck_urs_type`、`ck_urs_dept`、`ck_urs_status`、`ck_urs_revoke`�
 
 ### 2.16 `sys_external_event` — HR/OA外部事件幂等与阶段记录表
 
-事件接收可独立提交；业务事实、签名、审计和APPLIED结果在单个事务提交。输入 JSON 明文保存用于重复请求核对；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
+事件接收、业务事实、签名、审计和APPLIED结果在单个事务提交。输入 JSON 明文保存用于重复请求核对；OA版本允许空，HR必须正版本。来源系统从已认证身份确认，不信任请求任意声明。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -543,7 +539,7 @@ CHECK约束：`ck_sms_purpose`、`ck_sms_attempts`；完整布尔条件见建表
 
 ### 2.20 `sys_service_identity` — 可信服务身份表（服务凭据绑定应用与受控操作范围）
 
-本期HTTPS+Ed25519请求签名，公钥用于验签，credential_hash仅为指纹而非验签密钥。API_AUTH绑定应用；OA服务必须配置角色、部门根和操作数组，空数组表示无权限，超级角色禁止。
+服务请求使用HTTPS与Ed25519签名，公钥用于验签，credential_hash仅为指纹而非验签密钥。API_AUTH绑定应用；OA服务必须配置角色、部门根和操作数组，空数组表示无权限，超级角色禁止。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -569,7 +565,7 @@ CHECK约束：`ck_sms_purpose`、`ck_sms_attempts`；完整布尔条件见建表
 
 CHECK约束：`ck_sid_status`、`ck_sid_scope`、`ck_sid_binding`、`ck_sid_oa`；完整布尔条件见建表SQL。
 
-### 2.21 `sys_grant_batch` — 旧版批量任务历史兼容表（当前不再写入）
+### 2.21 `sys_grant_batch` — 批量任务兼容表（同步批量流程不读写）
 
 GR03异步接收，GR06必做。Idempotency-Key在发起人范围唯一；同键同内容返回已有状态，同键不同内容409。dryRun只校验，不写任务。
 
@@ -595,9 +591,9 @@ GR03异步接收，GR06必做。Idempotency-Key在发起人范围唯一；同键
 
 CHECK约束：`ck_batch_operation`、`ck_batch_status`、`ck_batch_count`；完整布尔条件见建表SQL。
 
-### 2.22 `sys_grant_batch_item` — 旧版批量逐项历史兼容表（当前不再写入）
+### 2.22 `sys_grant_batch_item` — 批量明细兼容表（同步批量流程不读写）
 
-以下字段仅用于保存旧版任务历史；当前同步批量不创建任务、明细或后台恢复进度。
+以下为兼容字段。同步批量接口不使用任务、明细和后台恢复进度。
 
 | 字段 | 定义 | 含义 |
 |---|---|---|
@@ -683,7 +679,7 @@ CHECK约束：`ck_item_status`、`ck_item_attempts`、`ck_item_source`、`ck_ite
 
 ## 5. 建表、初始化与验证
 
-本脚本仅用于首次空库，不是旧库迁移。组织者统一管理迁移文件，不运行删除或清空既有数据库的命令。初始化由 Service 保存演示身份、生成密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
+本脚本仅用于首次空库，不是旧库迁移。已有数据库通过迁移脚本更新，执行前先备份。初始化由 Service 保存演示身份、生成密码哈希、签名及超级用户关系，不硬编码私钥或可用默认密码。
 
 测试数据至少包含两个业务系统（各3—4菜单）、本系统菜单/API、一级和部门管理员、多角色重叠、多授权来源、冻结部门和临时账号。采用手动完整备份及独立库恢复演示；篡改保全现场后人工处理并重新验签。
 
@@ -691,8 +687,8 @@ CHECK约束：`ck_item_status`、`ck_item_attempts`、`ck_item_source`、`ck_ite
 
 当前SQL包含49个CHECK、16个触发器。
 
-## 2026-10-16 部门合并与事件认领增量
+## 6. 部门合并与事件事务
 
-sys_dept新增nullable BIGINT merged_into_dept_id及自引用RESTRICT外键，NULL未合并；非空即已合并并保留去向。status=0/1仍只表示冻结。空源不能再接收人员/新任命，源/祖先冻结先显式解冻，子冻结保留。合并只推进源hr_version，目标/人员版本不变。路径统一/id/.../id/，包括自身及尾斜杠。
+sys_dept包含nullable BIGINT merged_into_dept_id及自引用RESTRICT外键，NULL未合并；非空即已合并并保留去向。status=0/1仍只表示冻结。空源不能再接收人员/新任命，源/祖先冻结先显式解冻，子冻结保留。合并只推进源hr_version，目标/人员版本不变。路径统一/id/.../id/，包括自身及尾斜杠。
 
-当前事件登记与业务成功结果同事务；失败整体回滚。不使用认领令牌或在线恢复；旧版非终态记录由人核对。
+当前事件登记与业务成功结果同事务；失败整体回滚。不使用认领令牌或在线恢复；非成功事件由管理员核对。

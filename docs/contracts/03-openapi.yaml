@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: 统一权限管理系统：三层功能开发 RBAC0 API 契约
-  version: 0.7.0-coursework
-  description: 课程作业简化版；55项接口。批量1–100人同步执行，无后台任务/恢复/查询；仅一级配置可授权清单，无递归委派；简单鉴权日志，无事实快照摘要；性能及备份按课堂演示。保留数据签名、服务签名、RBAC0及事务一致性。
+  version: 1.0.0
+  description: 统一权限管理系统，提供55项业务接口，覆盖账号、组织、资源、角色、授权、管理员和在线鉴权；支持同步批量、HR/OA事件、审计查询、数据及服务请求签名。
 servers:
 - url: https://iam.example.test/api/v1
   description: 占位地址（非真实部署地址）

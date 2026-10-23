@@ -1,5 +1,3 @@
-> 当前验收按 [2026-10-23 课程作业简化范围](docs/COURSEWORK_SCOPE.md)。旧版持久批量、在线事件恢复、递归委派及生产指标不再适用；旧版已提交留档。
-
 # 统一权限管理系统
 
 Java 21 + Spring Boot + Spring Data JPA + MySQL，Vue 前端。Controller → Service → Repository 三层；RBAC0 功能权限与管理员任命、范围分别校验。
@@ -14,7 +12,7 @@ Java 21 + Spring Boot + Spring Data JPA + MySQL，Vue 前端。Controller → Se
 | 手工联调 | [requests/system.http](requests/system.http) |
 | 功能、演示、逐项要求和接口增补 | [docs/GUIDE.md](docs/GUIDE.md) |
 | 测试和验证记录 | [docs/TESTING.md](docs/TESTING.md) |
-| 原始设计依据 | [docs/contracts](docs/contracts/README.md) |
+| 接口与设计文档 | [docs/contracts](docs/contracts/README.md) |
 
 ## 启动（推荐 IntelliJ IDEA）
 
@@ -117,4 +115,4 @@ docker compose up -d --wait
 
 旧的空 Docker 数据库使用 [空库升级脚本](db/migrations/20261023-demo-identity.sql) 调整三张表，不需要删除 Docker 卷或重建其他表。脚本发现账号、短信或事件数据时会拒绝执行；已经有加密业务数据的数据库不能直接使用该脚本，需要另行解密迁移并重新签名。新库直接使用更新后的 `db/schema.sql`。
 
-现有演示库部署本次代码前，先手动备份，再执行 [课程范围迁移](db/migrations/20261023-coursework-scope.sql) 更新鉴权日志约束；新库使用当前 schema.sql。迁移不删除历史数据。
+已有数据库部署前，先手动备份，再执行 [鉴权日志约束迁移](db/migrations/20261023-coursework-scope.sql) 更新鉴权日志约束；新库使用当前 schema.sql。迁移不删除历史数据。
