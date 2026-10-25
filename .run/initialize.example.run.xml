@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="初始化数据库（模板，复制后设置密码）" type="Application" factoryName="Application">
+    <option name="ALTERNATIVE_JRE_PATH" value="$USER_HOME$/.jdks/corretto-21.0.12.1" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <envs>
+      <env name="IAM_INIT_SUPER_PASSWORD" value="" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="com.whatname.iam.IamApplication" />
+    <module name="iam-backend" />
+    <option name="PROGRAM_PARAMETERS" value="--spring.main.web-application-type=none --iam.init.mode=import --iam.init.data=../data/runtime/prepared-data.json --iam.init.super-username=superadmin --iam.init.super-name=系统管理员 --iam.init.super-phone=13800000000" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

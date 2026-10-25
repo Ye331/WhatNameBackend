@@ -1,29 +1,23 @@
-# Docker方式运行scripts/dev.ps1 setup自动生成配置；手动配置可复制此文件。
-# 从backend目录启动；本地文件不会提交，禁止填入正式环境凭据。
+# 新版请优先使用 application-coursework.example.yml。
+# 由 scripts/dev.ps1 setup 生成 application-coursework.yml，保留旧配置和旧数据库。
 spring:
   datasource:
-    url: jdbc:mysql://127.0.0.1:3307/unified_permission?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
+    url: jdbc:mysql://127.0.0.1:3308/unified_permission_coursework?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
     username: iam_dev
     password: "__MYSQL_APP_PASSWORD__"
-# 不使用Docker时，按实际地址修改url。
-
-# 密钥通过环境变量提供；JWT 使用 RSA，事实签名使用独立 Ed25519 密钥。
 iam:
   security:
-    sms-hmac-key: ${IAM_SMS_HMAC_KEY:}
-    jwt-private-key: ${IAM_JWT_PRIVATE_KEY:}
-    jwt-public-key: ${IAM_JWT_PUBLIC_KEY:}
-    jwt-issuer: ${IAM_JWT_ISSUER:}
-    jwt-audience: ${IAM_JWT_AUDIENCE:}
-    jwt-key-id: ${IAM_JWT_KEY_ID:}
-    # Ed25519: PKCS#8 private DER / X.509 public DER, standard Base64.
-    # 本地首次启动自动保存一对签名密钥；后续复用，不要删除 local-secrets。
+    local-keys: true
+    jwt-issuer: coursework-iam
+    jwt-audience: coursework-apps
+    jwt-key-id: local-dev
     data-signing:
       local-auto-generate: true
-      key-id: local-dev
-      private-key: ${IAM_DATA_SIGNING_PRIVATE_KEY:}
-      public-keys:
-        local-dev: ${IAM_DATA_SIGNING_PUBLIC_KEY:}
-  permission:
-    # Keep this aligned with frontend VITE_IAM_APP_CODE and the initialized IAM application.
-    management-app-code: ${IAM_MANAGEMENT_APP_CODE:IAM}
+  integration:
+    hr-key: ${IAM_HR_SERVICE_KEY:__HR_KEY__}
+    oa-key: ${IAM_OA_SERVICE_KEY:__OA_KEY__}
+    apps:
+      OA:
+        key: ${IAM_OA_APP_KEY:__OA_APP_KEY__}
+      HR:
+        key: ${IAM_HR_APP_KEY:__HR_APP_KEY__}

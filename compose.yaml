@@ -1,13 +1,13 @@
-name: whatname-iam
+name: whatname-iam-coursework
 
 services:
   mysql:
     image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+      - "127.0.0.1:${COURSEWORK_MYSQL_PORT:-3308}:3306"
     environment:
-      MYSQL_DATABASE: unified_permission
+      MYSQL_DATABASE: unified_permission_coursework
       MYSQL_USER: iam_dev
       MYSQL_ROOT_HOST: localhost
       MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
@@ -21,17 +21,17 @@ services:
       - mysql_root_password
       - mysql_app_password
     volumes:
-      - mysql_data:/var/lib/mysql
+      - coursework_mysql_data:/var/lib/mysql
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=\"$$(cat /run/secrets/mysql_app_password)\" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission -Nse \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='unified_permission' AND table_type='BASE TABLE'\" | grep -qx 23"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$(cat /run/secrets/mysql_app_password)\" mysql --protocol=tcp -h127.0.0.1 -uiam_dev unified_permission_coursework -Nse \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='unified_permission_coursework' AND table_type='BASE TABLE'\" | grep -qx 11"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 30s
 
 volumes:
-  mysql_data:
+  coursework_mysql_data:
 
 secrets:
   mysql_root_password:

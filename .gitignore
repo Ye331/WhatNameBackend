@@ -13,6 +13,11 @@ out/
 # 本地配置与密码；公共配置和示例文件仍需提交
 /config/application-local.yml
 /config/application-local.yaml
+/config/application-coursework.yml
+/.run/local-*.run.xml
+/.run/*
+!/.run/start-backend.run.xml
+!/.run/initialize.example.run.xml
 /config/local-secrets/
 .env
 .env.*

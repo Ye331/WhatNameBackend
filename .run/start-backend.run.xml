@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="启动后端" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.whatname.iam.IamApplication" />
+    <module name="iam-backend" />
+    <option name="ALTERNATIVE_JRE_PATH" value="$USER_HOME$/.jdks/corretto-21.0.12.1" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2"><option name="Make" enabled="true" /></method>
+  </configuration>
+</component>

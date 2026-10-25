@@ -1,118 +1,76 @@
-# 统一权限管理系统
+# 统一权限管理系统 · 课程简化版
 
-Java 21 + Spring Boot + Spring Data JPA + MySQL，Vue 前端。Controller → Service → Repository 三层；RBAC0 功能权限与管理员任命、范围分别校验。
+Java 21 + Spring Boot + Spring Data JPA/Hibernate + MySQL 8 + Vue 3。保留 RBAC0、全量基础数据、HR/OA 简单联动及基础签名，数据库缩减为 11 张表。
 
-## 常用入口
+管理平台自己的权限也通过“用户 → 角色 → 菜单 → API”管理。没有独立管理员身份、等级、任命或可授权清单。
 
-| 工作 | 位置 |
-| --- | --- |
-| 空库建表 | db/schema.sql，Compose 首次启动自动执行 |
-| 本地设置、数据准备、初始化、测试 | scripts/dev.ps1 setup / data / init / recover / test |
-| 个人配置模板 | config/application-local.example.yml |
-| 手工联调 | [requests/system.http](requests/system.http) |
-| 功能、演示、逐项要求和接口增补 | [docs/GUIDE.md](docs/GUIDE.md) |
-| 测试和验证记录 | [docs/TESTING.md](docs/TESTING.md) |
-| 接口与设计文档 | [docs/contracts](docs/contracts/README.md) |
+## 首次准备
 
-## 启动（推荐 IntelliJ IDEA）
+旧数据库保持原样，新版使用独立库 unified_permission_coursework、默认端口 3308 和独立 Docker 数据卷。不要删除旧数据卷，不要对旧库执行建表脚本。
 
-后端可以直接在 IDEA 中点击 Run / Debug 启动，不需要执行 Maven 启动命令。MySQL 需要事先运行；可以使用本机或已有的 MySQL 8，也可以使用项目提供的 Docker 数据库。
-
-### 1. 导入项目
-
-在 IDEA 中打开 `backend/pom.xml`，作为 Maven 项目导入并等待依赖同步。Project SDK、模块 SDK 与运行配置的 JRE 均使用 **Java 21**。
-
-### 2. 准备个人配置（首次）
-
-如果已有 `config/application-local.yml`，直接检查其中的数据库连接，保留现有密码与密钥设置。没有该文件时，在 IDEA 项目视图中复制 `config/application-local.example.yml`，命名为 `application-local.yml`，仍放在 `backend/config` 下。
-
-如果旧个人配置只有数据库连接，请把模板中的 `iam` 段补入现有文件，保留原数据库密码。模板的 `data-signing.local-auto-generate: true` 启用本地签名密钥自动生成；`setup` 不会覆盖或补齐已有文件。
-
-修改 `spring.datasource.url`、`username`、`password` 为实际数据库信息。模板使用 `127.0.0.1:3307/unified_permission`，适合项目 Docker 配置；本机 MySQL 常用 3306，应按实际端口填写。模板中的 `__MYSQL_APP_PASSWORD__` 必须替换成真实数据库密码。
-
-已有项目数据库无需重建。使用全新数据库时，先由数据库客户端执行 `db/schema.sql` 建表，再完成下文的数据初始化；JPA 设置为 `ddl-auto=none`，不会自动创建表。
-
-### 3. 创建 IDEA 运行配置
-
-打开 `src/main/java/com/whatname/iam/IamApplication.java`，点击 `main` 方法旁的运行按钮。随后在 Run → Edit Configurations 中检查该配置；也可以手动创建 **Application** 配置，使用以下值：
-
-| 配置项 | 填写内容 |
-| --- | --- |
-| Main class | `com.whatname.iam.IamApplication` |
-| Use classpath of module | 后端 Maven 模块（包含 `IamApplication` 的模块） |
-| JRE | Java 21 |
-| Working directory | `backend` 的绝对路径，例如 `D:\WhatName\backend` |
-| Program arguments | 日常启动留空 |
-| Environment variables | 下表所列安全配置；沿用已有开发环境密钥 |
-
-**工作目录必须指向 backend。** 项目通过 `optional:file:./config/application-local.yml` 读取个人配置；如果工作目录设成父目录，文件可能被静默跳过，转而使用默认连接参数。不需要设置 `local` profile，也不需要添加 `--spring.profiles.active=local`，因为文件已经由主配置显式导入。
-
-个人配置模板通过下列环境变量读取密钥。在 IDEA 运行配置的 Environment variables 中逐项填写，Run 和 Debug 都会使用它们；只在另一个终端设置的变量不会自动传给已打开的 IDEA。
-
-| 环境变量 | 内容 |
-| --- | --- |
-| `IAM_SMS_HMAC_KEY` | 短信验证码使用的 32 字节随机密钥，标准 Base64 编码 |
-| `IAM_JWT_PRIVATE_KEY`、`IAM_JWT_PUBLIC_KEY` | RSA 密钥对；私钥 PKCS#8 DER Base64，公钥 X.509 DER Base64 |
-| `IAM_JWT_ISSUER`、`IAM_JWT_AUDIENCE`、`IAM_JWT_KEY_ID` | 本地 JWT 签发者、受众与密钥标识，沿用当前环境设置 |
-| `IAM_DATA_SIGNING_PRIVATE_KEY`、`IAM_DATA_SIGNING_PUBLIC_KEY` | 可留空：个人配置已启用本地自动生成数据签名密钥；已有环境可继续显式配置 |
-
-本地首次启动会把数据签名密钥保存到 `config/local-secrets/data-signing.properties`，后续启动复用。不要删除该文件或每次重新生成密钥，否则已有签名无法校验。个人配置和包含密钥的 IDEA 运行配置不要提交到仓库。`scripts/dev.ps1 setup` 只准备 Docker 数据库密码与配置文件，不生成 JWT 或短信验证码密钥；数据签名密钥由后端首次启动生成。
-
-### 4. 点击 Run 或 Debug
-
-默认后端地址为 `http://localhost:8080`。浏览器打开：
-
-- `/api/v1/system/ping`：检查后端进程是否正常响应。
-- `/api/v1/system/database`：检查数据库连接；数据库不可达时返回 503。
-
-进程启动成功不代表数据库、密钥与业务数据都已准备完成。登录及业务功能需要有效的安全配置和初始化数据。日常开发配置不要填写 `iam.init.*` 参数；初始化模式执行完成后会主动退出。
-
-### 可选：使用 Docker 数据库或命令行启动
-
-如果尚无 MySQL，可在 `backend` 目录准备项目自带数据库（首次设置）：
+在 backend 目录，确认 Java 21、Python 3 与 Docker 可用：
 
 ```powershell
 .\scripts\dev.ps1 setup
 docker compose up -d --wait
+.\scripts\dev.ps1 init -SuperPhone <初始化管理账号手机号>
 ```
 
-之后仍可回到 IDEA 点击 Run。已有本机或远程 MySQL 时不必执行这两条命令。Docker 默认数据库端口为 3307，修改时同步 `.env` 的 `MYSQL_PORT` 和个人配置的 datasource URL。
+初始化/恢复密码在运行时交互输入，至少 8 位且含字母和数字。管理用户名默认 superadmin，可通过 -SuperUser 指定。初始化完成后进程退出，结果保存在 target/initialization-report.json。
 
-如果偏好命令行，也可以在配置好相同环境变量后执行：
+setup 创建被忽略的 config/application-coursework.yml，不覆盖旧 application-local.yml。它生成本地数据库密码和四个集成密钥；JWT 与数据签名密钥在首次运行时保存到 config/local-secrets/，后续复用。请保留并备份这些文件，不提交仓库。
+
+本机 MySQL 也可以使用：先建立一个新的空数据库，在该库执行 db/schema.sql，再修改 application-coursework.yml 中的连接。JPA 不自动建表。正常启动会验证新版结构。
+
+## 日常启动
+
+### 全程使用 IDEA
+
+项目提供“初始化数据库（仅首次）”和“启动后端”两个运行配置，均指定 Java 21 和 backend 工作目录。
+
+首次初始化：Run → Edit Configurations → 选择“初始化数据库（仅首次）”，在 Environment variables 中填写 IAM_INIT_SUPER_PASSWORD（8–64 位，含字母和数字）；Program arguments 中的 super-phone 为演示手机号，可按需修改。运行后会导入全量数据并退出。随后选择“启动后端”，日常只运行此配置。
+
+仓库提供 .run/initialize.example.run.xml 空密码模板，请在 IDEA 中复制为自己的本地初始化配置再填写密码。本地运行配置已加入 Git 忽略，只有启动配置与空密码模板会提交。初始化使用工作区 data/runtime/prepared-data.json；它是原始 Excel 整理的全量数据包，Maven clean 不会删除。修改原始 Excel 后须重新整理数据包再初始化新空库。
+
+初始化以非 Web 模式执行，不占用 8080。数据库容器需要事先运行；初始化不替代建库，已有业务数据时拒绝重复导入。
+
+在 IDEA 打开 pom.xml，SDK/JRE 使用 Java 21，运行 IamApplication，工作目录必须是 backend。
+
+也可运行：
 
 ```powershell
 .\mvnw.cmd spring-boot:run
 ```
 
-前端在 `frontend` 目录执行 `npm ci`、`npm run dev`。模板为 `.env.example`；平台编码必须与后端 `iam.permission.management-app-code` 一致。
+前端在 frontend 目录执行 npm ci、npm run dev，访问前端提示的地址。JWT 只保存在浏览器内存，刷新页面需要重新登录。
 
-## 数据与初始化
+## 全量数据与恢复
 
-原始 Excel 统一位于工作区 data/。空库首次启动前执行一次受控初始化：
+原始文件在工作区 data/，完整导入 111 个部门、10,000 名员工、18 个来源应用和 359 条来源功能，并额外建立 IAM 与两套可运行演示应用。员工没有共享默认密码，通过管理页面重置选定员工密码后演示。
+
+管理员误删自身权限时，在本地运行：
 
 ```powershell
-.\scripts\dev.ps1 init -SuperPhone <超级用户手机号>
+.\scripts\dev.ps1 recover -SuperUser superadmin
 ```
 
-它会整理 Excel、导入部门和员工、登记 IAM 与两个演示业务系统（OA、人力资源）的菜单和 API、创建角色和超级用户，并全部签名。超级用户密码在运行时输入，代码中没有默认密码。唯一管理员误删自己权限时，用 `.\scripts\dev.ps1 recover` 恢复超级用户。细节见 [GUIDE 第五节](docs/GUIDE.md)。
+只恢复受控初始化账号，需设置恢复密码，不开放 HTTP 恢复接口；不自动修复签名异常数据。
 
-新库只执行 db/schema.sql；不要对现有数据库重复执行或删除 Docker 卷。
+## 验证
 
-课堂验收记录实际耗时，不以原20ms或万人集中登录作为硬指标，见当前课程范围。
+```powershell
+.\scripts\dev.ps1 test
+.\scripts\dev.ps1 test -FullImport
+```
 
+常规业务回归使用隔离 H2 数据库，不接触本地 MySQL。FullImport 额外测试真实来源全量导入及恢复，结果不代表 MySQL 性能。MySQL 专项验证见 docs/TESTING.md。
 
-## 持久层与学习入口
+## 阅读入口
 
-持久层已迁移为 Spring Data JPA / Hibernate：`repository` 包替代原持久层接口和查询 XML，普通查询使用 JPQL 或 `@Query`，复杂锁定、版本条件更新使用自定义 Repository 片段中的原生 SQL。
-
-表结构继续由 `db/schema.sql` 管理，`spring.jpa.hibernate.ddl-auto=none`，本次迁移无需重建现有数据库。初始化保留专用 `JdbcTemplate`，与 JPA 通过同一 DataSource 共享事务。业务接口和数据库字段保持原契约。
-
-完整讲解与练习见 [学习手册](../学习手册/README.md)，先读 [Spring Data JPA 与三层链路](../学习手册/01-三层链路.md)。测试入口与本次验证记录见 [TESTING.md](docs/TESTING.md)。
-
-## 本阶段的简化范围
-
-姓名和手机号使用明文演示数据，响应返回 `realName`、`phone`，不做展示脱敏；不再配置 `IAM_DATA_KEY` 或 `IAM_PHONE_HMAC_KEY`。密码哈希、手机号唯一约束、权限及手机号防篡改签名、超级用户兜底均保留。此项隐私保护范围与原始需求 PDF 不同，演示请使用虚构数据。
-
-旧的空 Docker 数据库使用 [空库升级脚本](db/migrations/20261023-demo-identity.sql) 调整三张表，不需要删除 Docker 卷或重建其他表。脚本发现账号、短信或事件数据时会拒绝执行；已经有加密业务数据的数据库不能直接使用该脚本，需要另行解密迁移并重新签名。新库直接使用更新后的 `db/schema.sql`。
-
-已有数据库部署前，先手动备份，再执行 [鉴权日志约束迁移](db/migrations/20261023-coursework-scope.sql) 更新鉴权日志约束；新库使用当前 schema.sql。迁移不删除历史数据。
+- [改造决定](docs/PLAN.md)
+- [功能范围](docs/FUNCTIONAL_SCOPE.md)
+- [运行与演示](docs/GUIDE.md)
+- [三层结构、权限与事务](docs/contracts/01-system-design.md)
+- [接口](docs/contracts/02-api-spec.md)、[11 表设计](docs/contracts/04-database-design.md)
+- [测试记录](docs/TESTING.md)
+- [学习手册](docs/learning/README.md)

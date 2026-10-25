@@ -9,9 +9,9 @@ spring:
   application:
     name: iam-backend
   config:
-    import: optional:file:./config/application-local.yml
+    import: optional:file:./config/application-local.yml,optional:file:./config/application-coursework.yml
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:unified_permission}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/${DB_NAME:unified_permission_coursework}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
     username: ${DB_USERNAME:iam_dev}
     password: ${DB_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -20,7 +20,7 @@ spring:
       minimum-idle: 0
       connection-timeout: 3000
       initialization-fail-timeout: -1
-      transaction-isolation: TRANSACTION_REPEATABLE_READ
+      transaction-isolation: TRANSACTION_READ_COMMITTED
   jpa:
     open-in-view: false
     database-platform: org.hibernate.dialect.MySQLDialect
@@ -42,6 +42,20 @@ spring:
 app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+iam:
+  security:
+    local-keys: true
+    data-signing:
+      local-auto-generate: true
+  integration:
+    hr-key: ${IAM_HR_SERVICE_KEY:}
+    oa-key: ${IAM_OA_SERVICE_KEY:}
+    apps:
+      OA:
+        key: ${IAM_OA_APP_KEY:}
+      HR:
+        key: ${IAM_HR_APP_KEY:}
 
 logging:
   level:
