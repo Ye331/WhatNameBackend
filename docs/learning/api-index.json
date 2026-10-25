@@ -1,0 +1,2985 @@
+[
+  {
+    "id": "A01",
+    "owner": "A",
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "title": "账号或手机号密码登录",
+    "service": "AccountService.login",
+    "permission": "公开登录入口；不需要旧 JWT。",
+    "scope": "仅验证输入凭据对应的账号，不使用管理数据范围。",
+    "fields": [
+      [
+        "loginType",
+        "string",
+        "必填",
+        "USERNAME 或 PHONE"
+      ],
+      [
+        "identifier",
+        "string",
+        "必填",
+        "最长100；PHONE 会规范化并检查手机号"
+      ],
+      [
+        "password",
+        "string",
+        "必填",
+        "登录只验证已有哈希；新密码复杂度由设密接口检查"
+      ]
+    ],
+    "body": {
+      "loginType": "USERNAME",
+      "identifier": "demo_temp",
+      "password": "ExampleOnly123!"
+    },
+    "result": {
+      "authenticated": true,
+      "token": "<JWT>",
+      "user": {
+        "id": "101",
+        "username": "demo_temp",
+        "realName": "演示用户",
+        "phone": "13800000002",
+        "employeeNo": null,
+        "deptId": "2",
+        "status": 1,
+        "source": 2,
+        "employmentType": null,
+        "managementScope": "DEPT_TREE",
+        "createdAt": "2026-10-25T10:00:00"
+      }
+    },
+    "tables": "读 sys_user、sys_data_signature；写 sys_operation_log。",
+    "repository": "AccountRepository.findByUsername/findByPhone；DomainRepository.query/save。",
+    "flow": [
+      "按登录类型找到账号并验签。",
+      "检查 status=1 和 scrypt 密码哈希。",
+      "写成功/失败 LOGIN 日志；成功签发含用户ID和会话版本的 JWT。",
+      "失败先返回内部结果提交日志，再由 Controller 返回401。"
+    ],
+    "transaction": "登录失败日志通过正常返回先提交；Controller 在事务外报告凭据错误，避免把失败日志回滚。",
+    "audit": "LOGIN：成功与普通凭据失败均记录；完整性故障抛异常，不保证该路径有失败日志。",
+    "errors": [
+      "400 INVALID_ARGUMENT：登录类型/字段不合法",
+      "401 INVALID_CREDENTIALS：密码错误或账号不可用",
+      "503 INTEGRITY_FAILURE：用户签名异常"
+    ],
+    "success": "创建临时测试账号后，用 USERNAME 和 PHONE 分别登录，均获得 token。",
+    "failure": "同一账号输入错误密码，应401；随后由G查询 LOGIN 失败记录。",
+    "question": "为什么登录不能只看密码正确？",
+    "answer": "还要验证账号签名和可用状态，暂停/离职账号即使密码正确也不能登录。",
+    "coverage": "HTTP 自动用例覆盖用户名成功和手机号错误密码；手机号成功需人工补验。",
+    "tests": [
+      "loginAndScopedTemporaryAccount"
+    ],
+    "frontend": "登录页 App.vue → api.js.login",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 25,
+      "method": "AuthController.login"
+    }
+  },
+  {
+    "id": "A02",
+    "owner": "A",
+    "method": "GET",
+    "path": "/api/v1/auth/me",
+    "title": "读取本人身份与IAM权限",
+    "service": "AccountService.me",
+    "permission": "本人 Bearer JWT，不要求另有 IAM 管理菜单权限。账号状态和会话版本仍必须有效。",
+    "scope": "只返回本人，不接受目标 userId。",
+    "fields": [],
+    "body": null,
+    "result": {
+      "user": {
+        "id": "101",
+        "username": "demo_user",
+        "realName": "演示用户",
+        "phone": "13800000002",
+        "employeeNo": "DEMO001",
+        "deptId": "2",
+        "status": 1,
+        "source": 1,
+        "employmentType": 1,
+        "managementScope": "DEPT_TREE",
+        "createdAt": "2026-10-25T10:00:00"
+      },
+      "menus": [
+        {
+          "id": "4",
+          "appId": "3",
+          "parentId": "0",
+          "menuCode": "DEMO_MENU",
+          "menuName": "演示菜单",
+          "menuType": 2,
+          "path": "/demo",
+          "sortOrder": 0,
+          "status": 1
+        }
+      ]
+    },
+    "tables": "共同读取：sys_user、sys_dept、sys_application、sys_user_role、sys_role、sys_role_permission、sys_menu、sys_menu_api、sys_api、sys_data_signature。",
+    "repository": "DomainRepository.get/roles/menus/apis/query。",
+    "flow": [
+      "校验JWT、用户签名、状态和会话版本。",
+      "读取 IAM 应用，计算本人的有效菜单并集。",
+      "返回 user 和 menus，供前端导航与按钮使用。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写操作日志。",
+    "errors": [
+      "401 INVALID_TOKEN：令牌失效",
+      "503 INTEGRITY_FAILURE：身份或权限数据异常"
+    ],
+    "success": "登录后携带 Bearer 调用，返回本人及实际拥有的 IAM 菜单。",
+    "failure": "退出登录后复用旧JWT，应401。",
+    "question": "这里返回的是不是管理员任命？",
+    "answer": "不是；返回普通用户及其 IAM 菜单权限，没有 sys_admin 身份。",
+    "coverage": "HTTP 自动覆盖成功及不返回 passwordHash；令牌失效由其他用例覆盖。",
+    "tests": [
+      "protectedEndpointsAndSelfManagedRbac"
+    ],
+    "frontend": "api.js.refreshSession → App.vue 导航",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 33,
+      "method": "AuthController.me"
+    }
+  },
+  {
+    "id": "A03",
+    "owner": "A",
+    "method": "POST",
+    "path": "/api/v1/auth/logout",
+    "title": "退出该账号全部会话",
+    "service": "AccountService.logout",
+    "permission": "本人 Bearer JWT，不要求另有 IAM 管理菜单权限。账号状态和会话版本仍必须有效。",
+    "scope": "仅本人。",
+    "fields": [],
+    "body": null,
+    "result": {},
+    "tables": "读写 sys_user；写 sys_data_signature、sys_operation_log。",
+    "repository": "DomainRepository.lock/get/save。",
+    "flow": [
+      "取得本人并锁用户行。",
+      "递增 sessionVersion，重新签名。",
+      "保存 LOGOUT，随后旧JWT均因版本不符失效。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "LOGOUT。",
+    "errors": [
+      "401 INVALID_TOKEN：旧或无效JWT",
+      "503 INTEGRITY_FAILURE：用户签名异常"
+    ],
+    "success": "准备同账号两枚JWT，退出其中一个会话。",
+    "failure": "两枚旧JWT随后访问 /auth/me 都应401。",
+    "question": "为什么另一个浏览器也退出了？",
+    "answer": "设计采用账号会话版本统一失效，未保留单令牌黑名单。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "App.vue 退出 → api.js.logout",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 46,
+      "method": "AuthController.logout"
+    }
+  },
+  {
+    "id": "A04",
+    "owner": "A",
+    "method": "PUT",
+    "path": "/api/v1/auth/password",
+    "title": "修改本人密码",
+    "service": "AccountService.ownPassword",
+    "permission": "本人 Bearer JWT，不要求另有 IAM 管理菜单权限。账号状态和会话版本仍必须有效。",
+    "scope": "仅本人。",
+    "fields": [
+      [
+        "oldPassword",
+        "string",
+        "必填",
+        "必须匹配当前哈希"
+      ],
+      [
+        "password",
+        "string",
+        "必填",
+        "8–64位，含字母和数字"
+      ]
+    ],
+    "body": {
+      "oldPassword": "OldExample123!",
+      "password": "NewExample456!"
+    },
+    "result": {},
+    "tables": "读写 sys_user；写签名、日志。",
+    "repository": "DomainRepository.lock；实体脏检查。",
+    "flow": [
+      "锁本人并验签。",
+      "校验原密码。",
+      "生成新scrypt哈希，递增会话版本，签名并记日志。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "PASSWORD_CHANGE。",
+    "errors": [
+      "401 INVALID_CREDENTIALS：原密码不符",
+      "400 INVALID_ARGUMENT：新密码不合规则"
+    ],
+    "success": "用正确原密码改密，再用新密码登录。",
+    "failure": "原密码错误应401，旧密码仍可登录；成功改密后原JWT应401。",
+    "question": "为什么改完密码需要重新登录？",
+    "answer": "会话版本递增，旧JWT不能继续使用。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "App.vue 修改密码对话框",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 53,
+      "method": "AuthController.password"
+    }
+  },
+  {
+    "id": "A05",
+    "owner": "A",
+    "method": "GET",
+    "path": "/api/v1/users",
+    "title": "分页查询范围内用户",
+    "service": "AccountService.users",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_USERS_VIEW 或 IAM_GRANTS_VIEW。",
+    "scope": "先计算本人可见部门；指定 deptId 必须也在范围内，且仅筛该精确部门，不自动包含其子部门。",
+    "fields": [
+      [
+        "keyword",
+        "query string",
+        "可选",
+        "匹配账号、姓名、工号；不是手机号搜索"
+      ],
+      [
+        "deptId",
+        "query ID",
+        "可选",
+        "指定部门精确筛选"
+      ],
+      [
+        "status/source",
+        "query integer",
+        "可选",
+        "1/2/3 含义见公共说明；当前查询未单独验证枚举"
+      ],
+      [
+        "page",
+        "query integer",
+        "默认1",
+        ">=1"
+      ],
+      [
+        "pageSize",
+        "query integer",
+        "默认20",
+        "1–100"
+      ]
+    ],
+    "body": null,
+    "result": {
+      "items": [
+        {
+          "id": "101",
+          "username": "demo_user",
+          "realName": "演示用户",
+          "phone": "13800000002",
+          "employeeNo": "DEMO001",
+          "deptId": "2",
+          "status": 1,
+          "source": 1,
+          "employmentType": 1,
+          "managementScope": "DEPT_TREE",
+          "createdAt": "2026-10-25T10:00:00"
+        }
+      ],
+      "total": "1",
+      "page": 1,
+      "pageSize": 20
+    },
+    "tables": "授权公共读取＋sys_user 范围分页；无写表。",
+    "repository": "AccountService.visibleDepartments → DomainRepository.all(Department)、page(Account)、query(count)。",
+    "flow": [
+      "验证菜单权限。",
+      "计算可见部门并检查 deptId。",
+      "按关键字/状态/来源分页；逐条验证返回用户签名。",
+      "返回 items/total/page/pageSize。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "403 OUT_OF_SCOPE：指定范围外部门",
+      "400 INVALID_ARGUMENT：分页参数不合法",
+      "503 INTEGRITY_FAILURE：返回用户或组织签名异常"
+    ],
+    "success": "部门管理员查询只看到本部门及后代用户；ALL用户可看到全公司。",
+    "failure": "指定兄弟部门的deptId，应403。",
+    "question": "范围过滤应该由前端还是后端完成？",
+    "answer": "后端查询就限制部门集合，前端筛选不能作为权限防线。",
+    "coverage": "HTTP 自动覆盖范围内总数，服务级用例覆盖其他范围规则。",
+    "tests": [
+      "protectedEndpointsAndSelfManagedRbac"
+    ],
+    "frontend": "UsersView.vue 用户账号/权限分配",
+    "query": "?page=1&pageSize=20",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 34,
+      "method": "ManagementController.users"
+    }
+  },
+  {
+    "id": "A06",
+    "owner": "A",
+    "method": "GET",
+    "path": "/api/v1/users/{id}",
+    "title": "查询一个用户",
+    "service": "AccountService.detail",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_USERS_VIEW。",
+    "scope": "目标用户必须在本人部门范围内。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标用户ID"
+      ]
+    ],
+    "body": null,
+    "result": {
+      "id": "101",
+      "username": "demo_user",
+      "realName": "演示用户",
+      "phone": "13800000002",
+      "employeeNo": "DEMO001",
+      "deptId": "2",
+      "status": 1,
+      "source": 1,
+      "employmentType": 1,
+      "managementScope": "DEPT_TREE",
+      "createdAt": "2026-10-25T10:00:00"
+    },
+    "tables": "授权公共读取＋sys_user；无写表。",
+    "repository": "DomainRepository.get(Account)；AccessService.scope。",
+    "flow": [
+      "校验功能权限。",
+      "读取目标用户。",
+      "验证目标签名和目标部门范围后返回实体。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：用户不存在",
+      "403 OUT_OF_SCOPE：目标部门越界"
+    ],
+    "success": "查询已知范围内员工，返回用户对象。",
+    "failure": "查询兄弟部门员工，应403。",
+    "question": "知道别人的ID能不能直接查看？",
+    "answer": "不能，服务端仍按目标所属部门检查范围。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "当前列表直接使用分页数据；详情接口可用 IDEA HTTP Client 演示",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 46,
+      "method": "ManagementController.user"
+    }
+  },
+  {
+    "id": "A07",
+    "owner": "A",
+    "method": "POST",
+    "path": "/api/v1/users/temporary",
+    "title": "创建临时账号",
+    "service": "AccountService.temporary",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_USERS_WRITE。",
+    "scope": "新账号部门必须在操作者范围内，且祖先链不冻结、不合并。",
+    "fields": [
+      [
+        "username",
+        "string",
+        "必填",
+        "最长64且唯一"
+      ],
+      [
+        "realName",
+        "string",
+        "必填",
+        "最长64"
+      ],
+      [
+        "phone",
+        "string",
+        "必填",
+        "规范化后1[3-9]开头的11位手机号且唯一"
+      ],
+      [
+        "deptId",
+        "ID",
+        "必填",
+        "目标部门"
+      ],
+      [
+        "password",
+        "string",
+        "必填",
+        "8–64位，含字母和数字"
+      ]
+    ],
+    "body": {
+      "username": "demo_temp",
+      "realName": "演示外部人员",
+      "phone": "13800000002",
+      "deptId": "2",
+      "password": "ExampleOnly123!"
+    },
+    "result": {
+      "id": "101",
+      "username": "demo_temp",
+      "realName": "演示用户",
+      "phone": "13800000002",
+      "employeeNo": null,
+      "deptId": "2",
+      "status": 1,
+      "source": 2,
+      "employmentType": null,
+      "managementScope": "DEPT_TREE",
+      "createdAt": "2026-10-25T10:00:00"
+    },
+    "tables": "新增 sys_user；写 sys_data_signature、sys_operation_log；查询 sys_dept。",
+    "repository": "DomainRepository.get(Department)/save(Account)；JPA自动生成ID。",
+    "flow": [
+      "检查权限、部门范围和部门有效性。",
+      "设置 source=2，无工号、无人员类型，默认DEPT_TREE。",
+      "密码哈希后保存账号、签名和日志；不自动分配角色。"
+    ],
+    "transaction": "一次普通写事务；新增用户无旧行锁，唯一约束处理重复账号和手机号。",
+    "audit": "USER_CREATE。",
+    "errors": [
+      "403 OUT_OF_SCOPE：创建到范围外",
+      "422 BUSINESS_RULE_VIOLATION：部门链冻结/合并",
+      "409 DUPLICATE_RESOURCE：账号或手机号重复"
+    ],
+    "success": "创建账号后由D分配角色，再登录演示。",
+    "failure": "不分配角色就登录，只能证明身份，不应获得业务菜单。",
+    "question": "临时账号需要另一张表吗？",
+    "answer": "不需要，source=2 区分来源，使用同一套角色与权限关系。",
+    "coverage": "服务级自动覆盖创建、越界；前端创建交互为模拟接口契约测试。",
+    "tests": [
+      "loginAndScopedTemporaryAccount"
+    ],
+    "frontend": "UsersView.vue 创建临时账号",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 51,
+      "method": "ManagementController.createUser"
+    }
+  },
+  {
+    "id": "A08",
+    "owner": "A",
+    "method": "PATCH",
+    "path": "/api/v1/users/{id}",
+    "title": "修改临时账号信息",
+    "service": "AccountService.updateTemporary",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_USERS_WRITE。",
+    "scope": "目标在范围内且 source=2。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标临时账号"
+      ],
+      [
+        "realName",
+        "string",
+        "可选",
+        "给出时非空、最长64"
+      ],
+      [
+        "phone",
+        "string",
+        "可选",
+        "给出时规范化并验证唯一"
+      ]
+    ],
+    "body": {
+      "realName": "更新后的演示人员"
+    },
+    "result": {
+      "id": "101",
+      "username": "demo_temp",
+      "realName": "演示用户",
+      "phone": "13800000002",
+      "employeeNo": null,
+      "deptId": "2",
+      "status": 1,
+      "source": 2,
+      "employmentType": null,
+      "managementScope": "DEPT_TREE",
+      "createdAt": "2026-10-25T10:00:00"
+    },
+    "tables": "修改 sys_user；更新签名并记日志。",
+    "repository": "DomainRepository.lock(Account)；实体脏检查保存修改。",
+    "flow": [
+      "锁目标并检查范围。",
+      "拒绝非临时账号。",
+      "只修改给出的姓名/手机号；不改工号、来源、部门或角色。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "USER_EDIT。",
+    "errors": [
+      "422 BUSINESS_RULE_VIOLATION：正式员工不能走此接口",
+      "409 DUPLICATE_RESOURCE：手机号重复",
+      "403 OUT_OF_SCOPE：目标越界"
+    ],
+    "success": "修改临时账号姓名，再查列表验证。",
+    "failure": "对HR员工调用，应422。",
+    "question": "为什么正式员工不能在这里改？",
+    "answer": "正式员工由HR维护，避免本地手工数据与HR来源冲突。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "UsersView.vue 临时账号“编辑”",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 57,
+      "method": "ManagementController.editUser"
+    }
+  },
+  {
+    "id": "A09",
+    "owner": "A",
+    "method": "PATCH",
+    "path": "/api/v1/users/{id}/status",
+    "title": "暂停或恢复临时账号",
+    "service": "AccountService.status",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_USERS_WRITE。",
+    "scope": "目标在范围内且 source=2。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "临时账号ID"
+      ],
+      [
+        "status",
+        "integer",
+        "建议必填",
+        "1恢复、2暂停；代码省略时保留当前状态"
+      ]
+    ],
+    "body": {
+      "status": 2
+    },
+    "result": {},
+    "tables": "修改 sys_user；暂停删除 sys_user_role；更新签名和日志。",
+    "repository": "DomainRepository.lock/clearRoles。",
+    "flow": [
+      "锁用户并验签、检查范围及来源。",
+      "status=2时清空角色并增加会话版本。",
+      "status=1只恢复账号，不自动返还角色。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "USER_STATUS。",
+    "errors": [
+      "400 INVALID_ARGUMENT：不接受status=3",
+      "422 BUSINESS_RULE_VIOLATION：非临时账号"
+    ],
+    "success": "暂停有角色的临时账号，核对角色清空且旧JWT失效。",
+    "failure": "恢复后未重新分配角色，业务请求仍应拒绝。",
+    "question": "恢复账号为什么没有恢复权限？",
+    "answer": "角色暂停时已删除，恢复只改变账号状态。",
+    "coverage": "服务级自动覆盖暂停、清空角色与JWT失效；恢复需人工补验。",
+    "tests": [
+      "loginAndScopedTemporaryAccount"
+    ],
+    "frontend": "UsersView.vue 暂停/恢复",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 65,
+      "method": "ManagementController.status"
+    }
+  },
+  {
+    "id": "A10",
+    "owner": "A",
+    "method": "PUT",
+    "path": "/api/v1/users/{id}/password",
+    "title": "管理者重置目标密码",
+    "service": "AccountService.resetPassword",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_PASSWORD_RESET。",
+    "scope": "目标必须在本人范围内；离职账号拒绝重置。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标用户ID"
+      ],
+      [
+        "password",
+        "string",
+        "必填",
+        "8–64位，含字母和数字"
+      ]
+    ],
+    "body": {
+      "password": "ResetExample456!"
+    },
+    "result": {},
+    "tables": "修改 sys_user.password_hash/session_version；写签名和日志。",
+    "repository": "DomainRepository.lock(Account)；setPassword。",
+    "flow": [
+      "校验重置权限与目标范围。",
+      "拒绝status=3。",
+      "更新哈希和会话版本，重新签名并写日志。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "PASSWORD_RESET。",
+    "errors": [
+      "403 OUT_OF_SCOPE：越界",
+      "422 BUSINESS_RULE_VIOLATION：目标已离职",
+      "400 INVALID_ARGUMENT：弱密码"
+    ],
+    "success": "重置选定测试员工密码，用新密码登录。",
+    "failure": "目标旧JWT应失效；离职账号重置应422。",
+    "question": "重置需要知道目标原密码吗？",
+    "answer": "管理者不需要原密码，但必须具有专门权限及目标数据范围。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "UsersView.vue 重置密码",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 83,
+      "method": "ManagementController.password"
+    }
+  },
+  {
+    "id": "A11",
+    "owner": "A",
+    "method": "GET",
+    "path": "/api/v1/system/ping",
+    "title": "检查后端进程",
+    "service": "AuthController.ping",
+    "permission": "公开运行检查。",
+    "scope": "不返回用户或业务数据。",
+    "fields": [],
+    "body": null,
+    "result": {
+      "status": "UP"
+    },
+    "tables": "不读写数据库。",
+    "repository": "无Repository调用。",
+    "flow": [
+      "直接构造UP响应。"
+    ],
+    "transaction": "无业务事务。",
+    "audit": "不写日志。",
+    "errors": [],
+    "success": "后端启动后请求返回UP。",
+    "failure": "数据库关闭时，此接口本身仍不能作为数据库就绪证明。",
+    "question": "ping成功能证明数据库能用吗？",
+    "answer": "不能，数据库连接由另一个检查接口验证。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "",
+    "query": "",
+    "support": true,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 84,
+      "method": "AuthController.ping"
+    }
+  },
+  {
+    "id": "A12",
+    "owner": "A",
+    "method": "GET",
+    "path": "/api/v1/system/database",
+    "title": "检查数据库连接",
+    "service": "QueryService.database",
+    "permission": "公开运行检查。",
+    "scope": "仅返回连接结果，不返回员工数量。",
+    "fields": [],
+    "body": null,
+    "result": {
+      "connected": true
+    },
+    "tables": "只读 sys_user 计数。",
+    "repository": "DomainRepository.query(count Account)。",
+    "flow": [
+      "执行一个用户计数查询。",
+      "查询成功返回connected=true；数据库异常交给统一异常处理。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "503 AUTH_STATE_UNAVAILABLE：数据库不可访问"
+    ],
+    "success": "MySQL正常时返回connected=true。",
+    "failure": "在独立环境停止数据库后请求，应该503。",
+    "question": "为什么内部查数量却不返回数量？",
+    "answer": "这里只用查询确认数据库可用，对外只给运行状态。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "",
+    "query": "",
+    "support": true,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 89,
+      "method": "AuthController.database"
+    }
+  },
+  {
+    "id": "B01",
+    "owner": "B",
+    "method": "GET",
+    "path": "/api/v1/auth/menus",
+    "title": "查询本人某应用的菜单",
+    "service": "QueryService.menus",
+    "permission": "本人 Bearer JWT，不要求另有 IAM 管理菜单权限。账号状态和会话版本仍必须有效。",
+    "scope": "仅本人；按指定应用计算业务权限，不使用“管理其他人”的部门范围。",
+    "fields": [
+      [
+        "appCode",
+        "query string",
+        "默认IAM",
+        "已登记且启用的应用编码"
+      ]
+    ],
+    "body": null,
+    "result": {
+      "appCode": "OA",
+      "user": {
+        "id": "101",
+        "username": "demo_user",
+        "realName": "演示用户",
+        "phone": "13800000002",
+        "employeeNo": "DEMO001",
+        "deptId": "2",
+        "status": 1,
+        "source": 1,
+        "employmentType": 1,
+        "managementScope": "DEPT_TREE",
+        "createdAt": "2026-10-25T10:00:00"
+      },
+      "menus": [
+        {
+          "id": "4",
+          "appId": "3",
+          "parentId": "0",
+          "menuCode": "DEMO_MENU",
+          "menuName": "演示菜单",
+          "menuType": 2,
+          "path": "/demo",
+          "sortOrder": 0,
+          "status": 1
+        }
+      ]
+    },
+    "tables": "共同读取：sys_user、sys_dept、sys_application、sys_user_role、sys_role、sys_role_permission、sys_menu、sys_menu_api、sys_api、sys_data_signature。",
+    "repository": "DomainRepository.roles/menus/get；补祖先目录。",
+    "flow": [
+      "根据JWT取得本人和目标应用。",
+      "AccessService.menus 取有效角色菜单并集，检查组织和资源状态。",
+      "补齐导航祖先，返回菜单及本人信息。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：应用不存在",
+      "403 PERMISSION_DENIED：应用停用",
+      "401 INVALID_TOKEN：身份失效"
+    ],
+    "success": "给测试账号分配演示角色后，OA返回4个菜单。",
+    "failure": "回收角色后重查，菜单为空；目录本身不能产生API权限。",
+    "question": "菜单为空会不会自动退出登录？",
+    "answer": "不会；身份和权限分开，账号有效仍可登录。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "DemoView.vue 选择OA/HR；api.js用于身份刷新时另调用/auth/me",
+    "query": "?appCode=OA",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 39,
+      "method": "AuthController.menus"
+    }
+  },
+  {
+    "id": "B02",
+    "owner": "B",
+    "method": "POST",
+    "path": "/api/v1/auth/check",
+    "title": "外部业务后端在线鉴权",
+    "service": "QueryService.check",
+    "permission": "用户Bearer JWT ＋ X-App-Code ＋ 对应 iam.integration.apps.<code>.key 的 X-Service-Key。",
+    "scope": "应用由对应服务凭据绑定；不接受用HR/OA集成密钥代替应用鉴权密钥。",
+    "fields": [
+      [
+        "method",
+        "string",
+        "必填",
+        "请求方法，应与登记的大写方法一致"
+      ],
+      [
+        "route",
+        "string",
+        "必填",
+        "最长256；传后端匹配后的路由模板，如/orders/{id}"
+      ],
+      [
+        "X-App-Code",
+        "header",
+        "必填",
+        "1–64位字母/数字/下划线/连字符"
+      ],
+      [
+        "X-Service-Key",
+        "header",
+        "必填",
+        "对应应用专用密钥"
+      ]
+    ],
+    "body": {
+      "method": "GET",
+      "route": "/api/v1/demo/OA/feature1"
+    },
+    "result": {
+      "allowed": true,
+      "reasonCode": "ALLOW"
+    },
+    "tables": "共同读取：sys_user、sys_dept、sys_application、sys_user_role、sys_role、sys_role_permission、sys_menu、sys_menu_api、sys_api、sys_data_signature。 成功执行判断时写 sys_operation_log。",
+    "repository": "DomainRepository.query(Api)、roles/menus/apis。",
+    "flow": [
+      "Controller先校验应用凭据。",
+      "验证用户身份、应用及目标API签名。",
+      "按规范化路径+方法找到唯一API，再检查有效菜单是否映射它。",
+      "返回allowed/reasonCode并记AUTH_CHECK。"
+    ],
+    "transaction": "QueryService普通事务，判断结果与日志同事务；日志失败不返回允许。异常身份/验签路径不保证有AUTH_CHECK日志。",
+    "audit": "AUTH_CHECK，含方法、模板、ALLOW/DENY。",
+    "errors": [
+      "401 INVALID_SERVICE：密钥不匹配",
+      "401 INVALID_TOKEN：JWT失效",
+      "400 INVALID_ROUTE_TEMPLATE：模板非法",
+      "503 INTEGRITY_FAILURE：签名异常"
+    ],
+    "success": "正确应用凭据和角色应返回200且allowed=true。",
+    "failure": "回收角色后同JWT返回200且allowed=false；错误服务密钥返回401。",
+    "question": "HTTP200是否就可以放行业务？",
+    "answer": "不能，业务系统必须继续检查data.allowed；只有true才放行。",
+    "coverage": "HTTP自动覆盖允许、应用密钥不能替换为OA/HR集成密钥。",
+    "tests": [
+      "externalCheckBindsApplicationToItsOwnCredential"
+    ],
+    "frontend": "外部后端调用；管理前端不保存应用密钥",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 61,
+      "method": "AuthController.check"
+    }
+  },
+  {
+    "id": "B03",
+    "owner": "B",
+    "method": "GET",
+    "path": "/api/v1/demo/{appCode}/{feature}",
+    "title": "演示业务接口逐次鉴权",
+    "service": "QueryService.check",
+    "permission": "本人 Bearer JWT，不要求另有 IAM 管理菜单权限。账号状态和会话版本仍必须有效。",
+    "scope": "对当前用户在路径指定应用中的菜单/API权限重新计算。",
+    "fields": [
+      [
+        "appCode",
+        "path string",
+        "必填",
+        "演示使用OA或HR"
+      ],
+      [
+        "feature",
+        "path string",
+        "必填",
+        "feature1到feature4；以已登记路由为准"
+      ]
+    ],
+    "body": null,
+    "result": {
+      "appCode": "OA",
+      "feature": "feature1",
+      "message": "业务接口鉴权通过"
+    },
+    "tables": "共同读取：sys_user、sys_dept、sys_application、sys_user_role、sys_role、sys_role_permission、sys_menu、sys_menu_api、sys_api、sys_data_signature。 写AUTH_CHECK。",
+    "repository": "复用AccessService.allowed与QueryService.check。",
+    "flow": [
+      "组合本次实际演示路径。",
+      "复用同一RBAC0计算器判断。",
+      "允许返回业务演示结果，拒绝由Controller返回403。"
+    ],
+    "transaction": "鉴权和日志在QueryService事务内完成；拒绝判断正常返回后由Controller抛403，因此该拒绝日志保留。",
+    "audit": "AUTH_CHECK。",
+    "errors": [
+      "403 PERMISSION_DENIED：业务权限不足",
+      "401 INVALID_TOKEN：账号失效"
+    ],
+    "success": "业务演示点一个已授权OA功能，显示通过。",
+    "failure": "保留旧页面，另一会话撤权后点击原功能，应403。",
+    "question": "前端菜单还没刷新，为什么也能阻止操作？",
+    "answer": "每次业务请求都重新校验，旧页面不能绕过后端。",
+    "coverage": "HTTP自动覆盖多角色并集、撤权、冻结与解冻。",
+    "tests": [
+      "multiRoleUnionImmediateRevokeAndOaRepeat",
+      "freezeTransferAndTermination"
+    ],
+    "frontend": "DemoView.vue",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/AuthController.java",
+      "line": 74,
+      "method": "AuthController.demo"
+    }
+  },
+  {
+    "id": "C01",
+    "owner": "C",
+    "method": "GET",
+    "path": "/api/v1/applications",
+    "title": "查询应用列表",
+    "service": "ResourceService.applications",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_VIEW。",
+    "scope": "资源为全局定义，不按操作者部门裁剪。",
+    "fields": [],
+    "body": null,
+    "result": [
+      {
+        "id": "3",
+        "appCode": "DEMO_APP",
+        "appName": "演示应用",
+        "appDesc": null,
+        "status": 1
+      }
+    ],
+    "tables": "授权公共读取＋对应 sys_application/sys_menu/sys_api/sys_menu_api；无写表。",
+    "repository": "DomainRepository.all/query/get/apis；逐个返回对象验签。",
+    "flow": [
+      "验证资源查看权限。",
+      "按路由参数读取资源或关联ID。",
+      "验证相应资源签名后返回；列表不是分页接口。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：路径对象不存在",
+      "503 INTEGRITY_FAILURE：资源或关联签名异常"
+    ],
+    "success": "打开应用资源页并选择应用，与接口返回对象对应。",
+    "failure": "无资源查看权限的账号应403。",
+    "question": "这里为什么没有部门范围过滤？",
+    "answer": "应用资源是全局定义，管理资格由对应IAM功能权限控制。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue；角色选菜单也使用应用和菜单目录",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 145,
+      "method": "ManagementController.apps"
+    }
+  },
+  {
+    "id": "C02",
+    "owner": "C",
+    "method": "GET",
+    "path": "/api/v1/applications/{app}/menus",
+    "title": "查询应用菜单",
+    "service": "ResourceService.menus",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_VIEW。",
+    "scope": "资源为全局定义，不按操作者部门裁剪。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "应用ID或菜单ID，以路由为准"
+      ]
+    ],
+    "body": null,
+    "result": [
+      {
+        "id": "4",
+        "appId": "3",
+        "parentId": "0",
+        "menuCode": "DEMO_MENU",
+        "menuName": "演示菜单",
+        "menuType": 2,
+        "path": "/demo",
+        "sortOrder": 0,
+        "status": 1
+      }
+    ],
+    "tables": "授权公共读取＋对应 sys_application/sys_menu/sys_api/sys_menu_api；无写表。",
+    "repository": "DomainRepository.all/query/get/apis；逐个返回对象验签。",
+    "flow": [
+      "验证资源查看权限。",
+      "按路由参数读取资源或关联ID。",
+      "验证相应资源签名后返回；列表不是分页接口。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：路径对象不存在",
+      "503 INTEGRITY_FAILURE：资源或关联签名异常"
+    ],
+    "success": "打开应用资源页并选择应用，与接口返回对象对应。",
+    "failure": "无资源查看权限的账号应403。",
+    "question": "这里为什么没有部门范围过滤？",
+    "answer": "应用资源是全局定义，管理资格由对应IAM功能权限控制。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue；角色选菜单也使用应用和菜单目录",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 164,
+      "method": "ManagementController.menus"
+    }
+  },
+  {
+    "id": "C03",
+    "owner": "C",
+    "method": "GET",
+    "path": "/api/v1/applications/{app}/apis",
+    "title": "查询应用API",
+    "service": "ResourceService.apis",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_VIEW。",
+    "scope": "资源为全局定义，不按操作者部门裁剪。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "应用ID或菜单ID，以路由为准"
+      ]
+    ],
+    "body": null,
+    "result": [
+      {
+        "id": "5",
+        "appId": "3",
+        "apiCode": "DEMO_API",
+        "apiName": "查看演示",
+        "apiPath": "/demo/items/{id}",
+        "canonicalPath": "/demo/items/{}",
+        "httpMethod": "GET",
+        "status": 1
+      }
+    ],
+    "tables": "授权公共读取＋对应 sys_application/sys_menu/sys_api/sys_menu_api；无写表。",
+    "repository": "DomainRepository.all/query/get/apis；逐个返回对象验签。",
+    "flow": [
+      "验证资源查看权限。",
+      "按路由参数读取资源或关联ID。",
+      "验证相应资源签名后返回；列表不是分页接口。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：路径对象不存在",
+      "503 INTEGRITY_FAILURE：资源或关联签名异常"
+    ],
+    "success": "打开应用资源页并选择应用，与接口返回对象对应。",
+    "failure": "无资源查看权限的账号应403。",
+    "question": "这里为什么没有部门范围过滤？",
+    "answer": "应用资源是全局定义，管理资格由对应IAM功能权限控制。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue；角色选菜单也使用应用和菜单目录",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 186,
+      "method": "ManagementController.apis"
+    }
+  },
+  {
+    "id": "C04",
+    "owner": "C",
+    "method": "GET",
+    "path": "/api/v1/menus/{id}/apis",
+    "title": "查询菜单关联API ID",
+    "service": "ResourceService.menuApis",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_VIEW。",
+    "scope": "资源为全局定义，不按操作者部门裁剪。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "应用ID或菜单ID，以路由为准"
+      ]
+    ],
+    "body": null,
+    "result": [
+      "5"
+    ],
+    "tables": "授权公共读取＋对应 sys_application/sys_menu/sys_api/sys_menu_api；无写表。",
+    "repository": "DomainRepository.all/query/get/apis；逐个返回对象验签。",
+    "flow": [
+      "验证资源查看权限。",
+      "按路由参数读取资源或关联ID。",
+      "验证相应资源签名后返回；列表不是分页接口。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：路径对象不存在",
+      "503 INTEGRITY_FAILURE：资源或关联签名异常"
+    ],
+    "success": "打开应用资源页并选择应用，与接口返回对象对应。",
+    "failure": "无资源查看权限的账号应403。",
+    "question": "这里为什么没有部门范围过滤？",
+    "answer": "应用资源是全局定义，管理资格由对应IAM功能权限控制。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue；角色选菜单也使用应用和菜单目录",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 208,
+      "method": "ManagementController.menuApis"
+    }
+  },
+  {
+    "id": "C05",
+    "owner": "C",
+    "method": "POST",
+    "path": "/api/v1/applications",
+    "title": "新建应用",
+    "service": "ResourceService.application",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局资源操作。",
+    "fields": [
+      [
+        "appCode",
+        "string",
+        "必填",
+        "最长64；只在创建时读取，更新不改编码"
+      ],
+      [
+        "appName",
+        "string",
+        "必填",
+        "最长128；PATCH也必须提供"
+      ],
+      [
+        "appDesc",
+        "string",
+        "可选",
+        "最长512；省略或null清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；省略保持原值，新建默认1"
+      ]
+    ],
+    "body": {
+      "appCode": "DEMO_APP",
+      "appName": "演示应用",
+      "status": 1
+    },
+    "result": {
+      "id": "3",
+      "appCode": "DEMO_APP",
+      "appName": "演示应用",
+      "appDesc": null,
+      "status": 1
+    },
+    "tables": "写 sys_application、sys_data_signature、sys_operation_log。",
+    "repository": "DomainRepository.save 或 lock(Application)；实体脏检查。",
+    "flow": [
+      "检查写权限。",
+      "创建或锁定并验签原对象。",
+      "保存名称/描述/状态；IAM应用不能停用。",
+      "签名并记录APPLICATION_SAVE。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "APPLICATION_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：缺少appName等必填字段",
+      "409 DUPLICATE_RESOURCE：应用编码重复",
+      "422 BUSINESS_RULE_VIOLATION：停用IAM"
+    ],
+    "success": "创建演示应用或修改其名称，再查询应用列表。",
+    "failure": "更新时只传status但缺少appName，会400；停用IAM会422。",
+    "question": "PATCH在这里是不是任意单字段修改？",
+    "answer": "不是；当前实现仍要求appName，并会将省略的描述清空，演示应按真实代码说明。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue 新建/编辑应用",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 150,
+      "method": "ManagementController.createApp"
+    }
+  },
+  {
+    "id": "C06",
+    "owner": "C",
+    "method": "PATCH",
+    "path": "/api/v1/applications/{id}",
+    "title": "修改应用",
+    "service": "ResourceService.application",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局资源操作。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "应用ID"
+      ],
+      [
+        "appName",
+        "string",
+        "必填",
+        "最长128；PATCH也必须提供"
+      ],
+      [
+        "appDesc",
+        "string",
+        "可选",
+        "最长512；省略或null清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；省略保持原值，新建默认1"
+      ]
+    ],
+    "body": {
+      "appName": "演示应用新名称",
+      "status": 1
+    },
+    "result": {
+      "id": "3",
+      "appCode": "DEMO_APP",
+      "appName": "演示应用",
+      "appDesc": null,
+      "status": 1
+    },
+    "tables": "写 sys_application、sys_data_signature、sys_operation_log。",
+    "repository": "DomainRepository.save 或 lock(Application)；实体脏检查。",
+    "flow": [
+      "检查写权限。",
+      "创建或锁定并验签原对象。",
+      "保存名称/描述/状态；IAM应用不能停用。",
+      "签名并记录APPLICATION_SAVE。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "APPLICATION_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：缺少appName等必填字段",
+      "409 DUPLICATE_RESOURCE：应用编码重复",
+      "422 BUSINESS_RULE_VIOLATION：停用IAM"
+    ],
+    "success": "创建演示应用或修改其名称，再查询应用列表。",
+    "failure": "更新时只传status但缺少appName，会400；停用IAM会422。",
+    "question": "PATCH在这里是不是任意单字段修改？",
+    "answer": "不是；当前实现仍要求appName，并会将省略的描述清空，演示应按真实代码说明。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue 新建/编辑应用",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 156,
+      "method": "ManagementController.editApp"
+    }
+  },
+  {
+    "id": "C07",
+    "owner": "C",
+    "method": "POST",
+    "path": "/api/v1/applications/{app}/menus",
+    "title": "新建菜单或目录",
+    "service": "ResourceService.menu",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局资源；父菜单必须与当前菜单属于同应用。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "所属应用"
+      ],
+      [
+        "menuCode",
+        "string",
+        "必填",
+        "最长64；只创建时读取"
+      ],
+      [
+        "menuName",
+        "string",
+        "必填",
+        "最长128；PATCH也必填"
+      ],
+      [
+        "menuType",
+        "integer",
+        "可选",
+        "1目录/2权限菜单；默认2或保持原值"
+      ],
+      [
+        "parentId",
+        "ID或0",
+        "可选",
+        "省略/null/0设为顶级；更新时也如此"
+      ],
+      [
+        "path",
+        "string",
+        "可选",
+        "最长256；省略清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；省略保持原值"
+      ]
+    ],
+    "body": {
+      "menuCode": "DEMO_MENU",
+      "menuName": "演示菜单",
+      "menuType": 2,
+      "parentId": "0",
+      "path": "/demo",
+      "status": 1
+    },
+    "result": {
+      "id": "4",
+      "appId": "3",
+      "parentId": "0",
+      "menuCode": "DEMO_MENU",
+      "menuName": "演示菜单",
+      "menuType": 2,
+      "path": "/demo",
+      "sortOrder": 0,
+      "status": 1
+    },
+    "tables": "写 sys_menu、签名、日志；检查 sys_application、sys_role_permission、sys_menu_api。",
+    "repository": "DomainRepository.get/lock/save/query/apis。",
+    "flow": [
+      "校验应用及原菜单。",
+      "检查父链同应用、不能指向自己或形成循环。",
+      "已有角色授权或API关联的菜单不能改成目录。",
+      "保存父节点/路径/状态并签名、记录日志。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "MENU_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：跨应用父节点或字段不合法",
+      "422 BUSINESS_RULE_VIOLATION：循环父链或已有授权菜单改目录",
+      "409 DUPLICATE_RESOURCE：同应用菜单编码重复"
+    ],
+    "success": "创建目录与子菜单，列表显示父子ID对应。",
+    "failure": "将父节点设为自己或自己的后代，应422。",
+    "question": "目录是否直接允许API？",
+    "answer": "目录只导航；角色只能获得type=2菜单，接口关联也只允许权限菜单。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue 菜单页签",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 169,
+      "method": "ManagementController.createMenu"
+    }
+  },
+  {
+    "id": "C08",
+    "owner": "C",
+    "method": "PATCH",
+    "path": "/api/v1/applications/{app}/menus/{id}",
+    "title": "修改菜单或目录",
+    "service": "ResourceService.menu",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局资源；父菜单必须与当前菜单属于同应用。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "所属应用"
+      ],
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标菜单"
+      ],
+      [
+        "menuName",
+        "string",
+        "必填",
+        "最长128；PATCH也必填"
+      ],
+      [
+        "menuType",
+        "integer",
+        "可选",
+        "1目录/2权限菜单；默认2或保持原值"
+      ],
+      [
+        "parentId",
+        "ID或0",
+        "可选",
+        "省略/null/0设为顶级；更新时也如此"
+      ],
+      [
+        "path",
+        "string",
+        "可选",
+        "最长256；省略清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；省略保持原值"
+      ]
+    ],
+    "body": {
+      "menuName": "更新菜单",
+      "menuType": 2,
+      "parentId": "0",
+      "path": "/demo",
+      "status": 1
+    },
+    "result": {
+      "id": "4",
+      "appId": "3",
+      "parentId": "0",
+      "menuCode": "DEMO_MENU",
+      "menuName": "演示菜单",
+      "menuType": 2,
+      "path": "/demo",
+      "sortOrder": 0,
+      "status": 1
+    },
+    "tables": "写 sys_menu、签名、日志；检查 sys_application、sys_role_permission、sys_menu_api。",
+    "repository": "DomainRepository.get/lock/save/query/apis。",
+    "flow": [
+      "校验应用及原菜单。",
+      "检查父链同应用、不能指向自己或形成循环。",
+      "已有角色授权或API关联的菜单不能改成目录。",
+      "保存父节点/路径/状态并签名、记录日志。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "MENU_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：跨应用父节点或字段不合法",
+      "422 BUSINESS_RULE_VIOLATION：循环父链或已有授权菜单改目录",
+      "409 DUPLICATE_RESOURCE：同应用菜单编码重复"
+    ],
+    "success": "创建目录与子菜单，列表显示父子ID对应。",
+    "failure": "将父节点设为自己或自己的后代，应422。",
+    "question": "目录是否直接允许API？",
+    "answer": "目录只导航；角色只能获得type=2菜单，接口关联也只允许权限菜单。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "ResourcesView.vue 菜单页签",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 177,
+      "method": "ManagementController.editMenu"
+    }
+  },
+  {
+    "id": "C09",
+    "owner": "C",
+    "method": "POST",
+    "path": "/api/v1/applications/{app}/apis",
+    "title": "新建API资源",
+    "service": "ResourceService.api",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局定义；应用归属不可通过更新迁移。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "所属应用"
+      ],
+      [
+        "apiCode",
+        "string",
+        "必填",
+        "最长128；仅创建时读取"
+      ],
+      [
+        "apiName",
+        "string",
+        "必填",
+        "最长128"
+      ],
+      [
+        "apiPath",
+        "string",
+        "必填",
+        "最长256；规范路由模板"
+      ],
+      [
+        "httpMethod",
+        "string",
+        "必填",
+        "GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1"
+      ]
+    ],
+    "body": {
+      "apiCode": "DEMO_API",
+      "apiName": "查看演示",
+      "apiPath": "/demo/items/{id}",
+      "httpMethod": "GET",
+      "status": 1
+    },
+    "result": {
+      "id": "5",
+      "appId": "3",
+      "apiCode": "DEMO_API",
+      "apiName": "查看演示",
+      "apiPath": "/demo/items/{id}",
+      "canonicalPath": "/demo/items/{}",
+      "httpMethod": "GET",
+      "status": 1
+    },
+    "tables": "写 sys_api、签名和日志。",
+    "repository": "DomainRepository.query(同应用同方法)、save/lock(Api)。",
+    "flow": [
+      "验证写权限及应用。",
+      "规范化模板，并将变量名转为{}保存canonicalPath。",
+      "拒绝与同应用同方法其他模板重叠的路径。",
+      "保存并签名，记录API_SAVE。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "API_SAVE。",
+    "errors": [
+      "400 INVALID_ROUTE_TEMPLATE：模板格式错误",
+      "400 INVALID_ARGUMENT：方法非法",
+      "409 DUPLICATE_RESOURCE：路径歧义/重复"
+    ],
+    "success": "登记GET /demo/items/{id}并查询，canonicalPath应为/demo/items/{}。",
+    "failure": "再登记GET /demo/items/{itemId}或重叠模板，应409。",
+    "question": "仅换参数名为什么也重复？",
+    "answer": "请求路由含义没有变化，不能让一个实际请求对应两个权限资源。",
+    "coverage": "现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。",
+    "tests": [
+      "roleAndResourceConfigurationsUseOneRbacChain"
+    ],
+    "frontend": "ResourcesView.vue 接口资源页签",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 191,
+      "method": "ManagementController.createApi"
+    }
+  },
+  {
+    "id": "C10",
+    "owner": "C",
+    "method": "PATCH",
+    "path": "/api/v1/applications/{app}/apis/{id}",
+    "title": "修改API资源",
+    "service": "ResourceService.api",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局定义；应用归属不可通过更新迁移。",
+    "fields": [
+      [
+        "app",
+        "path ID",
+        "必填",
+        "所属应用"
+      ],
+      [
+        "id",
+        "path ID",
+        "必填",
+        "API ID"
+      ],
+      [
+        "apiName",
+        "string",
+        "必填",
+        "最长128"
+      ],
+      [
+        "apiPath",
+        "string",
+        "必填",
+        "最长256；规范路由模板"
+      ],
+      [
+        "httpMethod",
+        "string",
+        "必填",
+        "GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1"
+      ]
+    ],
+    "body": {
+      "apiName": "查看演示",
+      "apiPath": "/demo/items/{id}",
+      "httpMethod": "GET",
+      "status": 1
+    },
+    "result": {
+      "id": "5",
+      "appId": "3",
+      "apiCode": "DEMO_API",
+      "apiName": "查看演示",
+      "apiPath": "/demo/items/{id}",
+      "canonicalPath": "/demo/items/{}",
+      "httpMethod": "GET",
+      "status": 1
+    },
+    "tables": "写 sys_api、签名和日志。",
+    "repository": "DomainRepository.query(同应用同方法)、save/lock(Api)。",
+    "flow": [
+      "验证写权限及应用。",
+      "规范化模板，并将变量名转为{}保存canonicalPath。",
+      "拒绝与同应用同方法其他模板重叠的路径。",
+      "保存并签名，记录API_SAVE。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "API_SAVE。",
+    "errors": [
+      "400 INVALID_ROUTE_TEMPLATE：模板格式错误",
+      "400 INVALID_ARGUMENT：方法非法",
+      "409 DUPLICATE_RESOURCE：路径歧义/重复"
+    ],
+    "success": "登记GET /demo/items/{id}并查询，canonicalPath应为/demo/items/{}。",
+    "failure": "再登记GET /demo/items/{itemId}或重叠模板，应409。",
+    "question": "仅换参数名为什么也重复？",
+    "answer": "请求路由含义没有变化，不能让一个实际请求对应两个权限资源。",
+    "coverage": "现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。",
+    "tests": [
+      "roleAndResourceConfigurationsUseOneRbacChain"
+    ],
+    "frontend": "ResourcesView.vue 接口资源页签",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 199,
+      "method": "ManagementController.editApi"
+    }
+  },
+  {
+    "id": "C11",
+    "owner": "C",
+    "method": "PUT",
+    "path": "/api/v1/menus/{id}/apis",
+    "title": "完整保存菜单接口关联",
+    "service": "ResourceService.replaceApis",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_RESOURCES_WRITE。",
+    "scope": "全局资源；菜单与每个API必须属于同应用。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "菜单ID"
+      ],
+      [
+        "apiIds",
+        "ID array",
+        "必填",
+        "最多10000个原始元素；去重排序；[]清空"
+      ]
+    ],
+    "body": {
+      "apiIds": [
+        "5"
+      ]
+    },
+    "result": {},
+    "tables": "改 sys_menu_api，更新 sys_menu 对象签名，写日志。",
+    "repository": "DomainRepository.lock(Menu)/apis/query/save/remove。",
+    "flow": [
+      "锁菜单、验签并要求type=2。",
+      "验证全部API及同应用约束。",
+      "差异增删关联，重新签名菜单的API集合。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "MENU_APIS_REPLACE，记录前后ID集合。",
+    "errors": [
+      "400 INVALID_ARGUMENT：跨应用API或列表非法",
+      "422 BUSINESS_RULE_VIOLATION：目录不能关联API"
+    ],
+    "success": "勾选两个API保存，再GET关联ID集合。",
+    "failure": "加入另一个应用的API，应拒绝且原集合保留。",
+    "question": "为什么集合签名挂在菜单上？",
+    "answer": "菜单签名覆盖其API ID集合，直接篡改关联表也能被发现。",
+    "coverage": "服务级自动覆盖跨应用拒绝；前端保存交互为契约测试。",
+    "tests": [
+      "roleAndResourceConfigurationsUseOneRbacChain"
+    ],
+    "frontend": "ResourcesView.vue 关联接口",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 213,
+      "method": "ManagementController.replaceApis"
+    }
+  },
+  {
+    "id": "D01",
+    "owner": "D",
+    "method": "GET",
+    "path": "/api/v1/roles",
+    "title": "查询角色目录",
+    "service": "ResourceService.roles",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_ROLES_VIEW 或 IAM_GRANTS_VIEW。",
+    "scope": "角色是全局目录，不按部门过滤。",
+    "fields": [],
+    "body": null,
+    "result": [
+      {
+        "id": "6",
+        "roleCode": "DEMO_ROLE",
+        "roleName": "演示角色",
+        "roleDesc": null,
+        "status": 1
+      }
+    ],
+    "tables": "授权公共读取＋sys_role及其菜单集合签名；无写表。",
+    "repository": "DomainRepository.all(Role)、SignatureService.verify(role)。",
+    "flow": [
+      "允许角色查看者或授权查看者读取目录。",
+      "读取全部角色并逐个验签。",
+      "返回角色数组，包含停用角色；前端按用途筛选。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "403 PERMISSION_DENIED：缺少两种查看权限",
+      "503 INTEGRITY_FAILURE：角色或关联异常"
+    ],
+    "success": "角色管理和权限分配都能取得角色目录。",
+    "failure": "只有用户查看、没有角色/授权查看的账号应403。",
+    "question": "授权人员为什么可以读角色但不能编辑角色？",
+    "answer": "查看和编辑是不同菜单权限。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "RolesView.vue；UsersView.vue 角色选择",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 112,
+      "method": "ManagementController.roles"
+    }
+  },
+  {
+    "id": "D02",
+    "owner": "D",
+    "method": "POST",
+    "path": "/api/v1/roles",
+    "title": "新建角色",
+    "service": "ResourceService.role",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_ROLES_WRITE。",
+    "scope": "全局角色定义，不按部门过滤。",
+    "fields": [
+      [
+        "roleCode",
+        "string",
+        "必填",
+        "最长64；更新不读取编码"
+      ],
+      [
+        "roleName",
+        "string",
+        "必填",
+        "最长128；PATCH也必填"
+      ],
+      [
+        "roleDesc",
+        "string",
+        "可选",
+        "最长512；省略清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；新建默认1，更新省略保持"
+      ]
+    ],
+    "body": {
+      "roleCode": "DEMO_ROLE",
+      "roleName": "演示角色",
+      "status": 1
+    },
+    "result": {
+      "id": "6",
+      "roleCode": "DEMO_ROLE",
+      "roleName": "演示角色",
+      "roleDesc": null,
+      "status": 1
+    },
+    "tables": "写 sys_role、签名和日志；不直接写用户角色。",
+    "repository": "DomainRepository.save 或 lock(Role)。",
+    "flow": [
+      "校验角色维护权限。",
+      "创建或锁定原角色并验签。",
+      "保存名称、描述和状态；签名包含现有菜单集合。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "ROLE_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：缺名称/状态非法",
+      "409 DUPLICATE_RESOURCE：roleCode重复"
+    ],
+    "success": "创建角色，再由另一个API配置菜单，最后给用户分配角色。",
+    "failure": "停用角色后其原用户关联仍存在，但该角色不贡献权限。",
+    "question": "创建角色会立即给某个用户权限吗？",
+    "answer": "不会，创建角色、配置菜单、分配给用户是三步。",
+    "coverage": "POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。",
+    "tests": [
+      "roleAndResourceConfigurationsUseOneRbacChain"
+    ],
+    "frontend": "RolesView.vue",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 117,
+      "method": "ManagementController.createRole"
+    }
+  },
+  {
+    "id": "D03",
+    "owner": "D",
+    "method": "PATCH",
+    "path": "/api/v1/roles/{id}",
+    "title": "修改或停用角色",
+    "service": "ResourceService.role",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_ROLES_WRITE。",
+    "scope": "全局角色定义，不按部门过滤。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标角色"
+      ],
+      [
+        "roleName",
+        "string",
+        "必填",
+        "最长128；PATCH也必填"
+      ],
+      [
+        "roleDesc",
+        "string",
+        "可选",
+        "最长512；省略清空"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "0/1；新建默认1，更新省略保持"
+      ]
+    ],
+    "body": {
+      "roleName": "演示角色新名称",
+      "status": 0
+    },
+    "result": {
+      "id": "6",
+      "roleCode": "DEMO_ROLE",
+      "roleName": "演示角色",
+      "roleDesc": null,
+      "status": 1
+    },
+    "tables": "写 sys_role、签名和日志；不直接写用户角色。",
+    "repository": "DomainRepository.save 或 lock(Role)。",
+    "flow": [
+      "校验角色维护权限。",
+      "创建或锁定原角色并验签。",
+      "保存名称、描述和状态；签名包含现有菜单集合。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "ROLE_SAVE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：缺名称/状态非法",
+      "409 DUPLICATE_RESOURCE：roleCode重复"
+    ],
+    "success": "创建角色，再由另一个API配置菜单，最后给用户分配角色。",
+    "failure": "停用角色后其原用户关联仍存在，但该角色不贡献权限。",
+    "question": "创建角色会立即给某个用户权限吗？",
+    "answer": "不会，创建角色、配置菜单、分配给用户是三步。",
+    "coverage": "POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。",
+    "tests": [],
+    "frontend": "RolesView.vue",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 123,
+      "method": "ManagementController.editRole"
+    }
+  },
+  {
+    "id": "D04",
+    "owner": "D",
+    "method": "GET",
+    "path": "/api/v1/roles/{id}/menus",
+    "title": "读取角色菜单ID集合",
+    "service": "ResourceService.roleMenus",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_ROLES_VIEW。",
+    "scope": "全局角色配置。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "角色ID"
+      ]
+    ],
+    "body": null,
+    "result": [
+      "4"
+    ],
+    "tables": "读 sys_role、sys_role_permission、签名。",
+    "repository": "DomainRepository.get(Role)/menus。",
+    "flow": [
+      "检查查看权限。",
+      "验证角色及关联集合签名。",
+      "返回当前menuId数组供复选框回显。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "404 RESOURCE_NOT_FOUND：角色不存在",
+      "503 INTEGRITY_FAILURE：关联签名不符"
+    ],
+    "success": "读取已有角色，与配置权限对话框勾选项对应。",
+    "failure": "直接篡改该角色菜单关联，再读应503。",
+    "question": "为何返回ID数组而不是菜单详情？",
+    "answer": "关联接口只负责关系；菜单详情由C的资源目录提供。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "RolesView.vue 配置权限回显",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 131,
+      "method": "ManagementController.roleMenus"
+    }
+  },
+  {
+    "id": "D05",
+    "owner": "D",
+    "method": "PUT",
+    "path": "/api/v1/roles/{id}/menus",
+    "title": "完整保存角色菜单权限",
+    "service": "ResourceService.replaceMenus",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_ROLE_PERMISSIONS_WRITE。",
+    "scope": "全局角色配置。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "角色ID"
+      ],
+      [
+        "menuIds",
+        "ID array",
+        "必填",
+        "最多10000个原始元素；只能选type=2菜单；[]清空"
+      ]
+    ],
+    "body": {
+      "menuIds": [
+        "4"
+      ]
+    },
+    "result": {},
+    "tables": "改 sys_role_permission；更新 sys_role 签名；写日志。",
+    "repository": "DomainRepository.lock(Role)/menus/query/save/remove。",
+    "flow": [
+      "锁角色并验签。",
+      "验证所有目标菜单签名和type=2。",
+      "差异增删关联，签名新集合并记录日志。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "ROLE_MENUS_REPLACE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：传目录或非法ID集合",
+      "404 RESOURCE_NOT_FOUND：菜单不存在"
+    ],
+    "success": "为角色配置业务菜单，其已有用户下一次请求获得权限。",
+    "failure": "数组含不存在菜单，整体拒绝且旧集合保留。",
+    "question": "这是不是RBAC1角色继承？",
+    "answer": "不是，角色只直接关联菜单，没有角色到角色的关系。",
+    "coverage": "HTTP自动覆盖角色菜单保存；无效替换回滚另有用户角色服务级测试。",
+    "tests": [
+      "roleAndResourceConfigurationsUseOneRbacChain"
+    ],
+    "frontend": "RolesView.vue；界面还需要资源查看权限用于选菜单",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 136,
+      "method": "ManagementController.replaceMenus"
+    }
+  },
+  {
+    "id": "D06",
+    "owner": "D",
+    "method": "GET",
+    "path": "/api/v1/users/{id}/roles",
+    "title": "读取用户角色ID集合",
+    "service": "GrantService.roles",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_GRANTS_VIEW。",
+    "scope": "目标用户必须在操作者范围内。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标用户"
+      ]
+    ],
+    "body": null,
+    "result": [
+      "6"
+    ],
+    "tables": "读 sys_user、sys_user_role及用户签名。",
+    "repository": "DomainRepository.get(Account)/roles。",
+    "flow": [
+      "检查授权查看权限。",
+      "验证目标身份签名和部门范围。",
+      "返回唯一用户角色关系中的roleId数组。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "403 OUT_OF_SCOPE：越界",
+      "404 RESOURCE_NOT_FOUND：用户不存在"
+    ],
+    "success": "打开用户角色对话框，与当前关系一致。",
+    "failure": "查看其他部门范围的用户角色应403。",
+    "question": "为什么没有授权来源接口？",
+    "answer": "现在只有一份用户角色关系，来源体系已删除。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "UsersView.vue 角色对话框",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 92,
+      "method": "ManagementController.userRoles"
+    }
+  },
+  {
+    "id": "D07",
+    "owner": "D",
+    "method": "PUT",
+    "path": "/api/v1/users/{id}/roles",
+    "title": "完整保存用户角色",
+    "service": "GrantService.replace",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_GRANTS_WRITE。",
+    "scope": "目标必须在范围内；非空角色集合要求用户可用且部门祖先有效。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标用户"
+      ],
+      [
+        "roleIds",
+        "ID array",
+        "必填",
+        "最多500个原始元素；去重；角色必须存在并启用；[]清空"
+      ]
+    ],
+    "body": {
+      "roleIds": [
+        "6"
+      ]
+    },
+    "result": {},
+    "tables": "改 sys_user_role；更新用户签名；写日志。",
+    "repository": "DomainRepository.lock(Account)/roles/query/save/remove。",
+    "flow": [
+      "检查功能权限，锁目标并检查部门范围。",
+      "校验目标状态和全部角色。",
+      "对唯一关系做差异增删，签名并记录前后集合。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "USER_ROLES_REPLACE。",
+    "errors": [
+      "403 OUT_OF_SCOPE：越界",
+      "422 BUSINESS_RULE_VIOLATION：非空授权给停用/冻结目标或选停用角色",
+      "404 RESOURCE_NOT_FOUND：角色不存在"
+    ],
+    "success": "为测试用户加两个角色，再取消一个；有效权限为剩余角色并集。",
+    "failure": "包含一个不存在角色，整体失败且原关系不变。",
+    "question": "两个管理者同时保存会怎样？",
+    "answer": "锁同一个用户行后依次保存，最后得到后提交的完整集合，没有旧页面版本冲突检测。",
+    "coverage": "服务级自动覆盖并集、回滚、并发完整保存及自我撤权。",
+    "tests": [
+      "multiRoleUnionImmediateRevokeAndOaRepeat",
+      "tamperingFailsAndInvalidReplacementRollsBack",
+      "competingSavesRemainCompleteAndSigned",
+      "selfRevocationNeedsNoIndependentAdministratorAndPersistsOtherGrants"
+    ],
+    "frontend": "UsersView.vue 单人角色配置",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 97,
+      "method": "ManagementController.userRoles"
+    }
+  },
+  {
+    "id": "E01",
+    "owner": "E",
+    "method": "PUT",
+    "path": "/api/v1/users/{id}/scope",
+    "title": "配置管理数据范围",
+    "service": "AccountService.scope",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_SCOPE_WRITE。",
+    "scope": "目标先在本人范围内；将目标设为ALL时，操作者自己也必须是ALL。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标用户"
+      ],
+      [
+        "managementScope",
+        "string",
+        "必填",
+        "ALL或DEPT_TREE"
+      ]
+    ],
+    "body": {
+      "managementScope": "DEPT_TREE"
+    },
+    "result": {},
+    "tables": "改 sys_user.management_scope；更新签名、日志。",
+    "repository": "DomainRepository.lock(Account)；AccessService.scope。",
+    "flow": [
+      "校验范围配置权限。",
+      "锁目标并检查原部门范围。",
+      "仅已有ALL范围的人可授予ALL；修改字段、签名、日志。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "USER_SCOPE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：范围枚举不合法",
+      "403 OUT_OF_SCOPE：目标越界或非ALL操作者授予ALL"
+    ],
+    "success": "ALL操作者给测试人员设置DEPT_TREE，再用测试账号查看用户列表。",
+    "failure": "DEPT_TREE操作者尝试把目标设置ALL，应403。",
+    "question": "ALL是否等于全部功能权限？",
+    "answer": "不是，ALL只扩大对象范围，每个操作仍需对应菜单权限。",
+    "coverage": "服务级自动覆盖非ALL不能授予ALL；前端对话框为契约测试。",
+    "tests": [
+      "batchPartialSuccessAndDepartmentScope"
+    ],
+    "frontend": "UsersView.vue 范围",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 74,
+      "method": "ManagementController.scope"
+    }
+  },
+  {
+    "id": "E02",
+    "owner": "E",
+    "method": "GET",
+    "path": "/api/v1/departments",
+    "title": "查询本人可管理部门",
+    "service": "OrganizationService.departments",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_DEPTS_VIEW、IAM_USERS_VIEW、IAM_GRANTS_VIEW 任一。",
+    "scope": "ALL返回全部；DEPT_TREE仅本人部门及后代。",
+    "fields": [],
+    "body": null,
+    "result": [
+      {
+        "id": "2",
+        "parentId": "1",
+        "deptCode": "DEMO_DEPT",
+        "deptName": "演示部门",
+        "status": 1,
+        "mergedIntoDeptId": null
+      }
+    ],
+    "tables": "读 sys_dept 与组织签名，不写表。",
+    "repository": "DomainRepository.all(Department)；AccessService.within/departmentChain。",
+    "flow": [
+      "验证允许的目录查看权限。",
+      "对每个部门检查与本人部门的祖先关系。",
+      "返回可见部门数组，供组织页和用户筛选器使用。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "不写日志。",
+    "errors": [
+      "403 PERMISSION_DENIED：缺少任一种查看权限",
+      "503 INTEGRITY_FAILURE：组织环或签名异常"
+    ],
+    "success": "同一接口在组织页和用户部门选择器都可使用。",
+    "failure": "部门管理员不应得到兄弟部门；伪造前端选项仍会被后端范围校验挡住。",
+    "question": "怎样判断目标部门是否属于下属？",
+    "answer": "沿目标的parentId向上找；祖先链包含操作者deptId就属于范围。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "OrganizationView.vue；UsersView.vue 部门筛选",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 222,
+      "method": "ManagementController.departments"
+    }
+  },
+  {
+    "id": "E03",
+    "owner": "E",
+    "method": "POST",
+    "path": "/api/v1/departments/{id}/freeze",
+    "title": "冻结部门权限",
+    "service": "OrganizationService.freeze",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_DEPTS_FREEZE。",
+    "scope": "目标部门必须在本人范围内。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标部门"
+      ]
+    ],
+    "body": null,
+    "result": {},
+    "tables": "改 sys_dept.status；更新组织签名和日志，不删除用户角色。",
+    "repository": "DomainRepository.lock(Department)；AccessService.scope。",
+    "flow": [
+      "验证功能权限。",
+      "锁目标部门，检查范围。",
+      "设置status=0，签名并记录；后续鉴权检查祖先链。"
+    ],
+    "transaction": "一次普通事务，只锁目标部门一行；对后代的影响由鉴权递归检查实现。",
+    "audit": "DEPARTMENT_FREEZE，detail中的frozen为true。",
+    "errors": [
+      "403 OUT_OF_SCOPE：冻结/解冻越界",
+      "401/403：操作者账号失效或自身权限已受冻结影响"
+    ],
+    "success": "冻结祖先部门后，后代测试员工业务请求拒绝；解冻后角色仍在并恢复允许。",
+    "failure": "冻结自己部门后可能失去解冻资格，应由未受该冻结影响且有权限的人操作。",
+    "question": "冻结为什么不用逐人清空角色？",
+    "answer": "把状态放在部门节点，鉴权检查祖先链即可影响整个子树，解冻也不必重建授权。",
+    "coverage": "服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。",
+    "tests": [
+      "freezeTransferAndTermination"
+    ],
+    "frontend": "OrganizationView.vue",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 227,
+      "method": "ManagementController.freeze"
+    }
+  },
+  {
+    "id": "E04",
+    "owner": "E",
+    "method": "POST",
+    "path": "/api/v1/departments/{id}/unfreeze",
+    "title": "解冻部门权限",
+    "service": "OrganizationService.freeze",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_DEPTS_FREEZE。",
+    "scope": "目标部门必须在本人范围内。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "目标部门"
+      ]
+    ],
+    "body": null,
+    "result": {},
+    "tables": "改 sys_dept.status；更新组织签名和日志，不删除用户角色。",
+    "repository": "DomainRepository.lock(Department)；AccessService.scope。",
+    "flow": [
+      "验证功能权限。",
+      "锁目标部门，检查范围。",
+      "设置status=1，签名并记录；后续鉴权检查祖先链。"
+    ],
+    "transaction": "一次普通事务，只锁目标部门一行；对后代的影响由鉴权递归检查实现。",
+    "audit": "DEPARTMENT_FREEZE，detail中的frozen为false。",
+    "errors": [
+      "403 OUT_OF_SCOPE：冻结/解冻越界",
+      "401/403：操作者账号失效或自身权限已受冻结影响"
+    ],
+    "success": "冻结祖先部门后，后代测试员工业务请求拒绝；解冻后角色仍在并恢复允许。",
+    "failure": "冻结自己部门后可能失去解冻资格，应由未受该冻结影响且有权限的人操作。",
+    "question": "冻结为什么不用逐人清空角色？",
+    "answer": "把状态放在部门节点，鉴权检查祖先链即可影响整个子树，解冻也不必重建授权。",
+    "coverage": "服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。",
+    "tests": [
+      "freezeTransferAndTermination"
+    ],
+    "frontend": "OrganizationView.vue",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 233,
+      "method": "ManagementController.unfreeze"
+    }
+  },
+  {
+    "id": "F01",
+    "owner": "F",
+    "method": "POST",
+    "path": "/api/v1/integrations/hr/departments",
+    "title": "按部门编码同步组织",
+    "service": "OrganizationService.syncDepartment",
+    "permission": "X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。",
+    "scope": "可信HR对全组织执行同步；不套用某个人类管理员的部门范围。调用方负责发送正确人员/组织信息。",
+    "fields": [
+      [
+        "deptCode",
+        "string",
+        "必填",
+        "最长64；用它查找已有部门"
+      ],
+      [
+        "deptName",
+        "string",
+        "必填",
+        "最长128"
+      ],
+      [
+        "parentId",
+        "ID或0",
+        "可选",
+        "省略/null/0会设为根，不是保持原父节点"
+      ]
+    ],
+    "body": {
+      "deptCode": "DEMO_DEPT",
+      "deptName": "演示部门",
+      "parentId": "1"
+    },
+    "result": {
+      "id": "2",
+      "parentId": "1",
+      "deptCode": "DEMO_DEPT",
+      "deptName": "演示部门",
+      "status": 1,
+      "mergedIntoDeptId": null
+    },
+    "tables": "新增/改 sys_dept；签名和日志。",
+    "repository": "DomainRepository.query(按deptCode)、lock/save。",
+    "flow": [
+      "校验HR密钥。",
+      "按编码找到对象；已有对象锁行验签。",
+      "拒绝已合并部门再同步，检查父链不能成环。",
+      "保存名字和父节点，签名和记录日志。"
+    ],
+    "transaction": "同一事务：新建对象或锁目标对象一行 → 校验 → 保存 → 更新对象签名 → 写日志。没有 expectedVersion。",
+    "audit": "HR_DEPARTMENT_SYNC。",
+    "errors": [
+      "401 INVALID_SERVICE：HR密钥无效",
+      "422 BUSINESS_RULE_VIOLATION：合并部门或父链循环",
+      "404 RESOURCE_NOT_FOUND：父部门不存在"
+    ],
+    "success": "同编码重复同步，保持同一部门ID且不产生重复部门。",
+    "failure": "把父节点设为后代，拒绝并保持原结构。",
+    "question": "省略parentId时为什么部门变成根？",
+    "answer": "当前代码将省略值解释为0，因此更新也要明确传期望父节点。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "无普通管理页按钮；由HR后端或IDEA HTTP Client调用",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 22,
+      "method": "IntegrationController.department"
+    }
+  },
+  {
+    "id": "F02",
+    "owner": "F",
+    "method": "POST",
+    "path": "/api/v1/integrations/hr/employees",
+    "title": "按工号同步员工",
+    "service": "OrganizationService.syncEmployee",
+    "permission": "X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。",
+    "scope": "可信HR对全组织执行同步；不套用某个人类管理员的部门范围。调用方负责发送正确人员/组织信息。",
+    "fields": [
+      [
+        "employeeNo",
+        "string",
+        "必填",
+        "最长64；用工号匹配用户"
+      ],
+      [
+        "realName",
+        "string",
+        "必填",
+        "最长64"
+      ],
+      [
+        "phone",
+        "string",
+        "必填",
+        "规范手机号且唯一"
+      ],
+      [
+        "deptId",
+        "ID",
+        "必填",
+        "必须存在且未合并；可处于冻结状态"
+      ],
+      [
+        "password",
+        "string",
+        "仅新建必填",
+        "8–64位含字母数字；更新不修改已有密码"
+      ],
+      [
+        "employmentType",
+        "integer",
+        "可选",
+        "1正式/2外包；新建默认1，更新保持原值"
+      ],
+      [
+        "status",
+        "integer",
+        "可选",
+        "1可用/2暂停；新建默认1"
+      ]
+    ],
+    "body": {
+      "employeeNo": "DEMO001",
+      "realName": "演示员工",
+      "phone": "13800000002",
+      "deptId": "2",
+      "employmentType": 1,
+      "status": 1,
+      "password": "ExampleOnly123!"
+    },
+    "result": {
+      "id": "101",
+      "username": "demo_user",
+      "realName": "演示用户",
+      "phone": "13800000002",
+      "employeeNo": "DEMO001",
+      "deptId": "2",
+      "status": 1,
+      "source": 1,
+      "employmentType": 1,
+      "managementScope": "DEPT_TREE",
+      "createdAt": "2026-10-25T10:00:00"
+    },
+    "tables": "新增/改 sys_user；实际换部门时清空 sys_user_role；更新签名和日志。",
+    "repository": "AccountRepository.findByEmployeeNo/findByUsername；DomainRepository.lock/get/save/clearRoles。",
+    "flow": [
+      "用工号查人，已有离职账号不允许此接口恢复。",
+      "新建生成拼音首字母账号，重名追加手机号后四位和序号。",
+      "已有人员实际换部门则先清空全部角色；status暂停时使旧会话失效。",
+      "保存身份、签名和日志。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。 新建时不锁不存在的用户行，由唯一约束防重复。",
+    "audit": "HR_EMPLOYEE_SYNC。",
+    "errors": [
+      "401 INVALID_SERVICE：凭据错误",
+      "422 BUSINESS_RULE_VIOLATION：目标离职或部门已合并",
+      "409 DUPLICATE_RESOURCE：手机号/工号等冲突",
+      "400 INVALID_ARGUMENT：新建缺密码等"
+    ],
+    "success": "同工号更新姓名后仍是一人一账号；新员工创建后由D授权。",
+    "failure": "同工号改deptId，应清空原角色；新建缺密码应400。",
+    "question": "工号和用户名谁是HR同步标识？",
+    "answer": "工号；用户名是系统生成的登录名，不能据此给同一员工建多个账号。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "HR集成接口；用户页只展示结果",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 30,
+      "method": "IntegrationController.employee"
+    }
+  },
+  {
+    "id": "F03",
+    "owner": "F",
+    "method": "POST",
+    "path": "/api/v1/integrations/hr/users/{id}/transfer",
+    "title": "HR调岗",
+    "service": "OrganizationService.transfer",
+    "permission": "X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。",
+    "scope": "可信HR对全组织执行同步；不套用某个人类管理员的部门范围。调用方负责发送正确人员/组织信息。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "source=1且非离职员工"
+      ],
+      [
+        "deptId",
+        "ID",
+        "必填",
+        "新部门存在且未合并"
+      ]
+    ],
+    "body": {
+      "deptId": "3"
+    },
+    "result": {},
+    "tables": "改 sys_user.dept_id；删该用户 sys_user_role；写签名和日志。",
+    "repository": "DomainRepository.lock(Account)/get(Department)/clearRoles。",
+    "flow": [
+      "验证员工及目标部门签名。",
+      "只允许HR来源、非离职账号。",
+      "只有实际部门改变才清空全部角色并换部门。",
+      "重新签名、记录；新部门后续手动授予角色。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "HR_TRANSFER。",
+    "errors": [
+      "422 BUSINESS_RULE_VIOLATION：临时/离职账号或目标部门已合并",
+      "404 RESOURCE_NOT_FOUND：目标不存在"
+    ],
+    "success": "调岗后业务与IAM管理角色都清空；重新授权后可访问新功能。",
+    "failure": "重复通知当前部门不应清空刚分配的新角色。",
+    "question": "只回收旧部门的角色还是全部？",
+    "answer": "本简化版没有来源区分，所以实际调岗清空全部旧角色。",
+    "coverage": "服务级自动覆盖实际调岗和重复当前部门不清角色。",
+    "tests": [
+      "freezeTransferAndTermination"
+    ],
+    "frontend": "HR调用，无普通后台调岗按钮",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 38,
+      "method": "IntegrationController.transfer"
+    }
+  },
+  {
+    "id": "F04",
+    "owner": "F",
+    "method": "POST",
+    "path": "/api/v1/integrations/hr/users/{id}/terminate",
+    "title": "HR离职",
+    "service": "OrganizationService.terminate",
+    "permission": "X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。",
+    "scope": "可信HR对全组织执行同步；不套用某个人类管理员的部门范围。调用方负责发送正确人员/组织信息。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "HR来源员工"
+      ]
+    ],
+    "body": null,
+    "result": {},
+    "tables": "改 sys_user.status/session_version；清空其 sys_user_role；签名和日志。",
+    "repository": "DomainRepository.lock(Account)/clearRoles。",
+    "flow": [
+      "锁并验证HR员工身份。",
+      "首次离职设status=3、清空角色、增加会话版本。",
+      "重复离职不重复递增版本，仍保留账号及日志。",
+      "不撤回此人过去给别人授予的角色。"
+    ],
+    "transaction": "同一事务：锁目标 sys_user 一行 → 验签/范围检查 → 修改 → 更新用户签名 → 记录日志；任一步异常整体回滚。",
+    "audit": "HR_TERMINATE。",
+    "errors": [
+      "422 BUSINESS_RULE_VIOLATION：临时或初始化账号不能走HR离职",
+      "404 RESOURCE_NOT_FOUND：用户不存在"
+    ],
+    "success": "离职后旧JWT和新登录均不可用，用户记录仍能追溯。",
+    "failure": "核对其他用户角色未因原授权者离职而被清空。",
+    "question": "为什么不物理删除账号？",
+    "answer": "保留身份ID与历史日志，能够追溯离职前操作。",
+    "coverage": "服务级自动覆盖角色清空、旧JWT失效和他人授权保留。",
+    "tests": [
+      "freezeTransferAndTermination"
+    ],
+    "frontend": "HR调用",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 48,
+      "method": "IntegrationController.terminate"
+    }
+  },
+  {
+    "id": "F05",
+    "owner": "F",
+    "method": "POST",
+    "path": "/api/v1/integrations/hr/departments/{id}/merge",
+    "title": "HR合并部门",
+    "service": "OrganizationService.merge",
+    "permission": "X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。",
+    "scope": "可信HR对全组织执行同步；不套用某个人类管理员的部门范围。调用方负责发送正确人员/组织信息。",
+    "fields": [
+      [
+        "id",
+        "path ID",
+        "必填",
+        "源部门"
+      ],
+      [
+        "targetDeptId",
+        "ID",
+        "必填",
+        "目标部门；不能相同或为源部门后代"
+      ]
+    ],
+    "body": {
+      "targetDeptId": "3"
+    },
+    "result": {},
+    "tables": "改源部门status/merged_into_dept_id、直属子部门parent_id、直属员工dept_id；保留角色；签名和日志。",
+    "repository": "DomainRepository.lock(两部门)、query(Account/Department)、逐行lock。",
+    "flow": [
+      "按ID顺序锁源和目标两行，避免相反合并请求锁顺序冲突。",
+      "同源同目标重复请求直接返回；拒绝已合并对象和循环结构。",
+      "移动直属员工与直属子部门，保留角色并重签受影响对象。",
+      "源部门冻结并标记合并去向。"
+    ],
+    "transaction": "一个普通事务，锁两部门及受影响人员/直属子部门；不使用全局管理员锁。",
+    "audit": "HR_DEPARTMENT_MERGE。",
+    "errors": [
+      "400 INVALID_ARGUMENT：自己合并自己",
+      "422 BUSINESS_RULE_VIOLATION：循环或合并状态不允许",
+      "503 INTEGRITY_FAILURE：受影响对象签名异常"
+    ],
+    "success": "在小型演示部门合并后，核对人员归属、子部门父节点和原角色仍在。",
+    "failure": "目标设为源部门后代应拒绝，原数据不变。",
+    "question": "合并与调岗为何角色处理不同？",
+    "answer": "已确认的业务规则不同：调岗清空，合并暂保留给新部门人工调整。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "HR调用；普通组织页显示合并状态",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 56,
+      "method": "IntegrationController.merge"
+    }
+  },
+  {
+    "id": "G01",
+    "owner": "G",
+    "method": "POST",
+    "path": "/api/v1/grants/batch",
+    "title": "同步批量授予或回收一个角色",
+    "service": "BatchService.execute",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：每一项内部仍要求 IAM_GRANTS_WRITE。",
+    "scope": "每个目标都独立检查操作者的部门范围。",
+    "fields": [
+      [
+        "userIds",
+        "ID array",
+        "必填",
+        "原始数组最多100个；去重排序后至少1个"
+      ],
+      [
+        "roleId",
+        "ID",
+        "必填",
+        "本批次同一个角色"
+      ],
+      [
+        "operation",
+        "string",
+        "必填",
+        "GRANT或REVOKE"
+      ]
+    ],
+    "body": {
+      "userIds": [
+        "101",
+        "102"
+      ],
+      "roleId": "6",
+      "operation": "GRANT"
+    },
+    "result": {
+      "items": [
+        {
+          "userId": "101",
+          "success": true
+        },
+        {
+          "userId": "102",
+          "success": false,
+          "message": "目标不在管理范围内"
+        }
+      ],
+      "succeeded": "1",
+      "total": 2
+    },
+    "tables": "逐人改 sys_user_role、更新用户签名、写日志；没有批量任务表。",
+    "repository": "BatchService → GrantService.change代理 → DomainRepository.lock/query/save/remove。",
+    "flow": [
+      "校验批量输入。",
+      "同步循环，每人通过另一个Service代理进入独立事务并重新检查权限/范围。",
+      "业务4xx逐项记录并继续；401或5xx直接中断。",
+      "正常完成返回每项结果、成功数和总数。"
+    ],
+    "transaction": "BatchService无外层事务；每个GrantService.change独立事务。后续项失败不回滚前面成功项。",
+    "audit": "每项USER_ROLE_CHANGE；没有独立任务日志或任务ID。",
+    "errors": [
+      "400 INVALID_ARGUMENT：超过100或空数组",
+      "200内success=false：单项越界等业务失败",
+      "401/503：身份或基础设施问题中断；应查询当前结果"
+    ],
+    "success": "同一批包含范围内和范围外用户，前者成功，后者失败。",
+    "failure": "批量超过100应400；中途基础设施失败不能认为此前全部回滚。",
+    "question": "为什么不把整个循环放一个事务？",
+    "answer": "这里需要部分成功；整个循环一个事务会改变已确认语义。",
+    "coverage": "服务级自动覆盖部分成功和范围拒绝。",
+    "tests": [
+      "batchPartialSuccessAndDepartmentScope"
+    ],
+    "frontend": "UsersView.vue 权限分配批量栏",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 106,
+      "method": "ManagementController.batch"
+    }
+  },
+  {
+    "id": "G02",
+    "owner": "G",
+    "method": "POST",
+    "path": "/api/v1/integrations/oa/roles",
+    "title": "OA审批后执行角色授予或回收",
+    "service": "GrantService.oa",
+    "permission": "X-Service-Key 必须匹配 iam.integration.oa-key；不接受应用鉴权密钥替代。",
+    "scope": "OA是可信全局集成，不套人类操作者范围；输入决定目标员工和角色。",
+    "fields": [
+      [
+        "userId",
+        "ID",
+        "必填",
+        "目标用户"
+      ],
+      [
+        "roleId",
+        "ID",
+        "必填",
+        "角色ID"
+      ],
+      [
+        "operation",
+        "string",
+        "必填",
+        "GRANT或REVOKE"
+      ]
+    ],
+    "body": {
+      "userId": "101",
+      "roleId": "6",
+      "operation": "GRANT"
+    },
+    "result": {},
+    "tables": "改 sys_user_role；更新用户签名；写日志。",
+    "repository": "DomainRepository.lock(Account)/query(UserRole)/save/remove。",
+    "flow": [
+      "验证OA专用密钥。",
+      "锁目标用户并验签；授予时检查用户/部门有效和角色启用。",
+      "已有关系重复授予不重复插入，不存在关系重复回收不报来源错误。",
+      "签名并记录OA_ROLE_CHANGE，不执行审批流程。"
+    ],
+    "transaction": "单目标普通事务，角色关系、用户签名、日志原子提交。",
+    "audit": "OA_ROLE_CHANGE；没有人类操作者时userId为空，targetUserId为目标。",
+    "errors": [
+      "401 INVALID_SERVICE：密钥错",
+      "400 INVALID_ARGUMENT：操作不是GRANT/REVOKE",
+      "422 BUSINESS_RULE_VIOLATION：不能给无效目标授予"
+    ],
+    "success": "审批结果重复授予同角色，关系仍只有一条。",
+    "failure": "先手工授予，再OA回收，此角色应直接移除，因为没有多来源保留。",
+    "question": "OA是否能知道是手工还是审批授予？",
+    "answer": "不能区分，也不需要；本版两者修改同一份关系。",
+    "coverage": "HTTP自动覆盖无效密钥和重复回收。",
+    "tests": [
+      "multiRoleUnionImmediateRevokeAndOaRepeat"
+    ],
+    "frontend": "OA服务或IDEA HTTP Client",
+    "query": "",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/IntegrationController.java",
+      "line": 66,
+      "method": "IntegrationController.oa"
+    }
+  },
+  {
+    "id": "G03",
+    "owner": "G",
+    "method": "GET",
+    "path": "/api/v1/audit/operations",
+    "title": "分页查询操作与鉴权日志",
+    "service": "QueryService.logs",
+    "permission": "Bearer JWT；同时经过 ManagementInterceptor 的 IAM 菜单/API 映射检查。Service 还检查：IAM_AUDIT_VIEW。",
+    "scope": "ALL看全部；DEPT_TREE按日志当时保存的deptId快照与当前可管理部门集合筛选。全局/无部门日志只有ALL可见。",
+    "fields": [
+      [
+        "operation",
+        "query string",
+        "可选",
+        "按operationType精确匹配；省略看所有类型"
+      ],
+      [
+        "page",
+        "query integer",
+        "默认1",
+        ">=1"
+      ],
+      [
+        "pageSize",
+        "query integer",
+        "默认20",
+        "1–100"
+      ]
+    ],
+    "body": null,
+    "result": {
+      "items": [
+        {
+          "id": "1",
+          "userId": "101",
+          "targetUserId": "101",
+          "deptId": "2",
+          "operationType": "AUTH_CHECK",
+          "targetType": "APPLICATION",
+          "targetId": "3",
+          "detail": "GET /demo/items/{id} ALLOW",
+          "success": true,
+          "createdAt": "2026-10-25T10:00:00"
+        }
+      ],
+      "total": "1",
+      "page": 1,
+      "pageSize": 20
+    },
+    "tables": "读 sys_operation_log 和范围/授权表；无写表。",
+    "repository": "DomainRepository.page(OperationLog)/query(count)；AccountService.visibleDepartments。",
+    "flow": [
+      "校验日志查看权限与分页。",
+      "构造类型过滤及部门快照过滤。",
+      "按id倒序分页，返回items/total/page/pageSize。"
+    ],
+    "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
+    "audit": "查询本身不再写日志，避免循环审计。",
+    "errors": [
+      "400 INVALID_ARGUMENT：分页非法",
+      "403 PERMISSION_DENIED：缺日志权限"
+    ],
+    "success": "筛选LOGIN看到成功及失败记录；筛选AUTH_CHECK看到允许和拒绝。",
+    "failure": "部门管理员不能看到范围外或deptId为空的全局日志。",
+    "question": "为什么不能只看当前员工所在部门来过滤历史日志？",
+    "answer": "日志保存当时部门快照，当前调岗不能重写历史操作归属。",
+    "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
+    "tests": [],
+    "frontend": "AuditView.vue",
+    "query": "?page=1&pageSize=20",
+    "support": false,
+    "controller": {
+      "file": "src/main/java/com/whatname/iam/controller/ManagementController.java",
+      "line": 239,
+      "method": "ManagementController.logs"
+    }
+  }
+]

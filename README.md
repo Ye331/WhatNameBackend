@@ -74,3 +74,4 @@ setup 创建被忽略的 config/application-coursework.yml，不覆盖旧 applic
 - [接口](docs/contracts/02-api-spec.md)、[11 表设计](docs/contracts/04-database-design.md)
 - [测试记录](docs/TESTING.md)
 - [学习手册](docs/learning/README.md)
+- [A–G分工与逐API答辩清单](docs/learning/分工-A-G与API清单.md)

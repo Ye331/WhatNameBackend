@@ -4,6 +4,8 @@
 
 完整路由见 [OpenAPI](03-openapi.yaml)，示例见 [system.http](../../requests/system.http)。
 
+按人学习及答辩使用 [A–G逐API手册](../learning/分工-A-G与API清单.md)：每个路由都有唯一负责人、参数、返回、权限、调用链、事务、表和测试案例。IDEA可使用 requests/learning/A.http 至 G.http，并配合该目录的私有环境模板。
+
 ## 身份与业务鉴权
 
 - POST `/auth/login`：`{loginType:USERNAME|PHONE,identifier,password}`，返回 token 和 user。

@@ -1,0 +1,32 @@
+# G组：批量OA审计与公共安全。仅为示例；不会自动执行。
+# 将同目录 http-client.private.env.example.json 复制为 http-client.private.env.json。
+# 只在私有文件填写账号/密码/密钥和测试对象ID；在IDEA选择coursework-local环境。
+# 私有文件已被Git忽略，请不要把真实凭据填进本.http文件。
+
+### G01 同步批量授予或回收一个角色
+POST {{base}}/api/v1/grants/batch
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userIds": [
+    "{{userId}}"
+  ],
+  "roleId": "{{roleId}}",
+  "operation": "GRANT"
+}
+
+### G02 OA审批后执行角色授予或回收
+POST {{base}}/api/v1/integrations/oa/roles
+X-Service-Key: {{oaKey}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "roleId": "{{roleId}}",
+  "operation": "GRANT"
+}
+
+### G03 分页查询操作与鉴权日志
+GET {{base}}/api/v1/audit/operations?page=1&pageSize=20
+Authorization: Bearer {{token}}

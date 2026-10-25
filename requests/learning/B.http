@@ -1,0 +1,24 @@
+# B组：在线鉴权与平台自我管理。仅为示例；不会自动执行。
+# 将同目录 http-client.private.env.example.json 复制为 http-client.private.env.json。
+# 只在私有文件填写账号/密码/密钥和测试对象ID；在IDEA选择coursework-local环境。
+# 私有文件已被Git忽略，请不要把真实凭据填进本.http文件。
+
+### B01 查询本人某应用的菜单
+GET {{base}}/api/v1/auth/menus?appCode=OA
+Authorization: Bearer {{token}}
+
+### B02 外部业务后端在线鉴权
+POST {{base}}/api/v1/auth/check
+Authorization: Bearer {{token}}
+X-App-Code: OA
+X-Service-Key: {{appKey}}
+Content-Type: application/json
+
+{
+  "method": "GET",
+  "route": "/api/v1/demo/OA/feature1"
+}
+
+### B03 演示业务接口逐次鉴权
+GET {{base}}/api/v1/demo/OA/feature1
+Authorization: Bearer {{token}}
