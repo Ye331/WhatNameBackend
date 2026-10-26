@@ -6,7 +6,7 @@ Java 21 + Spring Boot + Spring Data JPA/Hibernate + MySQL 8 + Vue 3。保留 RBA
 
 ## 首次准备
 
-旧数据库保持原样，新版使用独立库 unified_permission_coursework、默认端口 3308 和独立 Docker 数据卷。不要删除旧数据卷，不要对旧库执行建表脚本。
+使用数据库 unified_permission_coursework，默认端口 3308，并通过 Docker 数据卷持久化。
 
 在 backend 目录，确认 Java 21、Python 3 与 Docker 可用：
 
@@ -18,9 +18,9 @@ docker compose up -d --wait
 
 初始化/恢复密码在运行时交互输入，至少 8 位且含字母和数字。管理用户名默认 superadmin，可通过 -SuperUser 指定。初始化完成后进程退出，结果保存在 target/initialization-report.json。
 
-setup 创建被忽略的 config/application-coursework.yml，不覆盖旧 application-local.yml。它生成本地数据库密码和四个集成密钥；JWT 与数据签名密钥在首次运行时保存到 config/local-secrets/，后续复用。请保留并备份这些文件，不提交仓库。
+setup 创建本地配置 config/application-coursework.yml。它生成本地数据库密码和四个集成密钥；JWT 与数据签名密钥在首次运行时保存到 config/local-secrets/，后续复用。请保留并备份这些文件，不提交仓库。
 
-本机 MySQL 也可以使用：先建立一个新的空数据库，在该库执行 db/schema.sql，再修改 application-coursework.yml 中的连接。JPA 不自动建表。正常启动会验证新版结构。
+本机 MySQL 也可以使用：先建立一个新的空数据库，在该库执行 db/schema.sql，再修改 application-coursework.yml 中的连接。JPA 不自动建表。启动前应完成建表和初始化。
 
 ## 日常启动
 
@@ -63,13 +63,13 @@ setup 创建被忽略的 config/application-coursework.yml，不覆盖旧 applic
 .\scripts\dev.ps1 test -FullImport
 ```
 
-默认只编译和运行 `src/simplified-test/` 下新编写的简化版测试，原 `src/test/` 不再参与。每次运行先 clean，覆盖率不会混入旧测试数据。入口不再运行旧 Python 测试。
+测试代码位于 `src/test/`。每次运行先 clean，再执行测试并生成覆盖率报告。
 
-常规业务回归使用隔离 H2 数据库，每个场景重新初始化，不接触本地 MySQL。FullImport 额外测试真实来源全量导入及恢复，结果不代表 MySQL 性能。`-Integration` 运行新套件的独立 MySQL 容器验证；Docker 不可用时会显示跳过，不能算通过。范围和报告见 [新测试说明](docs/SIMPLIFIED_TESTING.md)。
+常规业务回归使用隔离 H2 数据库，每个场景重新初始化，不接触本地 MySQL。FullImport 额外测试真实来源全量导入及恢复，结果不代表 MySQL 性能。`-Integration` 运行独立 MySQL 容器验证；Docker 不可用时会显示跳过，不能算通过。范围和报告见 [测试说明](docs/TESTING.md)。
 
 ## 阅读入口
 
-- [改造决定](docs/PLAN.md)
+- [项目设计约定](docs/PLAN.md)
 - [功能范围](docs/FUNCTIONAL_SCOPE.md)
 - [运行与演示](docs/GUIDE.md)
 - [三层结构、权限与事务](docs/contracts/01-system-design.md)

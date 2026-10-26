@@ -245,7 +245,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖实际调岗和重复当前部门不清角色。 [CourseworkFlowTest.freezeTransferAndTermination](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L393)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.hrSyncTransferAndTerminationFollowSimplifiedRules](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L525)
 
 **正向演示：** 调岗后业务与IAM管理角色都清空；重新授权后可访问新功能。
 
@@ -308,7 +308,7 @@ X-Service-Key: <HR_SERVICE_KEY>
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖角色清空、旧JWT失效和他人授权保留。 [CourseworkFlowTest.freezeTransferAndTermination](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L393)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.hrSyncTransferAndTerminationFollowSimplifiedRules](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L525)
 
 **正向演示：** 离职后旧JWT和新登录均不可用，用户记录仍能追溯。
 

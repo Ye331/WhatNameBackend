@@ -1,6 +1,6 @@
 # E · 部门范围与组织冻结
 
-职责：替代旧管理员等级与任命；数据范围是跨接口公共规则。主讲 4 个接口。
+职责：部门管理范围与组织冻结；数据范围是跨接口公共规则。主讲 4 个接口。
 
 核心源码：AccessService.within/scope、AccountService.scope、OrganizationService。
 
@@ -75,7 +75,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖非ALL不能授予ALL；前端对话框为契约测试。 [CourseworkFlowTest.batchPartialSuccessAndDepartmentScope](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L296)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.batchReportsPartialSuccessAndCommitsOnlyAllowedTargets](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L471)
 
 **正向演示：** ALL操作者给测试人员设置DEPT_TREE，再用测试账号查看用户列表。
 
@@ -208,7 +208,7 @@ Authorization: Bearer <JWT>
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。 [CourseworkFlowTest.freezeTransferAndTermination](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L393)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.hrSyncTransferAndTerminationFollowSimplifiedRules](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L525)
 
 **正向演示：** 冻结祖先部门后，后代测试员工业务请求拒绝；解冻后角色仍在并恢复允许。
 
@@ -270,7 +270,7 @@ Authorization: Bearer <JWT>
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。 [CourseworkFlowTest.freezeTransferAndTermination](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L393)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.hrSyncTransferAndTerminationFollowSimplifiedRules](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L525)
 
 **正向演示：** 冻结祖先部门后，后代测试员工业务请求拒绝；解冻后角色仍在并恢复允许。
 

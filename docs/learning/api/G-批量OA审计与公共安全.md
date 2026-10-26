@@ -27,7 +27,7 @@ HTTP示例文件：[本组请求](../../../requests/learning/G.http)。变量均
 | CLI入口 | [InitializationRunner.run](../../../src/main/java/com/whatname/iam/common/config/InitializationRunner.java#L30) | IDEA“初始化数据库”配置，密码环境变量，不提交个人配置 |
 | 集成身份 | [ServiceKeys.require](../../../src/main/java/com/whatname/iam/common/security/ServiceKeys.java#L20) / [ServiceKeys.requireApplication](../../../src/main/java/com/whatname/iam/common/security/ServiceKeys.java#L25) | HR/OA集成密钥和业务鉴权密钥不可互换 |
 
-自动证据：[CourseworkFlowTest.fullSourceImportAndLocalRecovery](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L492)、[CourseworkFlowTest.tamperingFailsAndInvalidReplacementRollsBack](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L428)。初始化全量用例需开启coursework.fullImport=true，不应在日常已有数据库上重复执行。
+自动证据：[SimplifiedBusinessTest.fullSourceImportIsCheckedSeparatelyFromTheSmallBusinessFixture](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L584)、[SimplifiedBusinessTest.tamperingFailsClosedAndAuditCanBeFiltered](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L570)。初始化全量用例需开启coursework.fullImport=true，不应在日常已有数据库上重复执行。
 
 <a id="G01"></a>
 ## G01 · 同步批量授予或回收一个角色
@@ -102,7 +102,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖部分成功和范围拒绝。 [CourseworkFlowTest.batchPartialSuccessAndDepartmentScope](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L296)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.batchReportsPartialSuccessAndCommitsOnlyAllowedTargets](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L471)
 
 **正向演示：** 同一批包含范围内和范围外用户，前者成功，后者失败。
 
@@ -175,7 +175,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** HTTP自动覆盖无效密钥和重复回收。 [CourseworkFlowTest.multiRoleUnionImmediateRevokeAndOaRepeat](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L260)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L197)
 
 **正向演示：** 审批结果重复授予同角色，关系仍只有一条。
 
@@ -254,7 +254,7 @@ Authorization: Bearer <JWT>
 
 **事务与锁：** Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。
 
-**签名与日志：** 查询本身不再写日志，避免循环审计。
+**签名与日志：** 查询本身不写日志，避免循环审计。
 
 ### 验证与答辩
 

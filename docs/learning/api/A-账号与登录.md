@@ -96,7 +96,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** HTTP 自动用例覆盖用户名成功和手机号错误密码；手机号成功需人工补验。 [CourseworkFlowTest.loginAndScopedTemporaryAccount](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L218)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.temporaryAccountLifecycleClearsRolesAndInvalidatesSessions](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L410)
 
 **正向演示：** 创建临时测试账号后，用 USERNAME 和 PHONE 分别登录，均获得 token。
 
@@ -186,7 +186,7 @@ Authorization: Bearer <JWT>
 
 ### 验证与答辩
 
-**现有测试：** HTTP 自动覆盖成功及不返回 passwordHash；令牌失效由其他用例覆盖。 [CourseworkFlowTest.protectedEndpointsAndSelfManagedRbac](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L202)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L389)
 
 **正向演示：** 登录后携带 Bearer 调用，返回本人及实际拥有的 IAM 菜单。
 
@@ -197,9 +197,9 @@ Authorization: Bearer <JWT>
 - 401 INVALID_TOKEN：令牌失效
 - 503 INTEGRITY_FAILURE：身份或权限数据异常
 
-**老师可能问：** 这里返回的是不是管理员任命？
+**老师可能问：** 这里返回哪些用户信息？
 
-**回答要点：** 不是；返回普通用户及其 IAM 菜单权限，没有 sys_admin 身份。
+**回答要点：** 返回当前登录用户及其有效 IAM 功能菜单权限。
 
 
 <a id="A03"></a>
@@ -403,7 +403,7 @@ Authorization: Bearer <JWT>
 
 ### 验证与答辩
 
-**现有测试：** HTTP 自动覆盖范围内总数，服务级用例覆盖其他范围规则。 [CourseworkFlowTest.protectedEndpointsAndSelfManagedRbac](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L202)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L389)
 
 **正向演示：** 部门管理员查询只看到本部门及后代用户；ALL用户可看到全公司。
 
@@ -565,7 +565,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖创建、越界；前端创建交互为模拟接口契约测试。 [CourseworkFlowTest.loginAndScopedTemporaryAccount](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L218)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.temporaryAccountLifecycleClearsRolesAndInvalidatesSessions](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L410)
 
 **正向演示：** 创建账号后由D分配角色，再登录演示。
 
@@ -716,7 +716,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖暂停、清空角色与JWT失效；恢复需人工补验。 [CourseworkFlowTest.loginAndScopedTemporaryAccount](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L218)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.temporaryAccountLifecycleClearsRolesAndInvalidatesSessions](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L410)
 
 **正向演示：** 暂停有角色的临时账号，核对角色清空且旧JWT失效。
 

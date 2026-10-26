@@ -713,7 +713,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。 [CourseworkFlowTest.roleAndResourceConfigurationsUseOneRbacChain](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L350)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L485)
 
 **正向演示：** 登记GET /demo/items/{id}并查询，canonicalPath应为/demo/items/{}。
 
@@ -799,7 +799,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。 [CourseworkFlowTest.roleAndResourceConfigurationsUseOneRbacChain](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L350)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L485)
 
 **正向演示：** 登记GET /demo/items/{id}并查询，canonicalPath应为/demo/items/{}。
 
@@ -870,7 +870,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖跨应用拒绝；前端保存交互为契约测试。 [CourseworkFlowTest.roleAndResourceConfigurationsUseOneRbacChain](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L350)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L485)
 
 **正向演示：** 勾选两个API保存，再GET关联ID集合。
 

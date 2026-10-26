@@ -152,7 +152,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。 [CourseworkFlowTest.roleAndResourceConfigurationsUseOneRbacChain](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L350)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L485)
 
 **正向演示：** 创建角色，再由另一个API配置菜单，最后给用户分配角色。
 
@@ -363,7 +363,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** HTTP自动覆盖角色菜单保存；无效替换回滚另有用户角色服务级测试。 [CourseworkFlowTest.roleAndResourceConfigurationsUseOneRbacChain](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L350)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L485)
 
 **正向演示：** 为角色配置业务菜单，其已有用户下一次请求获得权限。
 
@@ -438,9 +438,9 @@ Authorization: Bearer <JWT>
 - 403 OUT_OF_SCOPE：越界
 - 404 RESOURCE_NOT_FOUND：用户不存在
 
-**老师可能问：** 为什么没有授权来源接口？
+**老师可能问：** OA 和管理页面怎样共同维护授权？
 
-**回答要点：** 现在只有一份用户角色关系，来源体系已删除。
+**回答要点：** 两者共同维护 sys_user_role，同一个用户与角色只有一条关联。
 
 
 <a id="D07"></a>
@@ -497,7 +497,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** 服务级自动覆盖并集、回滚、并发完整保存及自我撤权。 [CourseworkFlowTest.multiRoleUnionImmediateRevokeAndOaRepeat](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L260)；[CourseworkFlowTest.tamperingFailsAndInvalidReplacementRollsBack](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L428)；[CourseworkFlowTest.competingSavesRemainCompleteAndSigned](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L457)；[CourseworkFlowTest.selfRevocationNeedsNoIndependentAdministratorAndPersistsOtherGrants](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L448)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L197)；[SimplifiedBusinessTest.tamperingFailsClosedAndAuditCanBeFiltered](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L570)；[SimplifiedBusinessTest.concurrentRoleReplacementNeverProducesMixedOrUnsignedState](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L333)；[SimplifiedBusinessTest.rbacHasNoAdministratorBypassAndRevocationIsImmediate](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L443)
 
 **正向演示：** 为测试用户加两个角色，再取消一个；有效权限为剩余角色并集。
 

@@ -11,8 +11,6 @@ out/
 *.iws
 
 # 本地配置与密码；公共配置和示例文件仍需提交
-/config/application-local.yml
-/config/application-local.yaml
 /config/application-coursework.yml
 /.run/local-*.run.xml
 /.run/*
@@ -56,7 +54,3 @@ Desktop.ini
 # Python 本地校验缓存
 __pycache__/
 *.pyc
-
-# 本地文档备份与归档文件
-/docs/archive/
-/docs/contracts/source-manifest.json

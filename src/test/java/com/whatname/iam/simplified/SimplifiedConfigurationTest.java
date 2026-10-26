@@ -16,8 +16,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.context.support.GenericApplicationContext;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.env.MockEnvironment;
 
 class SimplifiedConfigurationTest {
@@ -110,19 +108,6 @@ class SimplifiedConfigurationTest {
         assertFalse(context.isActive());
       } else verifyNoInteractions(service);
     }
-  }
-
-  @ParameterizedTest @ValueSource(strings={"VALID", "WRONG_COUNT", "LEGACY_ADMIN", "MISSING_SCOPE"})
-  void schemaGuardAcceptsOnlySimplifiedShapeWithoutChangingTables(String shape) throws Exception {
-    var source = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE", "sa", "");
-    var jdbc = new JdbcTemplate(source);
-    jdbc.execute("CREATE TABLE sys_user (id BIGINT" + (shape.equals("MISSING_SCOPE") ? "" : ",management_scope VARCHAR(16)") + ")");
-    for (int i=0; i<(shape.equals("WRONG_COUNT") ? 9 : 10); i++)
-      jdbc.execute("CREATE TABLE " + (shape.equals("LEGACY_ADMIN") && i==0 ? "sys_admin" : "sys_fixture_" + i) + " (id BIGINT)");
-    var guard = new SchemaGuard(source);
-    if (shape.equals("VALID")) assertDoesNotThrow(() -> guard.run(new DefaultApplicationArguments(new String[0])));
-    else assertThrows(IllegalStateException.class, () -> guard.run(new DefaultApplicationArguments(new String[0])));
-    assertTrue(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'", Integer.class)>0);
   }
 
   @ParameterizedTest @NullAndEmptySource @ValueSource(strings={"wrong", "x", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"})

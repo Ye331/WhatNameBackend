@@ -72,7 +72,7 @@ class SimplifiedBusinessTest {
   @BeforeEach
   void freshSimplifiedInstallation() throws Exception {
     clearDatabase();
-    var report = initialization.initialize(Path.of("src/simplified-test/resources/seed.json"),
+    var report = initialization.initialize(Path.of("src/test/resources/seed.json"),
         "owner", "初始管理者", "13900000000", PASSWORD);
     assertEquals(4, report.get("employees"));
     assertEquals(4, report.get("departments"));
@@ -304,7 +304,7 @@ class SimplifiedBusinessTest {
 
   @ParameterizedTest @ValueSource(strings={"EMPTY_DEPARTMENTS", "UNKNOWN_PARENT", "UNKNOWN_EMPLOYEE_DEPARTMENT"})
   void invalidInitializationSourceRollsBackTheEntireImport(String invalid, @org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
-    var fixture = json.readTree(Path.of("src/simplified-test/resources/seed.json").toFile());
+    var fixture = json.readTree(Path.of("src/test/resources/seed.json").toFile());
     var tables = fixture.path("tables");
     switch (invalid) {
       case "EMPTY_DEPARTMENTS" -> ((com.fasterxml.jackson.databind.node.ArrayNode) tables.path("departments").path("records")).removeAll();

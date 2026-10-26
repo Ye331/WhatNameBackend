@@ -41,6 +41,5 @@ menu_type：1 目录，2 菜单权限。API canonical_path 把 `{id}` 等参数�
 
 用户—角色、角色—菜单、菜单—API 使用外键和唯一约束。树的父节点、同应用关系和无循环由业务校验保证。操作日志不关联业务外键，保留历史 ID 和当时部门快照。
 
-删除的 12 张旧表：sys_admin、sys_admin_delegable_role、sys_user_role_source、sys_external_event、sys_service_identity、sys_service_nonce、sys_grant_batch、sys_grant_batch_item、sys_sms_code、sys_password_history、sys_session_invalidation、sys_login_log。
 
-没有自动删旧表的升级脚本。旧库保持原状，新库重新初始化；SchemaGuard 启动时拒绝旧结构。
+使用 db/schema.sql 建立 11 张表，再通过本地初始化命令导入基础数据。初始化要求各业务表为空。

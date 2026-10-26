@@ -25,6 +25,6 @@
 | 7 | [初始化、恢复与测试](07-初始化与测试.md) |
 | 8 | [前端与答辩分工](08-前端与分工.md) |
 
-先读前两章，再对照自己负责的功能阅读源码。旧手册中的管理员等级、授权来源和 expectedVersion 已取消，不再作为本版学习内容。
+先读前两章，再对照自己负责的功能阅读源码。学习内容以当前源码和接口文档为准。
 
-权威入口：[改造决定](../PLAN.md)、[系统设计](../contracts/01-system-design.md)、[API](../contracts/02-api-spec.md)、[数据库](../../db/schema.sql)、[测试记录](../TESTING.md)。
+权威入口：[项目设计约定](../PLAN.md)、[系统设计](../contracts/01-system-design.md)、[API](../contracts/02-api-spec.md)、[数据库](../../db/schema.sql)、[测试记录](../TESTING.md)。

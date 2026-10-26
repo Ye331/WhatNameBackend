@@ -64,7 +64,7 @@ try {
         if (-not ($lines | Where-Object { $_ -match '^COURSEWORK_MYSQL_PORT=' })) {
             [IO.File]::AppendAllText($environmentPath, "`nCOURSEWORK_MYSQL_PORT=$Port`n", $encoding)
         }
-        Write-Host '新版配置已就绪；旧配置和旧数据库保持原状。'
+        Write-Host '本地配置已就绪。'
         Write-Host '下一步：docker compose up -d --wait；再执行 init。'
         exit 0
     }

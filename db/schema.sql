@@ -1,4 +1,4 @@
--- 课程简化版：11 张表。仅在新空库执行，不用于升级或覆盖旧库。
+-- 权限管理系统：11 张表，在空数据库中执行建表。
 -- 在已选中的新数据库执行。Docker 自动选择 MYSQL_DATABASE。
 SET NAMES utf8mb4;
 CREATE TABLE sys_dept (

@@ -69,9 +69,9 @@
     "failure": "同一账号输入错误密码，应401；随后由G查询 LOGIN 失败记录。",
     "question": "为什么登录不能只看密码正确？",
     "answer": "还要验证账号签名和可用状态，暂停/离职账号即使密码正确也不能登录。",
-    "coverage": "HTTP 自动用例覆盖用户名成功和手机号错误密码；手机号成功需人工补验。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "loginAndScopedTemporaryAccount"
+      "temporaryAccountLifecycleClearsRolesAndInvalidatesSessions"
     ],
     "frontend": "登录页 App.vue → api.js.login",
     "query": "",
@@ -136,11 +136,11 @@
     ],
     "success": "登录后携带 Bearer 调用，返回本人及实际拥有的 IAM 菜单。",
     "failure": "退出登录后复用旧JWT，应401。",
-    "question": "这里返回的是不是管理员任命？",
-    "answer": "不是；返回普通用户及其 IAM 菜单权限，没有 sys_admin 身份。",
-    "coverage": "HTTP 自动覆盖成功及不返回 passwordHash；令牌失效由其他用例覆盖。",
+    "question": "这里返回哪些用户信息？",
+    "answer": "返回当前登录用户及其有效 IAM 功能菜单权限。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "protectedEndpointsAndSelfManagedRbac"
+      "authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion"
     ],
     "frontend": "api.js.refreshSession → App.vue 导航",
     "query": "",
@@ -328,9 +328,9 @@
     "failure": "指定兄弟部门的deptId，应403。",
     "question": "范围过滤应该由前端还是后端完成？",
     "answer": "后端查询就限制部门集合，前端筛选不能作为权限防线。",
-    "coverage": "HTTP 自动覆盖范围内总数，服务级用例覆盖其他范围规则。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "protectedEndpointsAndSelfManagedRbac"
+      "authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion"
     ],
     "frontend": "UsersView.vue 用户账号/权限分配",
     "query": "?page=1&pageSize=20",
@@ -479,9 +479,9 @@
     "failure": "不分配角色就登录，只能证明身份，不应获得业务菜单。",
     "question": "临时账号需要另一张表吗？",
     "answer": "不需要，source=2 区分来源，使用同一套角色与权限关系。",
-    "coverage": "服务级自动覆盖创建、越界；前端创建交互为模拟接口契约测试。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "loginAndScopedTemporaryAccount"
+      "temporaryAccountLifecycleClearsRolesAndInvalidatesSessions"
     ],
     "frontend": "UsersView.vue 创建临时账号",
     "query": "",
@@ -610,9 +610,9 @@
     "failure": "恢复后未重新分配角色，业务请求仍应拒绝。",
     "question": "恢复账号为什么没有恢复权限？",
     "answer": "角色暂停时已删除，恢复只改变账号状态。",
-    "coverage": "服务级自动覆盖暂停、清空角色与JWT失效；恢复需人工补验。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "loginAndScopedTemporaryAccount"
+      "temporaryAccountLifecycleClearsRolesAndInvalidatesSessions"
     ],
     "frontend": "UsersView.vue 暂停/恢复",
     "query": "",
@@ -895,9 +895,9 @@
     "failure": "回收角色后同JWT返回200且allowed=false；错误服务密钥返回401。",
     "question": "HTTP200是否就可以放行业务？",
     "answer": "不能，业务系统必须继续检查data.allowed；只有true才放行。",
-    "coverage": "HTTP自动覆盖允许、应用密钥不能替换为OA/HR集成密钥。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "externalCheckBindsApplicationToItsOwnCredential"
+      "oaIsIdempotentAndApplicationCredentialCannotBeReplacedWithIntegrationKey"
     ],
     "frontend": "外部后端调用；管理前端不保存应用密钥",
     "query": "",
@@ -954,10 +954,10 @@
     "failure": "保留旧页面，另一会话撤权后点击原功能，应403。",
     "question": "前端菜单还没刷新，为什么也能阻止操作？",
     "answer": "每次业务请求都重新校验，旧页面不能绕过后端。",
-    "coverage": "HTTP自动覆盖多角色并集、撤权、冻结与解冻。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "multiRoleUnionImmediateRevokeAndOaRepeat",
-      "freezeTransferAndTermination"
+      "multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther",
+      "hrSyncTransferAndTerminationFollowSimplifiedRules"
     ],
     "frontend": "DemoView.vue",
     "query": "",
@@ -1621,9 +1621,9 @@
     "failure": "再登记GET /demo/items/{itemId}或重叠模板，应409。",
     "question": "仅换参数名为什么也重复？",
     "answer": "请求路由含义没有变化，不能让一个实际请求对应两个权限资源。",
-    "coverage": "现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "roleAndResourceConfigurationsUseOneRbacChain"
+      "resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries"
     ],
     "frontend": "ResourcesView.vue 接口资源页签",
     "query": "",
@@ -1716,9 +1716,9 @@
     "failure": "再登记GET /demo/items/{itemId}或重叠模板，应409。",
     "question": "仅换参数名为什么也重复？",
     "answer": "请求路由含义没有变化，不能让一个实际请求对应两个权限资源。",
-    "coverage": "现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "roleAndResourceConfigurationsUseOneRbacChain"
+      "resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries"
     ],
     "frontend": "ResourcesView.vue 接口资源页签",
     "query": "",
@@ -1775,9 +1775,9 @@
     "failure": "加入另一个应用的API，应拒绝且原集合保留。",
     "question": "为什么集合签名挂在菜单上？",
     "answer": "菜单签名覆盖其API ID集合，直接篡改关联表也能被发现。",
-    "coverage": "服务级自动覆盖跨应用拒绝；前端保存交互为契约测试。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "roleAndResourceConfigurationsUseOneRbacChain"
+      "resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries"
     ],
     "frontend": "ResourcesView.vue 关联接口",
     "query": "",
@@ -1900,9 +1900,9 @@
     "failure": "停用角色后其原用户关联仍存在，但该角色不贡献权限。",
     "question": "创建角色会立即给某个用户权限吗？",
     "answer": "不会，创建角色、配置菜单、分配给用户是三步。",
-    "coverage": "POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "roleAndResourceConfigurationsUseOneRbacChain"
+      "resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries"
     ],
     "frontend": "RolesView.vue",
     "query": "",
@@ -2082,9 +2082,9 @@
     "failure": "数组含不存在菜单，整体拒绝且旧集合保留。",
     "question": "这是不是RBAC1角色继承？",
     "answer": "不是，角色只直接关联菜单，没有角色到角色的关系。",
-    "coverage": "HTTP自动覆盖角色菜单保存；无效替换回滚另有用户角色服务级测试。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "roleAndResourceConfigurationsUseOneRbacChain"
+      "resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries"
     ],
     "frontend": "RolesView.vue；界面还需要资源查看权限用于选菜单",
     "query": "",
@@ -2131,8 +2131,8 @@
     ],
     "success": "打开用户角色对话框，与当前关系一致。",
     "failure": "查看其他部门范围的用户角色应403。",
-    "question": "为什么没有授权来源接口？",
-    "answer": "现在只有一份用户角色关系，来源体系已删除。",
+    "question": "OA 和管理页面怎样共同维护授权？",
+    "answer": "两者共同维护 sys_user_role，同一个用户与角色只有一条关联。",
     "coverage": "无该接口的专用自动用例；按下列人工步骤验收。",
     "tests": [],
     "frontend": "UsersView.vue 角色对话框",
@@ -2191,12 +2191,12 @@
     "failure": "包含一个不存在角色，整体失败且原关系不变。",
     "question": "两个管理者同时保存会怎样？",
     "answer": "锁同一个用户行后依次保存，最后得到后提交的完整集合，没有旧页面版本冲突检测。",
-    "coverage": "服务级自动覆盖并集、回滚、并发完整保存及自我撤权。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "multiRoleUnionImmediateRevokeAndOaRepeat",
-      "tamperingFailsAndInvalidReplacementRollsBack",
-      "competingSavesRemainCompleteAndSigned",
-      "selfRevocationNeedsNoIndependentAdministratorAndPersistsOtherGrants"
+      "multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther",
+      "tamperingFailsClosedAndAuditCanBeFiltered",
+      "concurrentRoleReplacementNeverProducesMixedOrUnsignedState",
+      "rbacHasNoAdministratorBypassAndRevocationIsImmediate"
     ],
     "frontend": "UsersView.vue 单人角色配置",
     "query": "",
@@ -2251,9 +2251,9 @@
     "failure": "DEPT_TREE操作者尝试把目标设置ALL，应403。",
     "question": "ALL是否等于全部功能权限？",
     "answer": "不是，ALL只扩大对象范围，每个操作仍需对应菜单权限。",
-    "coverage": "服务级自动覆盖非ALL不能授予ALL；前端对话框为契约测试。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "batchPartialSuccessAndDepartmentScope"
+      "batchReportsPartialSuccessAndCommitsOnlyAllowedTargets"
     ],
     "frontend": "UsersView.vue 范围",
     "query": "",
@@ -2349,9 +2349,9 @@
     "failure": "冻结自己部门后可能失去解冻资格，应由未受该冻结影响且有权限的人操作。",
     "question": "冻结为什么不用逐人清空角色？",
     "answer": "把状态放在部门节点，鉴权检查祖先链即可影响整个子树，解冻也不必重建授权。",
-    "coverage": "服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "freezeTransferAndTermination"
+      "hrSyncTransferAndTerminationFollowSimplifiedRules"
     ],
     "frontend": "OrganizationView.vue",
     "query": "",
@@ -2398,9 +2398,9 @@
     "failure": "冻结自己部门后可能失去解冻资格，应由未受该冻结影响且有权限的人操作。",
     "question": "冻结为什么不用逐人清空角色？",
     "answer": "把状态放在部门节点，鉴权检查祖先链即可影响整个子树，解冻也不必重建授权。",
-    "coverage": "服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "freezeTransferAndTermination"
+      "hrSyncTransferAndTerminationFollowSimplifiedRules"
     ],
     "frontend": "OrganizationView.vue",
     "query": "",
@@ -2634,9 +2634,9 @@
     "failure": "重复通知当前部门不应清空刚分配的新角色。",
     "question": "只回收旧部门的角色还是全部？",
     "answer": "本简化版没有来源区分，所以实际调岗清空全部旧角色。",
-    "coverage": "服务级自动覆盖实际调岗和重复当前部门不清角色。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "freezeTransferAndTermination"
+      "hrSyncTransferAndTerminationFollowSimplifiedRules"
     ],
     "frontend": "HR调用，无普通后台调岗按钮",
     "query": "",
@@ -2684,9 +2684,9 @@
     "failure": "核对其他用户角色未因原授权者离职而被清空。",
     "question": "为什么不物理删除账号？",
     "answer": "保留身份ID与历史日志，能够追溯离职前操作。",
-    "coverage": "服务级自动覆盖角色清空、旧JWT失效和他人授权保留。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "freezeTransferAndTermination"
+      "hrSyncTransferAndTerminationFollowSimplifiedRules"
     ],
     "frontend": "HR调用",
     "query": "",
@@ -2825,9 +2825,9 @@
     "failure": "批量超过100应400；中途基础设施失败不能认为此前全部回滚。",
     "question": "为什么不把整个循环放一个事务？",
     "answer": "这里需要部分成功；整个循环一个事务会改变已确认语义。",
-    "coverage": "服务级自动覆盖部分成功和范围拒绝。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "batchPartialSuccessAndDepartmentScope"
+      "batchReportsPartialSuccessAndCommitsOnlyAllowedTargets"
     ],
     "frontend": "UsersView.vue 权限分配批量栏",
     "query": "",
@@ -2892,9 +2892,9 @@
     "failure": "先手工授予，再OA回收，此角色应直接移除，因为没有多来源保留。",
     "question": "OA是否能知道是手工还是审批授予？",
     "answer": "不能区分，也不需要；本版两者修改同一份关系。",
-    "coverage": "HTTP自动覆盖无效密钥和重复回收。",
+    "coverage": "自动测试入口见以下源码；接口验收结合本节成功与失败步骤。",
     "tests": [
-      "multiRoleUnionImmediateRevokeAndOaRepeat"
+      "multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther"
     ],
     "frontend": "OA服务或IDEA HTTP Client",
     "query": "",
@@ -2962,7 +2962,7 @@
       "按id倒序分页，返回items/total/page/pageSize。"
     ],
     "transaction": "Service 的普通事务；不申请管理写锁，不改变业务数据。校验读取的是数据库当前授权，不从 JWT 读取角色快照。",
-    "audit": "查询本身不再写日志，避免循环审计。",
+    "audit": "查询本身不写日志，避免循环审计。",
     "errors": [
       "400 INVALID_ARGUMENT：分页非法",
       "403 PERMISSION_DENIED：缺日志权限"

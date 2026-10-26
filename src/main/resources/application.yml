@@ -9,7 +9,7 @@ spring:
   application:
     name: iam-backend
   config:
-    import: optional:file:./config/application-local.yml,optional:file:./config/application-coursework.yml
+    import: optional:file:./config/application-coursework.yml
   datasource:
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/${DB_NAME:unified_permission_coursework}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
     username: ${DB_USERNAME:iam_dev}

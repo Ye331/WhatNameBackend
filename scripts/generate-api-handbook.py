@@ -15,7 +15,7 @@ GROUPS = {
     'B': ('在线鉴权与平台自我管理', 'AccessService、ManagementInterceptor、QueryService.menus/check', 'RBAC0 计算、菜单输出、IAM 自我鉴权和业务演示'),
     'C': ('应用菜单与API资源', 'ResourceService 的资源方法、RouteTemplateUtils', '三层资源及菜单/API 映射'),
     'D': ('角色定义与用户授权', 'ResourceService 的角色方法、GrantService', '区分角色定义、角色菜单和用户角色三种操作'),
-    'E': ('部门范围与组织冻结', 'AccessService.within/scope、AccountService.scope、OrganizationService', '替代旧管理员等级与任命；数据范围是跨接口公共规则'),
+    'E': ('部门范围与组织冻结', 'AccessService.within/scope、AccountService.scope、OrganizationService', '部门管理范围与组织冻结；数据范围是跨接口公共规则'),
     'F': ('HR与人员组织变动', 'IntegrationController 的 HR 方法、OrganizationService', '同步、调岗、离职、部门合并'),
     'G': ('批量OA审计与公共安全', 'BatchService、SignatureService、AuditService、InitializationService', '批量、OA、审计；另主讲签名、事务、初始化和恢复'),
 }
@@ -74,15 +74,15 @@ card('A', 'POST', '/auth/login', '账号或手机号密码登录', 'AccountServi
      '同一账号输入错误密码，应401；随后由G查询 LOGIN 失败记录。',
      '为什么登录不能只看密码正确？','还要验证账号签名和可用状态，暂停/离职账号即使密码正确也不能登录。',
      'HTTP 自动用例覆盖用户名成功和手机号错误密码；手机号成功需人工补验。',
-     ['loginAndScopedTemporaryAccount'], '登录页 App.vue → api.js.login')
+     ['temporaryAccountLifecycleClearsRolesAndInvalidatesSessions'], '登录页 App.vue → api.js.login')
 card('A','GET','/auth/me','读取本人身份与IAM权限','AccountService.me',SELF,
      '只返回本人，不接受目标 userId。',[],None,{'user':USER,'menus':[MENU]},AUTH_TABLES,
      'DomainRepository.get/roles/menus/apis/query。',
      ['校验JWT、用户签名、状态和会话版本。','读取 IAM 应用，计算本人的有效菜单并集。','返回 user 和 menus，供前端导航与按钮使用。'],READ_TX,'不写操作日志。',
      ['401 INVALID_TOKEN：令牌失效','503 INTEGRITY_FAILURE：身份或权限数据异常'],
      '登录后携带 Bearer 调用，返回本人及实际拥有的 IAM 菜单。','退出登录后复用旧JWT，应401。',
-     '这里返回的是不是管理员任命？','不是；返回普通用户及其 IAM 菜单权限，没有 sys_admin 身份。',
-     'HTTP 自动覆盖成功及不返回 passwordHash；令牌失效由其他用例覆盖。',['protectedEndpointsAndSelfManagedRbac'], 'api.js.refreshSession → App.vue 导航')
+     '这里返回哪些用户信息？','返回当前登录用户及其有效 IAM 功能菜单权限。',
+     'HTTP 自动覆盖成功及不返回 passwordHash；令牌失效由其他用例覆盖。',['authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion'], 'api.js.refreshSession → App.vue 导航')
 card('A','POST','/auth/logout','退出该账号全部会话','AccountService.logout',SELF,'仅本人。',[],None,{},
      '读写 sys_user；写 sys_data_signature、sys_operation_log。','DomainRepository.lock/get/save。',
      ['取得本人并锁用户行。','递增 sessionVersion，重新签名。','保存 LOGOUT，随后旧JWT均因版本不符失效。'],USER_TX,'LOGOUT。',
@@ -107,7 +107,7 @@ card('A','GET','/users','分页查询范围内用户','AccountService.users',MAN
      ['403 OUT_OF_SCOPE：指定范围外部门','400 INVALID_ARGUMENT：分页参数不合法','503 INTEGRITY_FAILURE：返回用户或组织签名异常'],
      '部门管理员查询只看到本部门及后代用户；ALL用户可看到全公司。','指定兄弟部门的deptId，应403。',
      '范围过滤应该由前端还是后端完成？','后端查询就限制部门集合，前端筛选不能作为权限防线。',
-     'HTTP 自动覆盖范围内总数，服务级用例覆盖其他范围规则。',['protectedEndpointsAndSelfManagedRbac'], 'UsersView.vue 用户账号/权限分配', '?page=1&pageSize=20')
+     'HTTP 自动覆盖范围内总数，服务级用例覆盖其他范围规则。',['authenticationRejectsBadCredentialsAndNeverSerializesPasswordOrSessionVersion'], 'UsersView.vue 用户账号/权限分配', '?page=1&pageSize=20')
 card('A','GET','/users/{id}','查询一个用户','AccountService.detail',MANAGED+'IAM_USERS_VIEW。',
      '目标用户必须在本人部门范围内。',[field('id','path ID','必填','目标用户ID')],None,USER,
      '授权公共读取＋sys_user；无写表。','DomainRepository.get(Account)；AccessService.scope。',
@@ -126,7 +126,7 @@ card('A','POST','/users/temporary','创建临时账号','AccountService.temporar
      ['403 OUT_OF_SCOPE：创建到范围外','422 BUSINESS_RULE_VIOLATION：部门链冻结/合并','409 DUPLICATE_RESOURCE：账号或手机号重复'],
      '创建账号后由D分配角色，再登录演示。','不分配角色就登录，只能证明身份，不应获得业务菜单。',
      '临时账号需要另一张表吗？','不需要，source=2 区分来源，使用同一套角色与权限关系。',
-     '服务级自动覆盖创建、越界；前端创建交互为模拟接口契约测试。',['loginAndScopedTemporaryAccount'], 'UsersView.vue 创建临时账号')
+     '服务级自动覆盖创建、越界；前端创建交互为模拟接口契约测试。',['temporaryAccountLifecycleClearsRolesAndInvalidatesSessions'], 'UsersView.vue 创建临时账号')
 card('A','PATCH','/users/{id}','修改临时账号信息','AccountService.updateTemporary',MANAGED+'IAM_USERS_WRITE。',
      '目标在范围内且 source=2。',
      [field('id','path ID','必填','目标临时账号'),field('realName','string','可选','给出时非空、最长64'),field('phone','string','可选','给出时规范化并验证唯一')],
@@ -143,7 +143,7 @@ card('A','PATCH','/users/{id}/status','暂停或恢复临时账号','AccountServ
      ['400 INVALID_ARGUMENT：不接受status=3','422 BUSINESS_RULE_VIOLATION：非临时账号'],
      '暂停有角色的临时账号，核对角色清空且旧JWT失效。','恢复后未重新分配角色，业务请求仍应拒绝。',
      '恢复账号为什么没有恢复权限？','角色暂停时已删除，恢复只改变账号状态。',
-     '服务级自动覆盖暂停、清空角色与JWT失效；恢复需人工补验。',['loginAndScopedTemporaryAccount'], 'UsersView.vue 暂停/恢复')
+     '服务级自动覆盖暂停、清空角色与JWT失效；恢复需人工补验。',['temporaryAccountLifecycleClearsRolesAndInvalidatesSessions'], 'UsersView.vue 暂停/恢复')
 card('A','PUT','/users/{id}/password','管理者重置目标密码','AccountService.resetPassword',MANAGED+'IAM_PASSWORD_RESET。',
      '目标必须在本人范围内；离职账号拒绝重置。',[field('id','path ID','必填','目标用户ID'),field('password','string','必填','8–64位，含字母和数字')],
      {'password':'ResetExample456!'}, {},'修改 sys_user.password_hash/session_version；写签名和日志。','DomainRepository.lock(Account)；setPassword。',
@@ -184,7 +184,7 @@ card('B','POST','/auth/check','外部业务后端在线鉴权','QueryService.che
      ['401 INVALID_SERVICE：密钥不匹配','401 INVALID_TOKEN：JWT失效','400 INVALID_ROUTE_TEMPLATE：模板非法','503 INTEGRITY_FAILURE：签名异常'],
      '正确应用凭据和角色应返回200且allowed=true。','回收角色后同JWT返回200且allowed=false；错误服务密钥返回401。',
      'HTTP200是否就可以放行业务？','不能，业务系统必须继续检查data.allowed；只有true才放行。',
-     'HTTP自动覆盖允许、应用密钥不能替换为OA/HR集成密钥。',['externalCheckBindsApplicationToItsOwnCredential'], '外部后端调用；管理前端不保存应用密钥')
+     'HTTP自动覆盖允许、应用密钥不能替换为OA/HR集成密钥。',['oaIsIdempotentAndApplicationCredentialCannotBeReplacedWithIntegrationKey'], '外部后端调用；管理前端不保存应用密钥')
 card('B','GET','/demo/{appCode}/{feature}','演示业务接口逐次鉴权','QueryService.check',SELF,
      '对当前用户在路径指定应用中的菜单/API权限重新计算。',
      [field('appCode','path string','必填','演示使用OA或HR'),field('feature','path string','必填','feature1到feature4；以已登记路由为准')],None,
@@ -195,7 +195,7 @@ card('B','GET','/demo/{appCode}/{feature}','演示业务接口逐次鉴权','Que
      ['403 PERMISSION_DENIED：业务权限不足','401 INVALID_TOKEN：账号失效'],
      '业务演示点一个已授权OA功能，显示通过。','保留旧页面，另一会话撤权后点击原功能，应403。',
      '前端菜单还没刷新，为什么也能阻止操作？','每次业务请求都重新校验，旧页面不能绕过后端。',
-     'HTTP自动覆盖多角色并集、撤权、冻结与解冻。',['multiRoleUnionImmediateRevokeAndOaRepeat','freezeTransferAndTermination'], 'DemoView.vue')
+     'HTTP自动覆盖多角色并集、撤权、冻结与解冻。',['multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther','hrSyncTransferAndTerminationFollowSimplifiedRules'], 'DemoView.vue')
 
 # C: all eleven resource endpoints.
 for method,route,title,service,result in [
@@ -248,7 +248,7 @@ for create in [True,False]:
          ['400 INVALID_ROUTE_TEMPLATE：模板格式错误','400 INVALID_ARGUMENT：方法非法','409 DUPLICATE_RESOURCE：路径歧义/重复'],
          '登记GET /demo/items/{id}并查询，canonicalPath应为/demo/items/{}。','再登记GET /demo/items/{itemId}或重叠模板，应409。',
          '仅换参数名为什么也重复？','请求路由含义没有变化，不能让一个实际请求对应两个权限资源。',
-         '现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。',['roleAndResourceConfigurationsUseOneRbacChain'], 'ResourcesView.vue 接口资源页签')
+         '现有服务级回归覆盖重复路径拒绝；新建成功与编辑需人工补验。',['resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries'], 'ResourcesView.vue 接口资源页签')
 card('C','PUT','/menus/{id}/apis','完整保存菜单接口关联','ResourceService.replaceApis',MANAGED+'IAM_RESOURCES_WRITE。','全局资源；菜单与每个API必须属于同应用。',
      [field('id','path ID','必填','菜单ID'),field('apiIds','ID array','必填','最多10000个原始元素；去重排序；[]清空')],{'apiIds':['5']},{},
      '改 sys_menu_api，更新 sys_menu 对象签名，写日志。','DomainRepository.lock(Menu)/apis/query/save/remove。',
@@ -256,7 +256,7 @@ card('C','PUT','/menus/{id}/apis','完整保存菜单接口关联','ResourceServ
      ['400 INVALID_ARGUMENT：跨应用API或列表非法','422 BUSINESS_RULE_VIOLATION：目录不能关联API'],
      '勾选两个API保存，再GET关联ID集合。','加入另一个应用的API，应拒绝且原集合保留。',
      '为什么集合签名挂在菜单上？','菜单签名覆盖其API ID集合，直接篡改关联表也能被发现。',
-     '服务级自动覆盖跨应用拒绝；前端保存交互为契约测试。',['roleAndResourceConfigurationsUseOneRbacChain'], 'ResourcesView.vue 关联接口')
+     '服务级自动覆盖跨应用拒绝；前端保存交互为契约测试。',['resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries'], 'ResourcesView.vue 关联接口')
 
 # D: seven role and user-role endpoints.
 card('D','GET','/roles','查询角色目录','ResourceService.roles',MANAGED+'IAM_ROLES_VIEW 或 IAM_GRANTS_VIEW。','角色是全局目录，不按部门过滤。',[],None,[ROLE],
@@ -276,7 +276,7 @@ for create in [True,False]:
          ['400 INVALID_ARGUMENT：缺名称/状态非法','409 DUPLICATE_RESOURCE：roleCode重复'],
          '创建角色，再由另一个API配置菜单，最后给用户分配角色。','停用角色后其原用户关联仍存在，但该角色不贡献权限。',
          '创建角色会立即给某个用户权限吗？','不会，创建角色、配置菜单、分配给用户是三步。',
-         'POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。',['roleAndResourceConfigurationsUseOneRbacChain'] if create else [],'RolesView.vue')
+         'POST有HTTP创建回归；PATCH暂无专用正向HTTP用例。',['resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries'] if create else [],'RolesView.vue')
 card('D','GET','/roles/{id}/menus','读取角色菜单ID集合','ResourceService.roleMenus',MANAGED+'IAM_ROLES_VIEW。','全局角色配置。',
      [field('id','path ID','必填','角色ID')],None,['4'],'读 sys_role、sys_role_permission、签名。','DomainRepository.get(Role)/menus。',
      ['检查查看权限。','验证角色及关联集合签名。','返回当前menuId数组供复选框回显。'],READ_TX,'不写日志。',
@@ -290,13 +290,13 @@ card('D','PUT','/roles/{id}/menus','完整保存角色菜单权限','ResourceSer
      ['400 INVALID_ARGUMENT：传目录或非法ID集合','404 RESOURCE_NOT_FOUND：菜单不存在'],
      '为角色配置业务菜单，其已有用户下一次请求获得权限。','数组含不存在菜单，整体拒绝且旧集合保留。',
      '这是不是RBAC1角色继承？','不是，角色只直接关联菜单，没有角色到角色的关系。',
-     'HTTP自动覆盖角色菜单保存；无效替换回滚另有用户角色服务级测试。',['roleAndResourceConfigurationsUseOneRbacChain'], 'RolesView.vue；界面还需要资源查看权限用于选菜单')
+     'HTTP自动覆盖角色菜单保存；无效替换回滚另有用户角色服务级测试。',['resourceConfigurationRoundTripsAndProtectsCrossApplicationBoundaries'], 'RolesView.vue；界面还需要资源查看权限用于选菜单')
 card('D','GET','/users/{id}/roles','读取用户角色ID集合','GrantService.roles',MANAGED+'IAM_GRANTS_VIEW。','目标用户必须在操作者范围内。',
      [field('id','path ID','必填','目标用户')],None,['6'],'读 sys_user、sys_user_role及用户签名。','DomainRepository.get(Account)/roles。',
      ['检查授权查看权限。','验证目标身份签名和部门范围。','返回唯一用户角色关系中的roleId数组。'],READ_TX,'不写日志。',
      ['403 OUT_OF_SCOPE：越界','404 RESOURCE_NOT_FOUND：用户不存在'],
      '打开用户角色对话框，与当前关系一致。','查看其他部门范围的用户角色应403。',
-     '为什么没有授权来源接口？','现在只有一份用户角色关系，来源体系已删除。',frontend='UsersView.vue 角色对话框')
+     'OA 和管理页面怎样共同维护授权？','两者共同维护 sys_user_role，同一个用户与角色只有一条关联。',frontend='UsersView.vue 角色对话框')
 card('D','PUT','/users/{id}/roles','完整保存用户角色','GrantService.replace',MANAGED+'IAM_GRANTS_WRITE。','目标必须在范围内；非空角色集合要求用户可用且部门祖先有效。',
      [field('id','path ID','必填','目标用户'),field('roleIds','ID array','必填','最多500个原始元素；去重；角色必须存在并启用；[]清空')],{'roleIds':['6']},{},
      '改 sys_user_role；更新用户签名；写日志。','DomainRepository.lock(Account)/roles/query/save/remove。',
@@ -304,7 +304,7 @@ card('D','PUT','/users/{id}/roles','完整保存用户角色','GrantService.repl
      ['403 OUT_OF_SCOPE：越界','422 BUSINESS_RULE_VIOLATION：非空授权给停用/冻结目标或选停用角色','404 RESOURCE_NOT_FOUND：角色不存在'],
      '为测试用户加两个角色，再取消一个；有效权限为剩余角色并集。','包含一个不存在角色，整体失败且原关系不变。',
      '两个管理者同时保存会怎样？','锁同一个用户行后依次保存，最后得到后提交的完整集合，没有旧页面版本冲突检测。',
-     '服务级自动覆盖并集、回滚、并发完整保存及自我撤权。',['multiRoleUnionImmediateRevokeAndOaRepeat','tamperingFailsAndInvalidReplacementRollsBack','competingSavesRemainCompleteAndSigned','selfRevocationNeedsNoIndependentAdministratorAndPersistsOtherGrants'],'UsersView.vue 单人角色配置')
+     '服务级自动覆盖并集、回滚、并发完整保存及自我撤权。',['multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther','tamperingFailsClosedAndAuditCanBeFiltered','concurrentRoleReplacementNeverProducesMixedOrUnsignedState','rbacHasNoAdministratorBypassAndRevocationIsImmediate'],'UsersView.vue 单人角色配置')
 
 # E: new scope and organization responsibility replaces independent administrator identity.
 card('E','PUT','/users/{id}/scope','配置管理数据范围','AccountService.scope',MANAGED+'IAM_SCOPE_WRITE。','目标先在本人范围内；将目标设为ALL时，操作者自己也必须是ALL。',
@@ -314,7 +314,7 @@ card('E','PUT','/users/{id}/scope','配置管理数据范围','AccountService.sc
      ['400 INVALID_ARGUMENT：范围枚举不合法','403 OUT_OF_SCOPE：目标越界或非ALL操作者授予ALL'],
      'ALL操作者给测试人员设置DEPT_TREE，再用测试账号查看用户列表。','DEPT_TREE操作者尝试把目标设置ALL，应403。',
      'ALL是否等于全部功能权限？','不是，ALL只扩大对象范围，每个操作仍需对应菜单权限。',
-     '服务级自动覆盖非ALL不能授予ALL；前端对话框为契约测试。',['batchPartialSuccessAndDepartmentScope'],'UsersView.vue 范围')
+     '服务级自动覆盖非ALL不能授予ALL；前端对话框为契约测试。',['batchReportsPartialSuccessAndCommitsOnlyAllowedTargets'],'UsersView.vue 范围')
 card('E','GET','/departments','查询本人可管理部门','OrganizationService.departments',MANAGED+'IAM_DEPTS_VIEW、IAM_USERS_VIEW、IAM_GRANTS_VIEW 任一。','ALL返回全部；DEPT_TREE仅本人部门及后代。',[],None,[DEPT],
      '读 sys_dept 与组织签名，不写表。','DomainRepository.all(Department)；AccessService.within/departmentChain。',
      ['验证允许的目录查看权限。','对每个部门检查与本人部门的祖先关系。','返回可见部门数组，供组织页和用户筛选器使用。'],READ_TX,'不写日志。',
@@ -332,7 +332,7 @@ for frozen in [True,False]:
          '冻结祖先部门后，后代测试员工业务请求拒绝；解冻后角色仍在并恢复允许。',
          '冻结自己部门后可能失去解冻资格，应由未受该冻结影响且有权限的人操作。',
          '冻结为什么不用逐人清空角色？','把状态放在部门节点，鉴权检查祖先链即可影响整个子树，解冻也不必重建授权。',
-         '服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。',['freezeTransferAndTermination'],'OrganizationView.vue')
+         '服务级自动冻结/解冻，配合HTTP业务鉴权验证结果。',['hrSyncTransferAndTerminationFollowSimplifiedRules'],'OrganizationView.vue')
 
 # F: five HR integration APIs, not OA.
 HR_PERMISSION = 'X-Service-Key 必须匹配 iam.integration.hr-key；不要求人类用户JWT或IAM管理菜单。'
@@ -361,7 +361,7 @@ card('F','POST','/integrations/hr/users/{id}/transfer','HR调岗','OrganizationS
      ['422 BUSINESS_RULE_VIOLATION：临时/离职账号或目标部门已合并','404 RESOURCE_NOT_FOUND：目标不存在'],
      '调岗后业务与IAM管理角色都清空；重新授权后可访问新功能。','重复通知当前部门不应清空刚分配的新角色。',
      '只回收旧部门的角色还是全部？','本简化版没有来源区分，所以实际调岗清空全部旧角色。',
-     '服务级自动覆盖实际调岗和重复当前部门不清角色。',['freezeTransferAndTermination'],'HR调用，无普通后台调岗按钮')
+     '服务级自动覆盖实际调岗和重复当前部门不清角色。',['hrSyncTransferAndTerminationFollowSimplifiedRules'],'HR调用，无普通后台调岗按钮')
 card('F','POST','/integrations/hr/users/{id}/terminate','HR离职','OrganizationService.terminate',HR_PERMISSION,HR_SCOPE,
      [field('id','path ID','必填','HR来源员工')],None,{},
      '改 sys_user.status/session_version；清空其 sys_user_role；签名和日志。','DomainRepository.lock(Account)/clearRoles。',
@@ -369,7 +369,7 @@ card('F','POST','/integrations/hr/users/{id}/terminate','HR离职','Organization
      ['422 BUSINESS_RULE_VIOLATION：临时或初始化账号不能走HR离职','404 RESOURCE_NOT_FOUND：用户不存在'],
      '离职后旧JWT和新登录均不可用，用户记录仍能追溯。','核对其他用户角色未因原授权者离职而被清空。',
      '为什么不物理删除账号？','保留身份ID与历史日志，能够追溯离职前操作。',
-     '服务级自动覆盖角色清空、旧JWT失效和他人授权保留。',['freezeTransferAndTermination'],'HR调用')
+     '服务级自动覆盖角色清空、旧JWT失效和他人授权保留。',['hrSyncTransferAndTerminationFollowSimplifiedRules'],'HR调用')
 card('F','POST','/integrations/hr/departments/{id}/merge','HR合并部门','OrganizationService.merge',HR_PERMISSION,HR_SCOPE,
      [field('id','path ID','必填','源部门'),field('targetDeptId','ID','必填','目标部门；不能相同或为源部门后代')],{'targetDeptId':'3'},{},
      '改源部门status/merged_into_dept_id、直属子部门parent_id、直属员工dept_id；保留角色；签名和日志。',
@@ -393,7 +393,7 @@ card('G','POST','/grants/batch','同步批量授予或回收一个角色','Batch
      ['400 INVALID_ARGUMENT：超过100或空数组','200内success=false：单项越界等业务失败','401/503：身份或基础设施问题中断；应查询当前结果'],
      '同一批包含范围内和范围外用户，前者成功，后者失败。','批量超过100应400；中途基础设施失败不能认为此前全部回滚。',
      '为什么不把整个循环放一个事务？','这里需要部分成功；整个循环一个事务会改变已确认语义。',
-     '服务级自动覆盖部分成功和范围拒绝。',['batchPartialSuccessAndDepartmentScope'],'UsersView.vue 权限分配批量栏')
+     '服务级自动覆盖部分成功和范围拒绝。',['batchReportsPartialSuccessAndCommitsOnlyAllowedTargets'],'UsersView.vue 权限分配批量栏')
 card('G','POST','/integrations/oa/roles','OA审批后执行角色授予或回收','GrantService.oa',
      'X-Service-Key 必须匹配 iam.integration.oa-key；不接受应用鉴权密钥替代。',
      'OA是可信全局集成，不套人类操作者范围；输入决定目标员工和角色。',
@@ -405,7 +405,7 @@ card('G','POST','/integrations/oa/roles','OA审批后执行角色授予或回收
      ['401 INVALID_SERVICE：密钥错','400 INVALID_ARGUMENT：操作不是GRANT/REVOKE','422 BUSINESS_RULE_VIOLATION：不能给无效目标授予'],
      '审批结果重复授予同角色，关系仍只有一条。','先手工授予，再OA回收，此角色应直接移除，因为没有多来源保留。',
      'OA是否能知道是手工还是审批授予？','不能区分，也不需要；本版两者修改同一份关系。',
-     'HTTP自动覆盖无效密钥和重复回收。',['multiRoleUnionImmediateRevokeAndOaRepeat'],'OA服务或IDEA HTTP Client')
+     'HTTP自动覆盖无效密钥和重复回收。',['multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther'],'OA服务或IDEA HTTP Client')
 LOG = dict(id='1', userId='101', targetUserId='101', deptId='2', operationType='AUTH_CHECK',
            targetType='APPLICATION', targetId='3', detail='GET /demo/items/{id} ALLOW',
            success=True, createdAt='2026-10-25T10:00:00')
@@ -414,7 +414,7 @@ card('G','GET','/audit/operations','分页查询操作与鉴权日志','QuerySer
      [field('operation','query string','可选','按operationType精确匹配；省略看所有类型'),field('page','query integer','默认1','>=1'),field('pageSize','query integer','默认20','1–100')],None,
      {'items':[LOG],'total':'1','page':1,'pageSize':20},'读 sys_operation_log 和范围/授权表；无写表。',
      'DomainRepository.page(OperationLog)/query(count)；AccountService.visibleDepartments。',
-     ['校验日志查看权限与分页。','构造类型过滤及部门快照过滤。','按id倒序分页，返回items/total/page/pageSize。'],READ_TX,'查询本身不再写日志，避免循环审计。',
+     ['校验日志查看权限与分页。','构造类型过滤及部门快照过滤。','按id倒序分页，返回items/total/page/pageSize。'],READ_TX,'查询本身不写日志，避免循环审计。',
      ['400 INVALID_ARGUMENT：分页非法','403 PERMISSION_DENIED：缺日志权限'],
      '筛选LOGIN看到成功及失败记录；筛选AUTH_CHECK看到允许和拒绝。','部门管理员不能看到范围外或deptId为空的全局日志。',
      '为什么不能只看当前员工所在部门来过滤历史日志？','日志保存当时部门快照，当前调岗不能重写历史操作归属。',frontend='AuditView.vue',query='?page=1&pageSize=20')
@@ -436,6 +436,11 @@ def controller_routes():
     return result
 
 
+for current_card in CARDS:
+    if current_card['tests']:
+        current_card['coverage'] = '自动测试入口见以下源码；接口验收结合本节成功与失败步骤。'
+
+
 def source_ref(symbol, from_api=True):
     cls, method = symbol.split('.', 1) if '.' in symbol else (symbol, '')
     candidates = list((ROOT / 'src').rglob(cls + '.java'))
@@ -447,7 +452,7 @@ def source_ref(symbol, from_api=True):
     if method:
         match = re.search(r'\b(?:public|private|protected)\s+(?:static\s+)?[^;{}=]*?\b' + re.escape(method) + r'\s*\(', text)
         if match is None:
-            match = re.search(r'(?m)^\s*(?:void|boolean|String|long|int)\s+' + re.escape(method) + r'\s*\(', text)
+            match = re.search(r'\b(?:void|boolean|String|long|int)\s+' + re.escape(method) + r'\s*\(', text)
         if match is None:
             raise ValueError('Cannot resolve method: ' + symbol)
         start = match.start()
@@ -490,7 +495,7 @@ def render_card(c, controller):
     fields = '\n'.join('| ' + ' | '.join(row) + ' |' for row in c['fields']) or '| 无 | — | — | 无请求体与业务参数 |'
     steps = '\n'.join(f'{i}. {step}' for i, step in enumerate(c['flow'], 1))
     errors = '\n'.join('- ' + e for e in c['errors']) or '- 没有本接口专用业务错误；HTTP层与运行故障见公共说明。'
-    tests = '；'.join(source_ref('CourseworkFlowTest.' + t) for t in c['tests']) or '暂无关联专用自动用例。'
+    tests = '；'.join(source_ref('SimplifiedBusinessTest.' + t) for t in c['tests']) or '暂无关联专用自动用例。'
     return f'''<a id="{c['id']}"></a>
 ## {c['id']} · {c['title']}
 
@@ -608,7 +613,7 @@ def render_index(routes):
     for owner, (title, _, responsibility) in GROUPS.items():
         cards = [c for c in CARDS if c['owner'] == owner]
         lines.append(f'| {owner} | {responsibility} | {sum(not c["support"] for c in cards)} | {sum(c["support"] for c in cards)} | [{title}](api/{group_file(owner)}) |')
-    lines += ['', '保持原A–G边界：A账号，B鉴权，C资源，D角色授权，E管理范围与组织，F HR，G批量/OA/审计。旧管理员任命已删除，E转为主讲实际参与多个接口的数据范围算法。G还负责签名、初始化和恢复，不能仅按HTTP接口数量评价工作量。', '',
+    lines += ['', 'A–G分工：A账号，B鉴权，C资源，D角色授权，E管理范围与组织，F HR，G批量/OA/审计。E主讲实际参与多个接口的数据范围算法。G还负责签名、初始化和恢复，不能仅按HTTP接口数量评价工作量。', '',
               '## 所有人共同掌握', '',
               '先读 [公共接口规则](api/00-公共接口规则.md)。每人应能解释：身份如何验证、权限从哪里来、目标范围怎样限制、事务如何提交、错误为什么发生。', '',
               '## 完整接口归属表', '', '| 编号 | 主讲 | 方法与完整路径 | 用途 |', '|---|---|---|---|']
@@ -644,7 +649,7 @@ def render_person(owner, routes):
     if owner == 'B':
         lines += ['## B必须额外主讲的公共链路', '',
                   'IAM自我管理不是额外一个HTTP接口，而是所有管理API入口都执行的公共机制。走读 '+source_ref('ManagementInterceptor.preHandle')+' → '+source_ref('AccessService.requireApi')+' → '+source_ref('AccessService.allowed')+' → '+source_ref('AccessService.menus')+'。', '',
-                  '演示同一管理页面：只读角色没有维护按钮；即使手工调用写接口也403；撤掉IAM角色后本人也失去管理能力。没有sys_admin或用户名放行。', '']
+                  '演示同一管理页面：只读角色没有维护按钮；即使手工调用写接口也403；撤掉IAM角色后本人也失去管理能力。权限通过角色关联实时计算。', '']
     if owner == 'E':
         lines += ['## E必须额外主讲的公共算法', '',
                   '没有独立管理员身份API。E负责 '+source_ref('AccessService.within')+'、'+source_ref('AccessService.scope')+'、'+source_ref('AccessService.departmentChain')+'，这些方法被A/D/G等人的接口调用。', '',
@@ -658,7 +663,7 @@ def render_person(owner, routes):
                   f'| 本地恢复 | {source_ref("InitializationService.recover")} | 恢复初始化账号管理角色、范围和密码，不修复篡改数据 |',
                   f'| CLI入口 | {source_ref("InitializationRunner.run")} | IDEA“初始化数据库”配置，密码环境变量，不提交个人配置 |',
                   f'| 集成身份 | {source_ref("ServiceKeys.require")} / {source_ref("ServiceKeys.requireApplication")} | HR/OA集成密钥和业务鉴权密钥不可互换 |', '',
-                  '自动证据：'+source_ref('CourseworkFlowTest.fullSourceImportAndLocalRecovery')+'、'+source_ref('CourseworkFlowTest.tamperingFailsAndInvalidReplacementRollsBack')+'。初始化全量用例需开启coursework.fullImport=true，不应在日常已有数据库上重复执行。', '']
+                  '自动证据：'+source_ref('SimplifiedBusinessTest.fullSourceImportIsCheckedSeparatelyFromTheSmallBusinessFixture')+'、'+source_ref('SimplifiedBusinessTest.tamperingFailsClosedAndAuditCanBeFiltered')+'。初始化全量用例需开启coursework.fullImport=true，不应在日常已有数据库上重复执行。', '']
     for c in cards:
         lines.append(render_card(c, routes[(c['method'], c['path'])]))
     return '\n'.join(lines)
@@ -707,7 +712,7 @@ def validate_inventory(routes):
         raise ValueError('OpenAPI route mismatch')
     for c in CARDS:
         source_ref(c['service'])
-        for test in c['tests']: source_ref('CourseworkFlowTest.'+test)
+        for test in c['tests']: source_ref('SimplifiedBusinessTest.'+test)
     return keys
 
 

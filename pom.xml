@@ -82,10 +82,8 @@
         </dependency>
     </dependencies>
     <build>
-        <!-- The simplified edition has an independent suite. Legacy src/test is not compiled. -->
-        <testSourceDirectory>src/simplified-test/java</testSourceDirectory>
         <testResources>
-            <testResource><directory>src/simplified-test/resources</directory></testResource>
+            <testResource><directory>src/test/resources</directory></testResource>
             <testResource><directory>db</directory><includes><include>schema.sql</include></includes></testResource>
         </testResources>
         <plugins>

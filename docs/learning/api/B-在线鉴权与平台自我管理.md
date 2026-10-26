@@ -20,7 +20,7 @@ HTTP示例文件：[本组请求](../../../requests/learning/B.http)。变量均
 
 IAM自我管理不是额外一个HTTP接口，而是所有管理API入口都执行的公共机制。走读 [ManagementInterceptor.preHandle](../../../src/main/java/com/whatname/iam/common/config/ManagementInterceptor.java#L36) → [AccessService.requireApi](../../../src/main/java/com/whatname/iam/service/AccessService.java#L137) → [AccessService.allowed](../../../src/main/java/com/whatname/iam/service/AccessService.java#L120) → [AccessService.menus](../../../src/main/java/com/whatname/iam/service/AccessService.java#L81)。
 
-演示同一管理页面：只读角色没有维护按钮；即使手工调用写接口也403；撤掉IAM角色后本人也失去管理能力。没有sys_admin或用户名放行。
+演示同一管理页面：只读角色没有维护按钮；即使手工调用写接口也403；撤掉IAM角色后本人也失去管理能力。权限通过角色关联实时计算。
 
 <a id="B01"></a>
 ## B01 · 查询本人某应用的菜单
@@ -174,7 +174,7 @@ Content-Type: application/json
 
 ### 验证与答辩
 
-**现有测试：** HTTP自动覆盖允许、应用密钥不能替换为OA/HR集成密钥。 [CourseworkFlowTest.externalCheckBindsApplicationToItsOwnCredential](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L317)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.oaIsIdempotentAndApplicationCredentialCannotBeReplacedWithIntegrationKey](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L557)
 
 **正向演示：** 正确应用凭据和角色应返回200且allowed=true。
 
@@ -243,7 +243,7 @@ Authorization: Bearer <JWT>
 
 ### 验证与答辩
 
-**现有测试：** HTTP自动覆盖多角色并集、撤权、冻结与解冻。 [CourseworkFlowTest.multiRoleUnionImmediateRevokeAndOaRepeat](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L260)；[CourseworkFlowTest.freezeTransferAndTermination](../../../src/test/java/com/whatname/iam/CourseworkFlowTest.java#L393)
+**现有测试：** 自动测试入口见以下源码；接口验收结合本节成功与失败步骤。 [SimplifiedBusinessTest.multipleRolesFormAUnionAndReplacingOneAssociationPreservesTheOther](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L197)；[SimplifiedBusinessTest.hrSyncTransferAndTerminationFollowSimplifiedRules](../../../src/test/java/com/whatname/iam/simplified/SimplifiedBusinessTest.java#L525)
 
 **正向演示：** 业务演示点一个已授权OA功能，显示通过。
 

@@ -1,4 +1,4 @@
-# 由 scripts/dev.ps1 setup 生成 application-coursework.yml，保留旧配置和旧数据库。
+# 由 scripts/dev.ps1 setup 生成 application-coursework.yml。
 spring:
   datasource:
     url: jdbc:mysql://127.0.0.1:3308/unified_permission_coursework?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=Asia/Taipei&forceConnectionTimeZoneToSession=true
