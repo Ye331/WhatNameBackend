@@ -63,7 +63,9 @@ setup 创建被忽略的 config/application-coursework.yml，不覆盖旧 applic
 .\scripts\dev.ps1 test -FullImport
 ```
 
-常规业务回归使用隔离 H2 数据库，不接触本地 MySQL。FullImport 额外测试真实来源全量导入及恢复，结果不代表 MySQL 性能。MySQL 专项验证见 docs/TESTING.md。
+默认只编译和运行 `src/simplified-test/` 下新编写的简化版测试，原 `src/test/` 不再参与。每次运行先 clean，覆盖率不会混入旧测试数据。入口不再运行旧 Python 测试。
+
+常规业务回归使用隔离 H2 数据库，每个场景重新初始化，不接触本地 MySQL。FullImport 额外测试真实来源全量导入及恢复，结果不代表 MySQL 性能。`-Integration` 运行新套件的独立 MySQL 容器验证；Docker 不可用时会显示跳过，不能算通过。范围和报告见 [新测试说明](docs/SIMPLIFIED_TESTING.md)。
 
 ## 阅读入口
 

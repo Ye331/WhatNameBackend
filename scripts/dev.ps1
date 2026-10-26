@@ -68,14 +68,18 @@ try {
         Write-Host '下一步：docker compose up -d --wait；再执行 init。'
         exit 0
     }
-    if ($Action -eq 'data' -or $Action -eq 'init' -or ($Action -eq 'test' -and $FullImport)) {
+    if ($Action -eq 'data' -or $Action -eq 'init') {
         & $Python (Join-Path $PSScriptRoot 'prepare-data.py')
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if ($Action -eq 'data') { exit 0 }
     }
     if ($Action -eq 'test') {
-        & $Python -m unittest discover -s scripts -p 'test_*.py' -v
+        & (Join-Path $projectDirectory 'mvnw.cmd') clean
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($FullImport) {
+            & $Python (Join-Path $PSScriptRoot 'prepare-data.py')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         $profile = if ($Integration) { '-Pcoverage,integration-tests' } else { '-Pcoverage' }
         $arguments = @($profile,'verify')
         if ($FullImport) { $arguments += '-Dcoursework.fullImport=true' }
